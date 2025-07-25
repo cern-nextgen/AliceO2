@@ -8,7 +8,7 @@ on:
       - '**'
 
 jobs:
-  standalone-benchmark:
+  nvidia-h100:
     runs-on: cern-nextgen-h100
     container: registry.cern.ch/docker.io/oliverrietmann/o2-standalone:latest
     steps:
@@ -17,25 +17,57 @@ jobs:
       - name: Build and Run
         run: |
           source /etc/profile.d/modules.sh
-          module load O2/daily-20250625-0000-1 boost/v1.83.0-alice2-43 CMake/v3.31.6-4 Clang/v18.1.8-21 ninja/fortran-v1.11.1.g9-12 ROOT/v6-32-06-alice8-4
+          module load O2/daily-20250719-0000-1 boost/v1.83.0-alice2-45 CMake/v3.31.6-4 Clang/v18.1.8-22 ninja/fortran-v1.11.1.g9-12 ROOT/v6-32-06-alice9-3
 
-          curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/cuQAwSojyDrl6FR/events.tar.xz
+          curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/3ArAHDck6Gc7eeS/events.tar.xz
           tar -xf /root/events.tar.xz -C ${STANDALONE_DIR}
           rm /root/events.tar.xz
 
-          cmake -B $BUILD_DIR -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
+          cmake -B $BUILD_DIR -DENABLE_CUDA=1 -DENABLE_HIP=0 -DENABLE_OPENCL=0 -DGPUCA_BUILD_EVENT_DISPLAY=0 -DCUDA_COMPUTETARGET=90 -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
           cd $BUILD_DIR
           make install -j8
           cd ${STANDALONE_DIR}
-          ${STANDALONE_DIR}/ca -e o2-pbpb-100 -g --gpuType CUDA --gpuDevice 0 --debug 1 > ${ARTIFACT_FILE}
+          ${STANDALONE_DIR}/ca -e o2-simple -g --gpuType CUDA --gpuDevice 0 --debug 1 > ${ARTIFACT_FILE}
           cat ${ARTIFACT_FILE}
         env:
           MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
           STANDALONE_DIR: /root/standalone
           BUILD_DIR: /root/standalone/build
-          ARTIFACT_FILE: /root/standalone-benchmark-artifact.txt
+          ARTIFACT_FILE: /root/nvidia-h100-artifact.txt
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: standalone-benchmark-artifact
-          path: /root/standalone-benchmark-artifact.txt
+          path: /root/nvidia-h100-artifact.txt
+
+  amd-mi300x:
+    runs-on: cern-nextgen-mi300x
+    container: registry.cern.ch/docker.io/oliverrietmann/o2-standalone:latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Build and Run
+        run: |
+          source /etc/profile.d/modules.sh
+          module load O2/daily-20250719-0000-1 boost/v1.83.0-alice2-45 CMake/v3.31.6-4 Clang/v18.1.8-22 ninja/fortran-v1.11.1.g9-12 ROOT/v6-32-06-alice9-3
+
+          curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/3ArAHDck6Gc7eeS/events.tar.xz
+          tar -xf /root/events.tar.xz -C ${STANDALONE_DIR}
+          rm /root/events.tar.xz
+
+          cmake -B $BUILD_DIR -DENABLE_CUDA=0 -DENABLE_HIP=1 -DENABLE_OPENCL=0 -DGPUCA_BUILD_EVENT_DISPLAY=0 -DHIP_COMPUTETARGET=gfx942 -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
+          cd $BUILD_DIR
+          make install -j8
+          cd ${STANDALONE_DIR}
+          ${STANDALONE_DIR}/ca -e o2-simple -g --gpuType HIP --gpuDevice 0 --debug 1 > ${ARTIFACT_FILE}
+          cat ${ARTIFACT_FILE}
+        env:
+          MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
+          STANDALONE_DIR: /root/standalone
+          BUILD_DIR: /root/standalone/build
+          ARTIFACT_FILE: /root/amd-mi300x-artifact.txt
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-benchmark-artifact
+          path: /root/amd-mi300x-artifact.txt
