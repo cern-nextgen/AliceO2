@@ -10,7 +10,7 @@ on:
 jobs:
   nvidia-h100:
     runs-on: cern-nextgen-h100
-    container: registry.cern.ch/docker.io/oliverrietmann/o2-standalone:latest
+    container: registry.cern.ch/alisw/slc9-gpu-builder:latest  # registry.cern.ch/docker.io/oliverrietmann/o2-standalone:latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -42,7 +42,7 @@ jobs:
 
   amd-mi300x:
     runs-on: cern-nextgen-mi300x
-    container: registry.cern.ch/docker.io/oliverrietmann/o2-standalone:latest
+    container: registry.cern.ch/alisw/slc9-gpu-builder:latest  # registry.cern.ch/alisw/slc9-gpu-builder:latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
