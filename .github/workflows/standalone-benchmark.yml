@@ -19,7 +19,7 @@ jobs:
           source /etc/profile.d/modules.sh
           module load O2/daily-20250719-0000-1 boost/v1.83.0-alice2-45 CMake/v3.31.6-4 Clang/v18.1.8-22 ninja/fortran-v1.11.1.g9-12 ROOT/v6-32-06-alice9-3
 
-          curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/3ArAHDck6Gc7eeS/events.tar.xz
+          curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/cuQAwSojyDrl6FR/events.tar.xz
           tar -xf /root/events.tar.xz -C ${STANDALONE_DIR}
           rm /root/events.tar.xz
 
@@ -51,7 +51,7 @@ jobs:
           source /etc/profile.d/modules.sh
           module load O2/daily-20250719-0000-1 boost/v1.83.0-alice2-45 CMake/v3.31.6-4 Clang/v18.1.8-22 ninja/fortran-v1.11.1.g9-12 ROOT/v6-32-06-alice9-3
 
-          curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/3ArAHDck6Gc7eeS/events.tar.xz
+          curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/cuQAwSojyDrl6FR/events.tar.xz
           tar -xf /root/events.tar.xz -C ${STANDALONE_DIR}
           rm /root/events.tar.xz
 
