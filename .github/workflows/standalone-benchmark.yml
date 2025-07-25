@@ -34,12 +34,12 @@ jobs:
           MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
           STANDALONE_DIR: /root/standalone
           BUILD_DIR: /root/standalone/build
-          ARTIFACT_FILE: /root/nvidia-h100-artifact.txt
+          ARTIFACT_FILE: /root/artifact.txt
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: standalone-benchmark-artifact
-          path: /root/nvidia-h100-artifact.txt
+          name: nvidia-h100-artifact
+          path: /root/artifact.txt
 
   amd-mi300x:
     runs-on: cern-nextgen-mi300x
@@ -67,9 +67,9 @@ jobs:
           MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
           STANDALONE_DIR: /root/standalone
           BUILD_DIR: /root/standalone/build
-          ARTIFACT_FILE: /root/amd-mi300x-artifact.txt
+          ARTIFACT_FILE: /root/artifact.txt
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: standalone-benchmark-artifact
-          path: /root/amd-mi300x-artifact.txt
+          name: amd-mi300x-artifact
+          path: /root/artifact.txt
