@@ -36,7 +36,7 @@ if(CUDA_COMPUTETARGET AND CUDA_COMPUTETARGET STREQUAL "default")
 endif()
 
 if(HIP_AMDGPUTARGET AND HIP_AMDGPUTARGET STREQUAL "default")
-  set(HIP_AMDGPUTARGET gfx906;gfx908)
+  set(HIP_AMDGPUTARGET gfx906)
 endif()
 
 function(set_target_cuda_arch target)
