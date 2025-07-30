@@ -9,7 +9,7 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
-/// \file GPUReconstructionHIPkernel.template.hip
+/// \file GPUReconstructionHIPkernel.cu
 /// \author David Rohr
 
 #define GPUCA_GPUCODE_COMPILEKERNELS
