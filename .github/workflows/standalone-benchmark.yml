@@ -16,7 +16,9 @@ jobs:
         uses: actions/checkout@v4
       - name: Build and Run
         run: |
-          . $WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh || true
+          set +e
+          . "$WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh" || true
+          set -e
           echo "$ROOT_INCLUDE_PATH" | sed -E 's#(:)?/cvmfs/alice\.cern\.ch/el9-x86_64/Packages/O2/[^/:]+/include/GPU(:)?#\1\2#g' | sed -E 's#::#:#g; s#^:##; s#:$##'
 
           mkdir -p ${STANDALONE_DIR}
@@ -51,7 +53,9 @@ jobs:
         uses: actions/checkout@v4
       - name: Build and Run
         run: |
-          . $WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh || true
+          set +e
+          . "$WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh" || true
+          set -e
           echo "$ROOT_INCLUDE_PATH" | sed -E 's#(:)?/cvmfs/alice\.cern\.ch/el9-x86_64/Packages/O2/[^/:]+/include/GPU(:)?#\1\2#g' | sed -E 's#::#:#g; s#^:##; s#:$##'
 
           mkdir -p ${STANDALONE_DIR}
@@ -86,7 +90,9 @@ jobs:
         uses: actions/checkout@v4
       - name: Build and Run
         run: |
-          . $WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh || true
+          set +e
+          . "$WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh" || true
+          set -e
           echo "$ROOT_INCLUDE_PATH" | sed -E 's#(:)?/cvmfs/alice\.cern\.ch/el9-x86_64/Packages/O2/[^/:]+/include/GPU(:)?#\1\2#g' | sed -E 's#::#:#g; s#^:##; s#:$##'
 
           mkdir -p ${STANDALONE_DIR}
@@ -121,7 +127,9 @@ jobs:
         uses: actions/checkout@v4
       - name: Build and Run
         run: |
-          . $WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh || true
+          set +e
+          . "$WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh" || true
+          set -e
           echo "$ROOT_INCLUDE_PATH" | sed -E 's#(:)?/cvmfs/alice\.cern\.ch/el9-x86_64/Packages/O2/[^/:]+/include/GPU(:)?#\1\2#g' | sed -E 's#::#:#g; s#^:##; s#:$##'
 
           mkdir -p ${STANDALONE_DIR}
