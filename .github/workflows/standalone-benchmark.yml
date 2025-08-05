@@ -16,8 +16,8 @@ jobs:
         uses: actions/checkout@v4
       - name: Build and Run
         run: |
-          source /etc/profile.d/modules.sh
-          module load O2/daily-20250719-0000-1 boost/v1.83.0-alice2-45 CMake/v3.31.6-4 Clang/v18.1.8-22 ninja/fortran-v1.11.1.g9-12 ROOT/v6-32-06-alice9-3
+          . $WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh
+          echo "$ROOT_INCLUDE_PATH" | sed -E 's#(:)?/cvmfs/alice\.cern\.ch/el9-x86_64/Packages/O2/[^/:]+/include/GPU(:)?#\1\2#g' | sed -E 's#::#:#g; s#^:##; s#:$##'
 
           mkdir -p ${STANDALONE_DIR}
           curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/cuQAwSojyDrl6FR/events.tar.xz
@@ -35,6 +35,8 @@ jobs:
           STANDALONE_DIR: /root/standalone
           BUILD_DIR: /root/standalone/build
           ARTIFACT_FILE: /root/artifact.txt
+          WORK_DIR: /cvmfs/alice.cern.ch
+          ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -49,8 +51,8 @@ jobs:
         uses: actions/checkout@v4
       - name: Build and Run
         run: |
-          source /etc/profile.d/modules.sh
-          module load O2/daily-20250719-0000-1 boost/v1.83.0-alice2-45 CMake/v3.31.6-4 Clang/v18.1.8-22 ninja/fortran-v1.11.1.g9-12 ROOT/v6-32-06-alice9-3
+          . $WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh
+          echo "$ROOT_INCLUDE_PATH" | sed -E 's#(:)?/cvmfs/alice\.cern\.ch/el9-x86_64/Packages/O2/[^/:]+/include/GPU(:)?#\1\2#g' | sed -E 's#::#:#g; s#^:##; s#:$##'
 
           mkdir -p ${STANDALONE_DIR}
           curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/cuQAwSojyDrl6FR/events.tar.xz
@@ -68,6 +70,8 @@ jobs:
           STANDALONE_DIR: /root/standalone
           BUILD_DIR: /root/standalone/build
           ARTIFACT_FILE: /root/artifact.txt
+          WORK_DIR: /cvmfs/alice.cern.ch
+          ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -82,8 +86,8 @@ jobs:
         uses: actions/checkout@v4
       - name: Build and Run
         run: |
-          source /etc/profile.d/modules.sh
-          module load O2/daily-20250719-0000-1 boost/v1.83.0-alice2-45 CMake/v3.31.6-4 Clang/v18.1.8-22 ninja/fortran-v1.11.1.g9-12 ROOT/v6-32-06-alice9-3
+          . $WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh
+          echo "$ROOT_INCLUDE_PATH" | sed -E 's#(:)?/cvmfs/alice\.cern\.ch/el9-x86_64/Packages/O2/[^/:]+/include/GPU(:)?#\1\2#g' | sed -E 's#::#:#g; s#^:##; s#:$##'
 
           mkdir -p ${STANDALONE_DIR}
           curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/cuQAwSojyDrl6FR/events.tar.xz
@@ -101,8 +105,45 @@ jobs:
           STANDALONE_DIR: /root/standalone
           BUILD_DIR: /root/standalone/build
           ARTIFACT_FILE: /root/artifact.txt
+          WORK_DIR: /cvmfs/alice.cern.ch
+          ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: amd-mi300x-artifact
+          path: /root/artifact.txt
+
+  amd-w7900:
+    runs-on: cern-nextgen-w7900
+    container: registry.cern.ch/alisw/slc9-gpu-builder:latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Build and Run
+        run: |
+          . $WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh
+          echo "$ROOT_INCLUDE_PATH" | sed -E 's#(:)?/cvmfs/alice\.cern\.ch/el9-x86_64/Packages/O2/[^/:]+/include/GPU(:)?#\1\2#g' | sed -E 's#::#:#g; s#^:##; s#:$##'
+
+          mkdir -p ${STANDALONE_DIR}
+          curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/cuQAwSojyDrl6FR/events.tar.xz
+          tar -xf /root/events.tar.xz -C ${STANDALONE_DIR}
+          rm /root/events.tar.xz
+
+          cmake -B $BUILD_DIR -DENABLE_CUDA=0 -DENABLE_HIP=1 -DENABLE_OPENCL=0 -DGPUCA_BUILD_EVENT_DISPLAY=0 -DHIP_AMDGPUTARGET=gfx1100 -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
+          cd $BUILD_DIR
+          make install -j8
+          cd ${STANDALONE_DIR}
+          ${STANDALONE_DIR}/ca -e o2-simple -g --gpuType HIP --gpuDevice 0 --debug 1 > ${ARTIFACT_FILE}
+          cat ${ARTIFACT_FILE}
+        env:
+          MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
+          STANDALONE_DIR: /root/standalone
+          BUILD_DIR: /root/standalone/build
+          ARTIFACT_FILE: /root/artifact.txt
+          WORK_DIR: /cvmfs/alice.cern.ch
+          ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: amd-w7900-artifact
           path: /root/artifact.txt
