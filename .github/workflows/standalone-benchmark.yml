@@ -16,10 +16,10 @@ jobs:
         uses: actions/checkout@v4
       - name: Build and Run
         run: |
-          set +e
-          . "$WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh" || true
-          set -e
-          echo "$ROOT_INCLUDE_PATH" | sed -E 's#(:)?/cvmfs/alice\.cern\.ch/el9-x86_64/Packages/O2/[^/:]+/include/GPU(:)?#\1\2#g' | sed -E 's#::#:#g; s#^:##; s#:$##'
+          $WORK_DIR/$ALIBUILD_ARCH_PREFIX/date/v3.0.3-1/etc/profile.d/init.sh
+          $WORK_DIR/$ALIBUILD_ARCH_PREFIX/pytorch_cpuinfo/alice1-1/etc/profile.d/init.sh
+          $WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh
+          export ROOT_INCLUDE_PATH=$(echo "$ROOT_INCLUDE_PATH" | cut -d: -f3-)  # Remove first two paths (O2)
 
           mkdir -p ${STANDALONE_DIR}
           curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/cuQAwSojyDrl6FR/events.tar.xz
@@ -39,6 +39,8 @@ jobs:
           ARTIFACT_FILE: /root/artifact.txt
           WORK_DIR: /cvmfs/alice.cern.ch
           ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
+          DATE_REVISION: 1             # HACK: Skip broken dependency
+          PYTORCH_CPUINFO_REVISION: 1  # HACK: Skip broken dependency
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -53,10 +55,10 @@ jobs:
         uses: actions/checkout@v4
       - name: Build and Run
         run: |
-          set +e
-          . "$WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh" || true
-          set -e
-          echo "$ROOT_INCLUDE_PATH" | sed -E 's#(:)?/cvmfs/alice\.cern\.ch/el9-x86_64/Packages/O2/[^/:]+/include/GPU(:)?#\1\2#g' | sed -E 's#::#:#g; s#^:##; s#:$##'
+          $WORK_DIR/$ALIBUILD_ARCH_PREFIX/date/v3.0.3-1/etc/profile.d/init.sh
+          $WORK_DIR/$ALIBUILD_ARCH_PREFIX/pytorch_cpuinfo/alice1-1/etc/profile.d/init.sh
+          $WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh
+          export ROOT_INCLUDE_PATH=$(echo "$ROOT_INCLUDE_PATH" | cut -d: -f3-)  # Remove first two paths (O2)
 
           mkdir -p ${STANDALONE_DIR}
           curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/cuQAwSojyDrl6FR/events.tar.xz
@@ -76,6 +78,8 @@ jobs:
           ARTIFACT_FILE: /root/artifact.txt
           WORK_DIR: /cvmfs/alice.cern.ch
           ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
+          DATE_REVISION: 1             # HACK: Skip broken dependency
+          PYTORCH_CPUINFO_REVISION: 1  # HACK: Skip broken dependency
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -90,10 +94,10 @@ jobs:
         uses: actions/checkout@v4
       - name: Build and Run
         run: |
-          set +e
-          . "$WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh" || true
-          set -e
-          echo "$ROOT_INCLUDE_PATH" | sed -E 's#(:)?/cvmfs/alice\.cern\.ch/el9-x86_64/Packages/O2/[^/:]+/include/GPU(:)?#\1\2#g' | sed -E 's#::#:#g; s#^:##; s#:$##'
+          $WORK_DIR/$ALIBUILD_ARCH_PREFIX/date/v3.0.3-1/etc/profile.d/init.sh
+          $WORK_DIR/$ALIBUILD_ARCH_PREFIX/pytorch_cpuinfo/alice1-1/etc/profile.d/init.sh
+          $WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh
+          export ROOT_INCLUDE_PATH=$(echo "$ROOT_INCLUDE_PATH" | cut -d: -f3-)  # Remove first two paths (O2)
 
           mkdir -p ${STANDALONE_DIR}
           curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/cuQAwSojyDrl6FR/events.tar.xz
@@ -113,6 +117,8 @@ jobs:
           ARTIFACT_FILE: /root/artifact.txt
           WORK_DIR: /cvmfs/alice.cern.ch
           ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
+          DATE_REVISION: 1             # HACK: Skip broken dependency
+          PYTORCH_CPUINFO_REVISION: 1  # HACK: Skip broken dependency
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -127,10 +133,10 @@ jobs:
         uses: actions/checkout@v4
       - name: Build and Run
         run: |
-          set +e
-          . "$WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh" || true
-          set -e
-          echo "$ROOT_INCLUDE_PATH" | sed -E 's#(:)?/cvmfs/alice\.cern\.ch/el9-x86_64/Packages/O2/[^/:]+/include/GPU(:)?#\1\2#g' | sed -E 's#::#:#g; s#^:##; s#:$##'
+          $WORK_DIR/$ALIBUILD_ARCH_PREFIX/date/v3.0.3-1/etc/profile.d/init.sh
+          $WORK_DIR/$ALIBUILD_ARCH_PREFIX/pytorch_cpuinfo/alice1-1/etc/profile.d/init.sh
+          $WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh
+          export ROOT_INCLUDE_PATH=$(echo "$ROOT_INCLUDE_PATH" | cut -d: -f3-)  # Remove first two paths (O2)
 
           mkdir -p ${STANDALONE_DIR}
           curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/cuQAwSojyDrl6FR/events.tar.xz
@@ -150,6 +156,8 @@ jobs:
           ARTIFACT_FILE: /root/artifact.txt
           WORK_DIR: /cvmfs/alice.cern.ch
           ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
+          DATE_REVISION: 1             # HACK: Skip broken dependency
+          PYTORCH_CPUINFO_REVISION: 1  # HACK: Skip broken dependency
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
