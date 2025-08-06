@@ -9,10 +9,10 @@ on:
 
 jobs:
   benchmark:
-    runs-on: ${{ config.runner }}
+    runs-on: ${{ matrix.runner }}
     container: registry.cern.ch/alisw/slc9-gpu-builder:latest
     strategy:
-      config:
+      matrix:
         name: [nvidia-h100, nvidia-l40s, amd-mi300x, amd-w7900]
         include:
           - name: nvidia-h100
@@ -32,7 +32,7 @@ jobs:
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DENABLE_OPENCL=0 -DHIP_AMDGPUTARGET=gfx1100
             ca_args: --gpuType HIP --gpuDevice 0
 
-    name: Benchmark on ${{ config.name }}
+    name: Benchmark on ${{ matrix.name }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -49,11 +49,11 @@ jobs:
           tar -xf /root/events.tar.xz -C ${STANDALONE_DIR}
           rm /root/events.tar.xz
 
-          cmake -B $BUILD_DIR ${{ config.cmake_args }} -DGPUCA_BUILD_EVENT_DISPLAY=0 -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
+          cmake -B $BUILD_DIR ${{ matrix.cmake_args }} -DGPUCA_BUILD_EVENT_DISPLAY=0 -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
           cd $BUILD_DIR
           make install -j8
           cd ${STANDALONE_DIR}
-          ${STANDALONE_DIR}/ca -e o2-simple -g ${{ config.ca_args }} --debug 1 > ${ARTIFACT_FILE}
+          ${STANDALONE_DIR}/ca -e o2-simple -g ${{ matrix.ca_args }} --debug 1 > ${ARTIFACT_FILE}
           cat ${ARTIFACT_FILE}
         env:
           STANDALONE_DIR: /root/standalone
@@ -67,5 +67,5 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ config.name }}-artifact
+          name: ${{ matrix.name }}-artifact
           path: /root/artifact.txt
