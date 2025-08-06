@@ -32,7 +32,7 @@ jobs:
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DENABLE_OPENCL=0 -DHIP_AMDGPUTARGET=gfx1100
             ca_args: --gpuType HIP --gpuDevice 0
 
-    name: Benchmark on ${{ matrix.name }}
+    name: ${{ matrix.name }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
