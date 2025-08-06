@@ -39,8 +39,6 @@ jobs:
 
       - name: Build and Run
         run: |
-          . $WORK_DIR/$ALIBUILD_ARCH_PREFIX/date/v3.0.3-1/etc/profile.d/init.sh
-          . $WORK_DIR/$ALIBUILD_ARCH_PREFIX/pytorch_cpuinfo/alice1-1/etc/profile.d/init.sh
           . $WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/daily-20250805-0000-1/etc/profile.d/init.sh
           export ROOT_INCLUDE_PATH=$(echo "$ROOT_INCLUDE_PATH" | cut -d: -f3-)
 
@@ -61,8 +59,6 @@ jobs:
           ARTIFACT_FILE: /root/artifact.txt
           WORK_DIR: /cvmfs/alice.cern.ch
           ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
-          DATE_REVISION: 1
-          PYTORCH_CPUINFO_REVISION: 1
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
