@@ -44,6 +44,7 @@ jobs:
 
       - name: Build and Run
         run: |
+          O2_REVISION="${{ github.event.inputs.o2_revision || env.DEFAULT_O2_REVISION }}"
           . $WORK_DIR/$ALIBUILD_ARCH_PREFIX/O2/${O2_REVISION}/etc/profile.d/init.sh
           export ROOT_INCLUDE_PATH=$(echo "$ROOT_INCLUDE_PATH" | cut -d: -f3-)
 
@@ -61,7 +62,7 @@ jobs:
         env:
           WORK_DIR: /cvmfs/alice.cern.ch
           ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
-          O2_REVISION: ${{ inputs.o2_revision }}
+          DEFAULT_O2_REVISION: daily-20250805-0000-1
           STANDALONE_DIR: /root/standalone
           BUILD_DIR: /root/standalone/build
           ARTIFACT_FILE: /root/artifact.txt
