@@ -30,7 +30,7 @@ jobs:
           - name: amd-w7900
             runner: cern-nextgen-w7900
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DENABLE_OPENCL=0 -DHIP_AMDGPUTARGET=gfx1100
-            ca_args: --gpuType HIP --gpuDevice 0
+            ca_args: --gpuType HIP --gpuDevice 0 --RTCenable --RTCTECHloadLaunchBoundsFromFile genGPUArch/amd-w7000.par
 
     name: ${{ matrix.name }}
     steps:
@@ -43,9 +43,16 @@ jobs:
           export ROOT_INCLUDE_PATH=$(echo "$ROOT_INCLUDE_PATH" | cut -d: -f3-)
 
           mkdir -p ${STANDALONE_DIR}
+
           curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/cuQAwSojyDrl6FR/events.tar.xz
           tar -xf /root/events.tar.xz -C ${STANDALONE_DIR}
           rm /root/events.tar.xz
+
+          curl -o /root/genGPUArch.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/3o2pvOVkINFU8qy/genGPUArch.tar.xz
+          tar -xf /root/genGPUArch.tar.xz -C ${STANDALONE_DIR}
+          rm /root/genGPUArch.tar.xz
+
+          https://cernbox.cern.ch/s/3o2pvOVkINFU8qy
 
           cmake -B ${BUILD_DIR} ${{ matrix.cmake_args }} -DGPUCA_BUILD_EVENT_DISPLAY=0 -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
           cd ${BUILD_DIR}
