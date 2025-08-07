@@ -51,8 +51,6 @@ jobs:
           tar -xf /root/genGPUArch.tar.xz -C ${STANDALONE_DIR}
           rm /root/genGPUArch.tar.xz
 
-          https://cernbox.cern.ch/s/3o2pvOVkINFU8qy
-
           cmake -B ${BUILD_DIR} ${{ matrix.cmake_args }} -DGPUCA_BUILD_EVENT_DISPLAY=0 -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
           cd ${BUILD_DIR}
           make install -j8
