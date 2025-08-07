@@ -1,0 +1,68 @@
+name: Standalone Benchmark
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  benchmark:
+    runs-on: ${{ matrix.runner }}
+    container: registry.cern.ch/alisw/slc9-gpu-builder:latest
+    strategy:
+      matrix:
+        name: [nvidia-h100, nvidia-l40s, amd-mi300x, amd-w7900]
+        include:
+          - name: nvidia-h100
+            runner: cern-nextgen-h100
+            cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DENABLE_OPENCL=0 -DCUDA_COMPUTETARGET=90
+            ca_args: --gpuType CUDA --gpuDevice 0
+          - name: nvidia-l40s
+            runner: cern-nextgen-l40s
+            cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DENABLE_OPENCL=0 -DCUDA_COMPUTETARGET=89
+            ca_args: --gpuType CUDA --gpuDevice 0
+          - name: amd-mi300x
+            runner: cern-nextgen-mi300x
+            cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DENABLE_OPENCL=0 -DHIP_AMDGPUTARGET=gfx942
+            ca_args: --gpuType HIP --gpuDevice 0
+          - name: amd-w7900
+            runner: cern-nextgen-w7900
+            cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DENABLE_OPENCL=0 -DHIP_AMDGPUTARGET=gfx1100
+            ca_args: --gpuType HIP --gpuDevice 0
+
+    name: ${{ matrix.name }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Build and Run
+        run: |
+          . ${WORK_DIR}/${ALIBUILD_ARCH_PREFIX}/O2/${O2_REVISION}/etc/profile.d/init.sh
+          export ROOT_INCLUDE_PATH=$(echo "$ROOT_INCLUDE_PATH" | cut -d: -f3-)
+
+          mkdir -p ${STANDALONE_DIR}
+          curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/cuQAwSojyDrl6FR/events.tar.xz
+          tar -xf /root/events.tar.xz -C ${STANDALONE_DIR}
+          rm /root/events.tar.xz
+
+          cmake -B ${BUILD_DIR} ${{ matrix.cmake_args }} -DGPUCA_BUILD_EVENT_DISPLAY=0 -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
+          cd ${BUILD_DIR}
+          make install -j8
+          cd ${STANDALONE_DIR}
+          ${STANDALONE_DIR}/ca -e o2-simple -g ${{ matrix.ca_args }} --debug 1 > ${ARTIFACT_FILE}
+          cat ${ARTIFACT_FILE}
+        env:
+          WORK_DIR: /cvmfs/alice.cern.ch
+          ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
+          O2_REVISION: daily-20250805-0000-1
+          STANDALONE_DIR: /root/standalone
+          BUILD_DIR: /root/standalone/build
+          ARTIFACT_FILE: /root/artifact.txt
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}-artifact
+          path: /root/artifact.txt
