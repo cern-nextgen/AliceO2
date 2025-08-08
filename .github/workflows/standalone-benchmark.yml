@@ -30,7 +30,7 @@ jobs:
           - name: amd-w7900
             runner: cern-nextgen-w7900
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DENABLE_OPENCL=0 -DHIP_AMDGPUTARGET=gfx1100
-            ca_args: --gpuType HIP --gpuDevice 0 --RTCenable --RTCTECHloadLaunchBoundsFromFile genGPUArch/amd-w7000.par
+            ca_args: --gpuType HIP --gpuDevice 0 --RTCenable --RTCTECHloadLaunchBoundsFromFile genGPUArch/amd-w7900.par
 
     name: ${{ matrix.name }}
     steps:
