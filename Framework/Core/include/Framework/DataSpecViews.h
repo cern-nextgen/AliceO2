@@ -1,4 +1,4 @@
-// Copyright 2019-2020 CERN and copyright holders of ALICE O2.
+// Copyright 2019-2025 CERN and copyright holders of ALICE O2.
 // See https://alice-o2.web.cern.ch/copyright for details of the copyright holders.
 // All rights not expressly granted are reserved.
 //
@@ -8,28 +8,18 @@
 // In applying this license CERN does not waive the privileges and immunities
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
-///
-/// \file Definitions.h
-/// \brief
+#ifndef O2_FRAMEWORK_DATASPECVIEWS_H_
+#define O2_FRAMEWORK_DATASPECVIEWS_H_
 
-#ifndef TRACKINGITS_DEFINITIONS_H_
-#define TRACKINGITS_DEFINITIONS_H_
+#include "Framework/DataSpecUtils.h"
+#include <ranges>
 
-#include "ReconstructionDataFormats/Vertex.h"
-
-#ifdef CA_DEBUG
-#define CA_DEBUGGER(x) x
-#else
-#define CA_DEBUGGER(x) \
-  do {                 \
-  } while (0)
-#endif
-
-namespace o2::its
+namespace o2::framework::views
 {
-
-using Vertex = o2::dataformats::Vertex<o2::dataformats::TimeStamp<int>>;
-
+static auto partial_match_filter(auto what)
+{
+  return std::views::filter([&what](auto const& t) -> bool { return DataSpecUtils::partialMatch(t, what); });
 }
+} // namespace o2::framework::views
 
-#endif
+#endif // O2_FRAMEWORK_DATASPECVIEWS_H_
