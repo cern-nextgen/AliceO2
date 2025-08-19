@@ -16,10 +16,10 @@
 #define GPUTPCBASETRACKPARAM_H
 
 #include "GPUTPCDef.h"
+// #include "wrapper.h"
 
 namespace o2::gpu
 {
-class GPUTPCTrackParam;
 
 /**
  * @class GPUTPCBaseTrackParam
@@ -28,7 +28,14 @@ class GPUTPCTrackParam;
  * used in output of the GPUTPCTracker sector tracker.
  * This class is used for transfer between tracker and merger and does not contain the covariance matrice
  */
-struct GPUTPCBaseTrackParam {
+template <template <class> class F>
+struct GPUTPCBaseTrackParamSkeleton {
+  template <template <class> class F_new>
+  operator GPUTPCBaseTrackParamSkeleton<F_new>() const { return {mX, mC, mZOffset, mP}; }
+
+  template <template <class> class F_new>
+  operator GPUTPCBaseTrackParamSkeleton<F_new>() { return {mX, mC, mZOffset, mP}; }
+
   GPUd() float X() const { return mX; }
   GPUd() float Y() const { return mP[0]; }
   GPUd() float Z() const { return mP[1]; }
@@ -73,11 +80,14 @@ struct GPUTPCBaseTrackParam {
   // WARNING, Track Param Data is copied in the GPU Tracklet Constructor element by element instead of using copy constructor!!!
   // This is neccessary for performance reasons!!!
   // Changes to Elements of this class therefore must also be applied to TrackletConstructor!!!
-  float mX;       // x position
-  float mC[15];   // the covariance matrix for Y,Z,SinPhi,..
-  float mZOffset; // z offset
-  float mP[5];    // 'active' track parameters: Y, Z, SinPhi, DzDs, q/Pt
+  F<float> mX;       // x position
+  F<float[15]> mC;   // the covariance matrix for Y,Z,SinPhi,..
+  F<float> mZOffset; // z offset
+  F<float[5]> mP;    // 'active' track parameters: Y, Z, SinPhi, DzDs, q/Pt
 };
+
+using GPUTPCBaseTrackParam = GPUTPCBaseTrackParamSkeleton<wrapper::value>;
+
 } // namespace o2::gpu
 
 #endif

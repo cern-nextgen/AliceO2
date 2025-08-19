@@ -18,6 +18,7 @@
 #include "GPUTPCBaseTrackParam.h"
 #include "GPUTPCDef.h"
 #include "GPUCommonMath.h"
+// #include "wrapper.h"
 
 namespace o2::gpu
 {
@@ -30,7 +31,8 @@ class GPUTPCTrackLinearisation;
  * which is used by the GPUTPCTracker sector tracker.
  *
  */
-class GPUTPCTrackParam
+template <template <class> class F>
+class GPUTPCTrackParamSkeleton
 {
  public:
   struct GPUTPCTrackFitParam {
@@ -92,8 +94,8 @@ class GPUTPCTrackParam
   GPUd() void SetChi2(float v) { mChi2 = v; }
   GPUd() void SetNDF(int32_t v) { mNDF = v; }
 
-  GPUd() float GetDist2(const GPUTPCTrackParam& t) const;
-  GPUd() float GetDistXZ2(const GPUTPCTrackParam& t) const;
+  GPUd() float GetDist2(const GPUTPCTrackParamSkeleton<F>& t) const;
+  GPUd() float GetDistXZ2(const GPUTPCTrackParamSkeleton<F>& t) const;
 
   GPUd() float GetS(float x, float y, float Bz) const;
 
@@ -142,17 +144,20 @@ class GPUTPCTrackParam
 #ifndef GPUCA_GPUCODE
  private:
 #endif                         //! GPUCA_GPUCODE
-  GPUTPCBaseTrackParam mParam; // Track Parameters
+  GPUTPCBaseTrackParamSkeleton<F> mParam; // Track Parameters
 
  private:
   // WARNING, Track Param Data is copied in the GPU Tracklet Constructor element by element instead of using copy constructor!!!
   // This is neccessary for performance reasons!!!
   // Changes to Elements of this class therefore must also be applied to TrackletConstructor!!!
-  float mSignCosPhi; // sign of cosPhi
-  float mChi2;       // the chi^2 value
-  int32_t mNDF;      // the Number of Degrees of Freedom
+  F<float> mSignCosPhi; // sign of cosPhi
+  F<float> mChi2;       // the chi^2 value
+  F<int32_t> mNDF;      // the Number of Degrees of Freedom
 };
 
+using GPUTPCTrackParam = GPUTPCTrackParamSkeleton<wrapper::value>;
+
+template <>
 GPUdi() void GPUTPCTrackParam::InitParam()
 {
   // Initialize Tracklet Parameters using default values

@@ -78,7 +78,7 @@ GPUd() void GPUTPCTrackletConstructor::StoreTracklet(int32_t /*nBlocks*/, int32_
     return;
   }
 
-  GPUglobalref() GPUTPCTracklet& GPUrestrict() tracklet = tracker.Tracklets()[itrout];
+  GPUglobalref() GPUTPCTracklet_reference GPUrestrict() tracklet = tracker.Tracklet(itrout);
 
   CADEBUG(printf("    Storing tracklet: %d rows\n", nHits));
 
