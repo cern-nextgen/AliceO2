@@ -16,6 +16,7 @@
 #define GPUTPCBASETRACKPARAM_H
 
 #include "GPUTPCDef.h"
+#include "wrapper.h"
 
 namespace o2::gpu
 {
@@ -28,8 +29,9 @@ class GPUTPCTrackParam;
  * used in output of the GPUTPCTracker sector tracker.
  * This class is used for transfer between tracker and merger and does not contain the covariance matrice
  */
-struct GPUTPCBaseTrackParam {
-  GPUd() float X() const { return mX; }
+template <template <class> class F>
+struct GPUTPCBaseTrackParamSkeleton {
+  GPUd() F<float> X() const { return mX; }
   GPUd() float Y() const { return mP[0]; }
   GPUd() float Z() const { return mP[1]; }
   GPUd() float SinPhi() const { return mP[2]; }
@@ -46,7 +48,7 @@ struct GPUTPCBaseTrackParam {
   GPUd() float GetCov(int32_t i) const { return mC[i]; }
   GPUhd() void SetCov(int32_t i, float v) { mC[i] = v; }
 
-  GPUhd() float GetX() const { return mX; }
+  GPUhd() F<float> GetX() const { return mX; }
   GPUhd() float GetY() const { return mP[0]; }
   GPUhd() float GetZ() const { return mP[1]; }
   GPUhd() float GetSinPhi() const { return mP[2]; }
@@ -62,7 +64,7 @@ struct GPUTPCBaseTrackParam {
 
   GPUhd() void SetPar(int32_t i, float v) { mP[i] = v; }
 
-  GPUd() void SetX(float v) { mX = v; }
+  GPUd() void SetX(F<float> v) { mX = v; }
   GPUd() void SetY(float v) { mP[0] = v; }
   GPUd() void SetZ(float v) { mP[1] = v; }
   GPUd() void SetSinPhi(float v) { mP[2] = v; }
@@ -73,11 +75,14 @@ struct GPUTPCBaseTrackParam {
   // WARNING, Track Param Data is copied in the GPU Tracklet Constructor element by element instead of using copy constructor!!!
   // This is neccessary for performance reasons!!!
   // Changes to Elements of this class therefore must also be applied to TrackletConstructor!!!
-  float mX;       // x position
+  F<float> mX;       // x position
   float mC[15];   // the covariance matrix for Y,Z,SinPhi,..
   float mZOffset; // z offset
   float mP[5];    // 'active' track parameters: Y, Z, SinPhi, DzDs, q/Pt
 };
+
+using GPUTPCBaseTrackParam = GPUTPCBaseTrackParamSkeleton<wrapper::value>;
+
 } // namespace o2::gpu
 
 #endif
