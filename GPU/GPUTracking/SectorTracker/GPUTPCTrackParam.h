@@ -18,6 +18,7 @@
 #include "GPUTPCBaseTrackParam.h"
 #include "GPUTPCDef.h"
 #include "GPUCommonMath.h"
+#include "wrapper.h"
 
 namespace o2::gpu
 {
@@ -30,7 +31,8 @@ class GPUTPCTrackLinearisation;
  * which is used by the GPUTPCTracker sector tracker.
  *
  */
-class GPUTPCTrackParam
+template <template <class> class F>
+class GPUTPCTrackParamSkeleton
 {
  public:
   struct GPUTPCTrackFitParam {
@@ -92,8 +94,8 @@ class GPUTPCTrackParam
   GPUd() void SetChi2(float v) { mChi2 = v; }
   GPUd() void SetNDF(int32_t v) { mNDF = v; }
 
-  GPUd() float GetDist2(const GPUTPCTrackParam& t) const;
-  GPUd() float GetDistXZ2(const GPUTPCTrackParam& t) const;
+  GPUd() float GetDist2(const GPUTPCTrackParamSkeleton<F>& t) const;
+  GPUd() float GetDistXZ2(const GPUTPCTrackParamSkeleton<F>& t) const;
 
   GPUd() float GetS(float x, float y, float Bz) const;
 
@@ -153,6 +155,9 @@ class GPUTPCTrackParam
   int32_t mNDF;      // the Number of Degrees of Freedom
 };
 
+using GPUTPCTrackParam = GPUTPCTrackParamSkeleton<wrapper::value>;
+
+template <>
 GPUdi() void GPUTPCTrackParam::InitParam()
 {
   // Initialize Tracklet Parameters using default values

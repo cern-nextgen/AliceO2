@@ -20,7 +20,6 @@
 
 namespace o2::gpu
 {
-class GPUTPCTrackParam;
 
 /**
  * @class GPUTPCBaseTrackParam
@@ -31,7 +30,7 @@ class GPUTPCTrackParam;
  */
 template <template <class> class F>
 struct GPUTPCBaseTrackParamSkeleton {
-  GPUd() F<float> X() const { return mX; }
+  GPUd() float X() const { return mX; }
   GPUd() float Y() const { return mP[0]; }
   GPUd() float Z() const { return mP[1]; }
   GPUd() float SinPhi() const { return mP[2]; }
@@ -48,7 +47,7 @@ struct GPUTPCBaseTrackParamSkeleton {
   GPUd() float GetCov(int32_t i) const { return mC[i]; }
   GPUhd() void SetCov(int32_t i, float v) { mC[i] = v; }
 
-  GPUhd() F<float> GetX() const { return mX; }
+  GPUhd() float GetX() const { return mX; }
   GPUhd() float GetY() const { return mP[0]; }
   GPUhd() float GetZ() const { return mP[1]; }
   GPUhd() float GetSinPhi() const { return mP[2]; }
@@ -64,7 +63,7 @@ struct GPUTPCBaseTrackParamSkeleton {
 
   GPUhd() void SetPar(int32_t i, float v) { mP[i] = v; }
 
-  GPUd() void SetX(F<float> v) { mX = v; }
+  GPUd() void SetX(float v) { mX = v; }
   GPUd() void SetY(float v) { mP[0] = v; }
   GPUd() void SetZ(float v) { mP[1] = v; }
   GPUd() void SetSinPhi(float v) { mP[2] = v; }
@@ -76,9 +75,9 @@ struct GPUTPCBaseTrackParamSkeleton {
   // This is neccessary for performance reasons!!!
   // Changes to Elements of this class therefore must also be applied to TrackletConstructor!!!
   F<float> mX;       // x position
-  float mC[15];   // the covariance matrix for Y,Z,SinPhi,..
-  float mZOffset; // z offset
-  float mP[5];    // 'active' track parameters: Y, Z, SinPhi, DzDs, q/Pt
+  F<float[15]> mC;   // the covariance matrix for Y,Z,SinPhi,..
+  F<float> mZOffset; // z offset
+  F<float[5]> mP;    // 'active' track parameters: Y, Z, SinPhi, DzDs, q/Pt
 };
 
 using GPUTPCBaseTrackParam = GPUTPCBaseTrackParamSkeleton<wrapper::value>;
