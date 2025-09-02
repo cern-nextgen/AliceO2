@@ -144,15 +144,15 @@ class GPUTPCTrackParamSkeleton
 #ifndef GPUCA_GPUCODE
  private:
 #endif                         //! GPUCA_GPUCODE
-  GPUTPCBaseTrackParam mParam; // Track Parameters
+  GPUTPCBaseTrackParamSkeleton<F> mParam; // Track Parameters
 
  private:
   // WARNING, Track Param Data is copied in the GPU Tracklet Constructor element by element instead of using copy constructor!!!
   // This is neccessary for performance reasons!!!
   // Changes to Elements of this class therefore must also be applied to TrackletConstructor!!!
-  float mSignCosPhi; // sign of cosPhi
-  float mChi2;       // the chi^2 value
-  int32_t mNDF;      // the Number of Degrees of Freedom
+  F<float> mSignCosPhi; // sign of cosPhi
+  F<float> mChi2;       // the chi^2 value
+  F<int32_t> mNDF;      // the Number of Degrees of Freedom
 };
 
 using GPUTPCTrackParam = GPUTPCTrackParamSkeleton<wrapper::value>;
