@@ -18,6 +18,12 @@ using reference = T&;
 template <class T>
 using const_reference = const T&;
 
+template <class T>
+using pointer = T*;
+
+template <class T>
+using const_pointer = const T*;
+
 template<
     template <template <class> class> class S,
     template <class> class F,

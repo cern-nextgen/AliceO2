@@ -129,22 +129,22 @@ void GPUTPCTracker::DumpTrackletHits(std::ostream& out)
   std::iota(Ids.begin(), Ids.end(), 0);
   if (mRec->GetProcessingSettings().deterministicGPUReconstruction) {
     std::sort(Ids.begin(), Ids.end(), [this](const int32_t& a, const int32_t& b) {
-      if (this->Tracklets()[a].FirstRow() != this->Tracklets()[b].FirstRow()) {
-        return this->Tracklets()[a].FirstRow() > this->Tracklets()[b].FirstRow();
+      if (this->Tracklet(a).FirstRow() != this->Tracklet(b).FirstRow()) {
+        return this->Tracklet(a).FirstRow() > this->Tracklet(b).FirstRow();
       }
-      if (this->Tracklets()[a].LastRow() != this->Tracklets()[b].LastRow()) {
-        return this->Tracklets()[a].LastRow() > this->Tracklets()[b].LastRow();
+      if (this->Tracklet(a).LastRow() != this->Tracklet(b).LastRow()) {
+        return this->Tracklet(a).LastRow() > this->Tracklet(b).LastRow();
       }
-      if (this->Tracklets()[a].Param().Y() != this->Tracklets()[b].Param().Y()) {
-        return this->Tracklets()[a].Param().Y() > this->Tracklets()[b].Param().Y();
+      if (this->Tracklet(a).Param().Y() != this->Tracklet(b).Param().Y()) {
+        return this->Tracklet(a).Param().Y() > this->Tracklet(b).Param().Y();
       }
-      return this->Tracklets()[a].Param().Z() > this->Tracklets()[b].Param().Z();
+      return this->Tracklet(a).Param().Z() > this->Tracklet(b).Param().Z();
     });
   }
   for (int32_t jj = 0; jj < nTracklets; jj++) {
     const int32_t j = Ids[jj];
-    const auto& tracklet = Tracklets()[j];
-    out << "Tracklet " << std::setw(4) << jj << " (Rows: " << Tracklets()[j].FirstRow() << " - " << tracklet.LastRow() << ", Weight " << Tracklets()[j].HitWeight() << ") ";
+    const auto& tracklet = Tracklet(j);
+    out << "Tracklet " << std::setw(4) << jj << " (Rows: " << Tracklet(j).FirstRow() << " - " << tracklet.LastRow() << ", Weight " << Tracklet(j).HitWeight() << ") ";
     if (tracklet.LastRow() > tracklet.FirstRow() && (tracklet.FirstRow() >= GPUCA_ROW_COUNT || tracklet.LastRow() >= GPUCA_ROW_COUNT)) {
       GPUError("Error: Tracklet %d First %d Last %d", j, tracklet.FirstRow(), tracklet.LastRow());
       out << " (Error: Tracklet " << j << " First " << tracklet.FirstRow() << " Last " << tracklet.LastRow() << ") ";

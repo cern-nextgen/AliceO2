@@ -37,6 +37,9 @@ class GPUTPCRow;
 class GPUTPCTracker : public GPUProcessor
 {
  public:
+   template <class T> using pointer = T*;
+   template <class T> using const_reference = const T&;
+
 #ifndef GPUCA_GPUCODE_DEVICE
   GPUTPCTracker() = default;
   ~GPUTPCTracker();
@@ -183,8 +186,18 @@ class GPUTPCTracker : public GPUProcessor
   GPUhd() GPUglobalref() const GPUTPCHitId* TrackletStartHits() const { return mTrackletStartHits; }
   GPUhd() GPUglobalref() GPUTPCHitId* TrackletStartHits() { return mTrackletStartHits; }
   GPUhd() GPUglobalref() GPUTPCHitId* TrackletTmpStartHits() const { return mTrackletTmpStartHits; }
-  GPUhd() GPUglobalref() const GPUTPCTracklet& Tracklet(int32_t i) const { return mTracklets[i]; }
-  GPUhd() GPUglobalref() GPUTPCTracklet* Tracklets() const { return mTracklets; }
+
+  GPUhd() GPUglobalref() GPUTPCTracklet_reference Tracklet(int32_t i) {
+    return {
+        mTracklets.mFirstRow[i],
+        mTracklets.mLastRow[i],
+        mTracklets.mParam[i],
+        mTracklets.mHitWeight[i],
+        mTracklets.mFirstHit[i]
+    };
+  }
+
+  GPUhd() GPUglobalref() GPUTPCTracklet_pointer Tracklets() const { return mTracklets; }
   GPUhd() GPUglobalref() calink* TrackletRowHits() const { return mTrackletRowHits; }
 
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NTracks() const { return &mCommonMem->nTracks; }
@@ -238,7 +251,7 @@ class GPUTPCTracker : public GPUProcessor
   // event
   GPUglobalref() commonMemoryStruct* mCommonMem = nullptr;  // common event memory
   GPUglobalref() GPUTPCHitId* mTrackletStartHits = nullptr; // start hits for the tracklets
-  GPUglobalref() GPUTPCTracklet* mTracklets = nullptr;      // tracklets
+  GPUglobalref() GPUTPCTracklet_pointer mTracklets;// tracklets
   GPUglobalref() calink* mTrackletRowHits = nullptr;        // Hits for each Tracklet in each row
   GPUglobalref() GPUTPCTrack* mTracks = nullptr;            // reconstructed tracks
   GPUglobalref() GPUTPCHitId* mTrackHits = nullptr;         // array of track hit numbers
