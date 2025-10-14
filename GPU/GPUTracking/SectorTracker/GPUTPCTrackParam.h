@@ -18,7 +18,7 @@
 #include "GPUTPCBaseTrackParam.h"
 #include "GPUTPCDef.h"
 #include "GPUCommonMath.h"
-#include "wrapper.h"
+// #include "wrapper.h"
 
 namespace o2::gpu
 {

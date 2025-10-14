@@ -31,7 +31,8 @@ namespace o2::gpu
 {
 struct GPUTPCClusterData;
 struct GPUParam;
-class GPUTPCTrack;
+template <template <class> class F>
+struct GPUTPCTrackSkeleton;
 class GPUTPCRow;
 
 class GPUTPCTracker : public GPUProcessor
@@ -201,7 +202,7 @@ class GPUTPCTracker : public GPUProcessor
   GPUhd() GPUglobalref() calink* TrackletRowHits() const { return mTrackletRowHits; }
 
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NTracks() const { return &mCommonMem->nTracks; }
-  GPUhd() GPUglobalref() GPUTPCTrack* Tracks() const { return mTracks; }
+  GPUhd() GPUglobalref() GPUTPCTrackSkeleton<wrapper::value>* Tracks() const { return mTracks; }
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NTrackHits() const { return &mCommonMem->nTrackHits; }
   GPUhd() GPUglobalref() GPUTPCHitId* TrackHits() const { return mTrackHits; }
 
@@ -253,7 +254,7 @@ class GPUTPCTracker : public GPUProcessor
   GPUglobalref() GPUTPCHitId* mTrackletStartHits = nullptr; // start hits for the tracklets
   GPUglobalref() GPUTPCTracklet_pointer mTracklets;// tracklets
   GPUglobalref() calink* mTrackletRowHits = nullptr;        // Hits for each Tracklet in each row
-  GPUglobalref() GPUTPCTrack* mTracks = nullptr;            // reconstructed tracks
+  GPUglobalref() GPUTPCTrackSkeleton<wrapper::value>* mTracks = nullptr;            // reconstructed tracks
   GPUglobalref() GPUTPCHitId* mTrackHits = nullptr;         // array of track hit numbers
 
   static int32_t StarthitSortComparison(const void* a, const void* b);

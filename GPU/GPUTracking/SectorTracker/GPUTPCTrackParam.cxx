@@ -15,7 +15,8 @@
 #include "GPUTPCTrackLinearisation.h"
 #include "GPUTPCTrackParam.h"
 #include "GPUTPCGeometry.h"
-#include "wrapper.h"
+#include "GPUTPCDef.h"
+// #include "wrapper.h"
 
 using namespace o2::gpu;
 
