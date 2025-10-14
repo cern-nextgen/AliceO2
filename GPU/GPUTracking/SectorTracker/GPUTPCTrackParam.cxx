@@ -337,7 +337,7 @@ GPUd() bool GPUTPCTrackParamSkeleton<F>::TransportToXWithMaterial(float x, GPUTP
 }
 
 template <template <class> class F>
-bool GPUTPCTrackParamSkeleton<F>::TransportToXWithMaterial(float x, float Bz, float maxSinPhi)
+GPUd() bool GPUTPCTrackParamSkeleton<F>::TransportToXWithMaterial(float x, float Bz, float maxSinPhi)
 {
   //* Transport the track parameters to X=x taking into account material budget
 
