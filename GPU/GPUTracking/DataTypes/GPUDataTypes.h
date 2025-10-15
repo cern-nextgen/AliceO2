@@ -24,7 +24,7 @@
 #include <cstddef>
 #endif
 #include "GPUTRDDef.h"
-#include "GPUTPCDef.h"
+#include "MemLayout.h"
 
 struct AliHLTTPCClusterMCLabel;
 struct AliHLTTPCRawCluster;
@@ -99,7 +99,7 @@ struct TPCZSLinkMapping;
 #include "utils/bitfield.h"
 
 template <template <class> class F>
-struct GPUTPCTrackSkeleton;
+class GPUTPCTrackSkeleton;
 class GPUTPCHitId;
 class GPUTPCGMMergedTrack;
 struct GPUTPCGMMergedTrackHit;
@@ -226,7 +226,7 @@ struct GPUTrackingInOutPointers {
   const AliHLTTPCRawCluster* rawClusters[NSECTORS] = {nullptr};
   uint32_t nRawClusters[NSECTORS] = {0};
   const o2::tpc::ClusterNativeAccess* clustersNative = nullptr;
-  const GPUTPCTrackSkeleton<wrapper::value>* sectorTracks[NSECTORS] = {nullptr};  // GPUTPCTrack
+  const GPUTPCTrackSkeleton<MemLayout::value>* sectorTracks[NSECTORS] = {nullptr};
   uint32_t nSectorTracks[NSECTORS] = {0};
   const GPUTPCHitId* sectorClusters[NSECTORS] = {nullptr};
   uint32_t nSectorClusters[NSECTORS] = {0};

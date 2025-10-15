@@ -18,6 +18,7 @@
 #include "GPUO2DataTypes.h"
 #include "GPUTPCGMMerger.h"
 #include "GPUTPCConvertImpl.h"
+#include "MemLayout.h"
 #include "GPUParam.inc"
 
 using namespace o2::gpu;
@@ -25,7 +26,7 @@ using namespace o2::tpc;
 
 GPUd() void GPUTPCGMSectorTrack::Set(const GPUTPCGMMerger* merger, const GPUTPCTrack* sectorTr, float alpha, int32_t sector)
 {
-  const GPUTPCBaseTrackParam& t = sectorTr->Param();
+  GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> t = sectorTr->Param();
   mOrigTrack = sectorTr;
   mParam.mX = t.GetX();
   mParam.mY = t.GetY();

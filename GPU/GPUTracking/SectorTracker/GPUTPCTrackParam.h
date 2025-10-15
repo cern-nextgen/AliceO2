@@ -18,10 +18,11 @@
 #include "GPUTPCBaseTrackParam.h"
 #include "GPUTPCDef.h"
 #include "GPUCommonMath.h"
-// #include "wrapper.h"
+#include "MemLayout.h"
 
 namespace o2::gpu
 {
+
 class GPUTPCTrackLinearisation;
 
 /**
@@ -35,12 +36,14 @@ template <template <class> class F>
 class GPUTPCTrackParamSkeleton
 {
  public:
+  MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCTrackParamSkeleton, F, mParam, mSignCosPhi, mChi2, mNDF)
+
   struct GPUTPCTrackFitParam {
     float bethe, e, theta2, EP2, sigmadE2, k22, k33, k43, k44; // parameters
   };
 
-  GPUd() const GPUTPCBaseTrackParam& GetParam() const { return mParam; }
-  GPUd() void SetParam(const GPUTPCBaseTrackParam& v) { mParam = v; }
+  GPUd() GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> GetParam() const { return mParam; }
+  GPUd() void SetParam(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v);
   GPUd() void InitParam();
 
   GPUd() float X() const { return mParam.X(); }
@@ -94,8 +97,8 @@ class GPUTPCTrackParamSkeleton
   GPUd() void SetChi2(float v) { mChi2 = v; }
   GPUd() void SetNDF(int32_t v) { mNDF = v; }
 
-  GPUd() float GetDist2(const GPUTPCTrackParamSkeleton<F>& t) const;
-  GPUd() float GetDistXZ2(const GPUTPCTrackParamSkeleton<F>& t) const;
+  GPUd() float GetDist2(GPUTPCTrackParamSkeleton<MemLayout::const_reference_restrict> t) const;
+  GPUd() float GetDistXZ2(GPUTPCTrackParamSkeleton<MemLayout::const_reference_restrict> t) const;
 
   GPUd() float GetS(float x, float y, float Bz) const;
 
@@ -142,11 +145,11 @@ class GPUTPCTrackParamSkeleton
   GPUd() void Print() const;
 
 #ifndef GPUCA_GPUCODE
- private:
+ //private:
 #endif                         //! GPUCA_GPUCODE
-  GPUTPCBaseTrackParamSkeleton<F> mParam; // Track Parameters
+  GPUTPCBaseTrackParamSkeleton<F> mParam;
 
- private:
+ //private:
   // WARNING, Track Param Data is copied in the GPU Tracklet Constructor element by element instead of using copy constructor!!!
   // This is neccessary for performance reasons!!!
   // Changes to Elements of this class therefore must also be applied to TrackletConstructor!!!
@@ -155,10 +158,11 @@ class GPUTPCTrackParamSkeleton
   F<int32_t> mNDF;      // the Number of Degrees of Freedom
 };
 
-using GPUTPCTrackParam = GPUTPCTrackParamSkeleton<wrapper::value>;
+template <template <class> class F>
+GPUd() void GPUTPCTrackParamSkeleton<F>::SetParam(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v) { mParam = v; }
 
-template <>
-GPUdi() void GPUTPCTrackParam::InitParam()
+template <template <class> class F>
+GPUd() void GPUTPCTrackParamSkeleton<F>::InitParam()
 {
   // Initialize Tracklet Parameters using default values
   SetSinPhi(0);

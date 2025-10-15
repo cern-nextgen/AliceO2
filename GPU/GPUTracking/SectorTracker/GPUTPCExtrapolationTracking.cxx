@@ -14,6 +14,7 @@
 
 #include "GPUTPCDef.h"
 #include "GPUTPCExtrapolationTracking.h"
+#include "GPUTPCTrackParam.h"
 #include "GPUTPCTrackletConstructor.h"
 #include "GPUTPCTrackLinearisation.h"
 #include "GPUTPCTracker.h"
@@ -30,7 +31,7 @@ GPUd() int32_t GPUTPCExtrapolationTracking::PerformExtrapolationTrackingRun(GPUT
     (float) Data().HitDataY(Row(mTrackHits[Tracks()[iTrack].FirstHitID() + j].RowIndex()), mTrackHits[Tracks()[iTrack].FirstHitID() + j].HitIndex()) * Row(mTrackHits[Tracks()[iTrack].FirstHitID() + j].RowIndex()).HstepY() + Row(mTrackHits[Tracks()[iTrack].FirstHitID() + j].RowIndex()).Grid().YMin());
   }*/
 
-  GPUTPCTrackParam tParam;
+  GPUTPCTrackParamSkeleton<MemLayout::value> tParam;
   tParam.InitParam();
   tParam.SetCov(0, 0.05f);
   tParam.SetCov(2, 0.05f);
