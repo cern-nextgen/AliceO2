@@ -33,7 +33,7 @@ class GPUTPCTrackSkeleton
 {
  public:
 #if !defined(GPUCA_GPUCODE)
-  GPUTPCTrackSkeleton();
+  GPUTPCTrackSkeleton() : mFirstHitID(0), mNHits(0), mLocalTrackId(-1), mParam() {}
   ~GPUTPCTrackSkeleton() = default;
 #endif //! GPUCA_GPUCODE
 
@@ -78,13 +78,6 @@ class GPUTPCTrackSkeleton
 
  private:
 };
-
-#if !defined(GPUCA_GPUCODE)
-template <>
-GPUTPCTrackSkeleton<wrapper::value>::GPUTPCTrackSkeleton() : mFirstHitID(0), mNHits(0), mLocalTrackId(-1), mParam()
-{
-}
-#endif //! GPUCA_GPUCODE
 
 using GPUTPCTrack = GPUTPCTrackSkeleton<wrapper::value>;
 

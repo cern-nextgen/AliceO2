@@ -31,10 +31,10 @@ namespace o2::gpu
 template <template <class> class F>
 struct GPUTPCBaseTrackParamSkeleton {
   template <template <class> class F_new>
-  operator GPUTPCBaseTrackParamSkeleton<F_new>() const { return {mX, mC, mZOffset, mP}; }
+  GPUd() operator GPUTPCBaseTrackParamSkeleton<F_new>() const { return {mX, mC, mZOffset, mP}; }
 
   template <template <class> class F_new>
-  operator GPUTPCBaseTrackParamSkeleton<F_new>() { return {mX, mC, mZOffset, mP}; }
+  GPUd() operator GPUTPCBaseTrackParamSkeleton<F_new>() { return {mX, mC, mZOffset, mP}; }
 
   GPUd() float X() const { return mX; }
   GPUd() float Y() const { return mP[0]; }

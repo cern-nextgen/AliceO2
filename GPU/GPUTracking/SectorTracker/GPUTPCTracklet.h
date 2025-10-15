@@ -78,9 +78,6 @@ class GPUTPCTrackletSkeleton
   F<uint32_t> mFirstHit;          // first hit in row hit array
 };
 
-template<>
-GPUhd() GPUTPCBaseTrackParamSkeleton<wrapper::const_reference> GPUTPCTrackletSkeleton<wrapper::pointer>::Param() const { return {mParam->mX, mParam->mC, mParam->mZOffset, mParam->mP}; }
-
 using GPUTPCTracklet = GPUTPCTrackletSkeleton<wrapper::value>;
 using GPUTPCTracklet_reference = GPUTPCTrackletSkeleton<wrapper::reference>;
 using GPUTPCTracklet_const_reference = GPUTPCTrackletSkeleton<wrapper::const_reference>;
