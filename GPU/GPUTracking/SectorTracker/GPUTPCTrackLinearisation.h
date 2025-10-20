@@ -41,6 +41,8 @@ class GPUTPCTrackLinearisation
 
   GPUd() GPUTPCTrackLinearisation(const GPUTPCTrackParam& t);
 
+  GPUd() GPUTPCTrackLinearisation(GPUTPCTrackParamSkeleton<wrapper::const_reference> t);
+
   GPUd() void Set(float SinPhi1, float CosPhi1, float DzDs1, float QPt1);
 
   GPUd() float SinPhi() const { return mSinPhi; }
@@ -66,6 +68,19 @@ class GPUTPCTrackLinearisation
 };
 
 GPUdi() GPUTPCTrackLinearisation::GPUTPCTrackLinearisation(const GPUTPCTrackParam& GPUrestrict() t) : mSinPhi(t.SinPhi()), mCosPhi(0), mDzDs(t.DzDs()), mQPt(t.QPt())
+{
+  if (mSinPhi > GPUCA_MAX_SIN_PHI) {
+    mSinPhi = GPUCA_MAX_SIN_PHI;
+  } else if (mSinPhi < -GPUCA_MAX_SIN_PHI) {
+    mSinPhi = -GPUCA_MAX_SIN_PHI;
+  }
+  mCosPhi = CAMath::Sqrt(1 - mSinPhi * mSinPhi);
+  if (t.SignCosPhi() < 0) {
+    mCosPhi = -mCosPhi;
+  }
+}
+
+GPUdi() GPUTPCTrackLinearisation::GPUTPCTrackLinearisation(GPUTPCTrackParamSkeleton<wrapper::const_reference> t) : mSinPhi(t.SinPhi()), mCosPhi(0), mDzDs(t.DzDs()), mQPt(t.QPt())
 {
   if (mSinPhi > GPUCA_MAX_SIN_PHI) {
     mSinPhi = GPUCA_MAX_SIN_PHI;

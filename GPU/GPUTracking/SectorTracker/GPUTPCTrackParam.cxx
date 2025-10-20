@@ -31,7 +31,7 @@ using namespace o2::gpu;
 //
 
 template <template <class> class F>
-GPUd() float GPUTPCTrackParamSkeleton<F>::GetDist2(const GPUTPCTrackParamSkeleton<F>& GPUrestrict() t) const
+GPUd() float GPUTPCTrackParamSkeleton<F>::GetDist2(GPUTPCTrackParamSkeleton<wrapper::const_reference> t) const
 {
   // get squared distance between tracks
 
@@ -42,7 +42,7 @@ GPUd() float GPUTPCTrackParamSkeleton<F>::GetDist2(const GPUTPCTrackParamSkeleto
 }
 
 template <template <class> class F>
-GPUd() float GPUTPCTrackParamSkeleton<F>::GetDistXZ2(const GPUTPCTrackParamSkeleton<F>& GPUrestrict() t) const
+GPUd() float GPUTPCTrackParamSkeleton<F>::GetDistXZ2(GPUTPCTrackParamSkeleton<wrapper::const_reference> t) const
 {
   // get squared distance between tracks in X&Z
 
@@ -332,7 +332,6 @@ template <template <class> class F>
 GPUd() bool GPUTPCTrackParamSkeleton<F>::TransportToXWithMaterial(float x, GPUTPCTrackFitParam& GPUrestrict() par, float Bz, float maxSinPhi)
 {
   //* Transport the track parameters to X=x  taking into account material budget
-
   GPUTPCTrackLinearisation t0(*this);
   return TransportToXWithMaterial(x, t0, par, Bz, maxSinPhi);
 }
@@ -878,3 +877,5 @@ GPUd() int32_t GPUTPCTrackParamSkeleton<F>::GetPropagatedYZ(float bz, float x, f
 }
 
 template class GPUTPCTrackParamSkeleton<wrapper::value>;
+template class GPUTPCTrackParamSkeleton<wrapper::reference>;
+template class GPUTPCTrackParamSkeleton<wrapper::const_reference>;

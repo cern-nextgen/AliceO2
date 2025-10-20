@@ -21,6 +21,22 @@
 namespace o2::gpu
 {
 
+template <template <template <class> class> class S, template <class> class F>
+struct BaseCRTP { };
+
+template <template <template <class> class> class S>
+struct BaseCRTP<S, wrapper::value> {
+  using Derived = S<wrapper::value>;
+  constexpr operator S<wrapper::reference>() { return {{}, static_cast<Derived*>(this)->mX, static_cast<Derived*>(this)->mC, static_cast<Derived*>(this)->mZOffset, static_cast<Derived*>(this)->mP}; };
+  constexpr operator S<wrapper::const_reference>() const { return {{}, static_cast<const Derived*>(this)->mX, static_cast<const Derived*>(this)->mC, static_cast<const Derived*>(this)->mZOffset, static_cast<const Derived*>(this)->mP}; };
+};
+
+template <template <template <class> class> class S>
+struct BaseCRTP<S, wrapper::reference> {
+  using Derived = S<wrapper::reference>;
+  constexpr operator S<wrapper::const_reference>() const { return {{}, static_cast<const Derived*>(this)->mX, static_cast<const Derived*>(this)->mC, static_cast<const Derived*>(this)->mZOffset, static_cast<const Derived*>(this)->mP}; };
+};
+
 /**
  * @class GPUTPCBaseTrackParam
  *
@@ -29,13 +45,7 @@ namespace o2::gpu
  * This class is used for transfer between tracker and merger and does not contain the covariance matrice
  */
 template <template <class> class F>
-struct GPUTPCBaseTrackParamSkeleton {
-  template <template <class> class F_new>
-  GPUd() operator GPUTPCBaseTrackParamSkeleton<F_new>() const { return {mX, mC, mZOffset, mP}; }
-
-  template <template <class> class F_new>
-  GPUd() operator GPUTPCBaseTrackParamSkeleton<F_new>() { return {mX, mC, mZOffset, mP}; }
-
+struct GPUTPCBaseTrackParamSkeleton : BaseCRTP<GPUTPCBaseTrackParamSkeleton, F> {
   GPUd() float X() const { return mX; }
   GPUd() float Y() const { return mP[0]; }
   GPUd() float Z() const { return mP[1]; }

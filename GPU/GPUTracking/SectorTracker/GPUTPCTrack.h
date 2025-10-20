@@ -40,7 +40,7 @@ class GPUTPCTrackSkeleton
   GPUhd() int32_t NHits() const { return mNHits; }
   GPUhd() int32_t LocalTrackId() const { return mLocalTrackId; }
   GPUhd() int32_t FirstHitID() const { return mFirstHitID; }
-  GPUhd() const GPUTPCBaseTrackParam& Param() const { return mParam; }
+  GPUhd() GPUTPCBaseTrackParamSkeleton<wrapper::const_reference> Param() const { return mParam; }
 
   GPUhd() void SetNHits(int32_t v) { mNHits = v; }
   GPUhd() void SetLocalTrackId(int32_t v) { mLocalTrackId = v; }
@@ -71,10 +71,10 @@ class GPUTPCTrackSkeleton
   }
 
  private:
-  int32_t mFirstHitID;         // index of the first track cell in the track->cell pointer array
-  int32_t mNHits;              // number of track cells
-  int32_t mLocalTrackId;       // Id of local track this extrapolated track belongs to, index of this track itself if it is a local track
-  GPUTPCBaseTrackParam mParam; // track parameters
+  F<int32_t> mFirstHitID;         // index of the first track cell in the track->cell pointer array
+  F<int32_t> mNHits;              // number of track cells
+  F<int32_t> mLocalTrackId;       // Id of local track this extrapolated track belongs to, index of this track itself if it is a local track
+  GPUTPCBaseTrackParamSkeleton<F> mParam; // track parameters
 
  private:
 };

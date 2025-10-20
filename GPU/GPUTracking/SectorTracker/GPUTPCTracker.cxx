@@ -112,7 +112,12 @@ GPUhd() void* GPUTPCTracker::SetPointersTracklets(void* mem)
 {
   computePointerWithAlignment(mem, mTracklets.mFirstRow, mNMaxTracklets);
   computePointerWithAlignment(mem, mTracklets.mLastRow, mNMaxTracklets);
-  computePointerWithAlignment(mem, mTracklets.mParam, mNMaxTracklets);
+
+  computePointerWithAlignment(mem, mTracklets.mParam.mX, mNMaxTracklets);
+  computePointerWithAlignment(mem, mTracklets.mParam.mC, mNMaxTracklets);
+  computePointerWithAlignment(mem, mTracklets.mParam.mZOffset, mNMaxTracklets);
+  computePointerWithAlignment(mem, mTracklets.mParam.mP, mNMaxTracklets);
+
   computePointerWithAlignment(mem, mTracklets.mHitWeight, mNMaxTracklets);
   computePointerWithAlignment(mem, mTracklets.mFirstHit, mNMaxTracklets);
   computePointerWithAlignment(mem, mTrackletRowHits, mNMaxRowHits);

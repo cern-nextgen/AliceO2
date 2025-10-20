@@ -38,8 +38,6 @@ class GPUTPCRow;
 class GPUTPCTracker : public GPUProcessor
 {
  public:
-   template <class T> using pointer = T*;
-   template <class T> using const_reference = const T&;
 
 #ifndef GPUCA_GPUCODE_DEVICE
   GPUTPCTracker() = default;
@@ -82,13 +80,13 @@ class GPUTPCTracker : public GPUProcessor
     return (mCommonMem);
   }
 
-  GPUdi() static void GetErrors2Seeding(const GPUParam& param, char sector, int32_t iRow, const GPUTPCTrackParam& t, float time, float& ErrY2, float& ErrZ2)
+  GPUdi() static void GetErrors2Seeding(const GPUParam& param, char sector, int32_t iRow, GPUTPCTrackParamSkeleton<wrapper::const_reference> t, float time, float& ErrY2, float& ErrZ2)
   {
     // param.GetClusterErrors2(sector, iRow, param.GetContinuousTracking() != 0. ? 125.f : t.Z(), t.SinPhi(), t.DzDs(), time, 0.f, 0.f, ErrY2, ErrZ2);
     param.GetClusterErrorsSeeding2(sector, iRow, param.par.continuousTracking != 0.f ? 125.f : t.Z(), t.SinPhi(), t.DzDs(), time, ErrY2, ErrZ2);
   }
 
-  GPUdi() void GetErrors2Seeding(int32_t iRow, const GPUTPCTrackParam& t, float time, float& ErrY2, float& ErrZ2) const
+  GPUdi() void GetErrors2Seeding(int32_t iRow, GPUTPCTrackParamSkeleton<wrapper::const_reference> t, float time, float& ErrY2, float& ErrZ2) const
   {
     // Param().GetClusterErrors2(mISector, iRow, Param().GetContinuousTracking() != 0. ? 125.f : t.Z(), t.SinPhi(), t.DzDs(), time, 0.f, 0.f, ErrY2, ErrZ2);
     Param().GetClusterErrorsSeeding2(mISector, iRow, Param().par.continuousTracking != 0.f ? 125.f : t.Z(), t.SinPhi(), t.DzDs(), time, ErrY2, ErrZ2);
@@ -192,13 +190,13 @@ class GPUTPCTracker : public GPUProcessor
     return {
         mTracklets.mFirstRow[i],
         mTracklets.mLastRow[i],
-        mTracklets.mParam[i],
+        {{}, mTracklets.mParam.mX[i], mTracklets.mParam.mC[i], mTracklets.mParam.mZOffset[i], mTracklets.mParam.mP[i]},
         mTracklets.mHitWeight[i],
         mTracklets.mFirstHit[i]
     };
   }
 
-  GPUhd() GPUglobalref() GPUTPCTracklet_pointer Tracklets() const { return mTracklets; }
+  GPUhd() GPUglobalref() GPUTPCTrackletSkeleton<wrapper::pointer> Tracklets() const { return mTracklets; }
   GPUhd() GPUglobalref() calink* TrackletRowHits() const { return mTrackletRowHits; }
 
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NTracks() const { return &mCommonMem->nTracks; }
@@ -252,7 +250,7 @@ class GPUTPCTracker : public GPUProcessor
   // event
   GPUglobalref() commonMemoryStruct* mCommonMem = nullptr;  // common event memory
   GPUglobalref() GPUTPCHitId* mTrackletStartHits = nullptr; // start hits for the tracklets
-  GPUglobalref() GPUTPCTracklet_pointer mTracklets;// tracklets
+  GPUglobalref() GPUTPCTrackletSkeleton<wrapper::pointer> mTracklets; // tracklets
   GPUglobalref() calink* mTrackletRowHits = nullptr;        // Hits for each Tracklet in each row
   GPUglobalref() GPUTPCTrackSkeleton<wrapper::value>* mTracks = nullptr;            // reconstructed tracks
   GPUglobalref() GPUTPCHitId* mTrackHits = nullptr;         // array of track hit numbers

@@ -25,7 +25,7 @@ using namespace o2::tpc;
 
 GPUd() void GPUTPCGMSectorTrack::Set(const GPUTPCGMMerger* merger, const GPUTPCTrack* sectorTr, float alpha, int32_t sector)
 {
-  const GPUTPCBaseTrackParam& t = sectorTr->Param();
+  GPUTPCBaseTrackParamSkeleton<wrapper::const_reference> t = sectorTr->Param();
   mOrigTrack = sectorTr;
   mParam.mX = t.GetX();
   mParam.mY = t.GetY();
