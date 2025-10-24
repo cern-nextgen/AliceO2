@@ -222,42 +222,6 @@ class GPUTPCTrackParamSkeleton : public CRTP<GPUTPCTrackParamSkeleton, F>
   F<int32_t> mNDF;      // the Number of Degrees of Freedom
 };
 
-template <> GPUd() void GPUTPCTrackParamSkeleton<wrapper::const_reference>::SetParam(GPUTPCBaseTrackParamSkeleton<wrapper::const_reference> v) = delete;
-template <> GPUd() void GPUTPCTrackParamSkeleton<wrapper::const_reference>::InitParam() = delete;
-
-template <> GPUhd() void GPUTPCTrackParamSkeleton<wrapper::const_reference>::SetPar(int32_t i, float v) = delete;
-template <> GPUhd() void GPUTPCTrackParamSkeleton<wrapper::const_reference>::SetCov(int32_t i, float v) = delete;
-
-template <> GPUd() void GPUTPCTrackParamSkeleton<wrapper::const_reference>::SetX(float v) = delete;
-template <> GPUd() void GPUTPCTrackParamSkeleton<wrapper::const_reference>::SetY(float v) = delete;
-template <> GPUd() void GPUTPCTrackParamSkeleton<wrapper::const_reference>::SetZ(float v) = delete;
-template <> GPUd() void GPUTPCTrackParamSkeleton<wrapper::const_reference>::SetSinPhi(float v) = delete;
-template <> GPUd() void GPUTPCTrackParamSkeleton<wrapper::const_reference>::SetDzDs(float v) = delete;
-template <> GPUd() void GPUTPCTrackParamSkeleton<wrapper::const_reference>::SetQPt(float v) = delete;
-template <> GPUd() void GPUTPCTrackParamSkeleton<wrapper::const_reference>::SetZOffset(float v) = delete;
-template <> GPUd() void GPUTPCTrackParamSkeleton<wrapper::const_reference>::SetSignCosPhi(float v) = delete;
-template <> GPUd() void GPUTPCTrackParamSkeleton<wrapper::const_reference>::SetChi2(float v) = delete;
-template <> GPUd() void GPUTPCTrackParamSkeleton<wrapper::const_reference>::SetNDF(int32_t v) = delete;
-
-template <> GPUd() bool GPUTPCTrackParamSkeleton<wrapper::const_reference>::TransportToX(float x, float Bz, float maxSinPhi) = delete;
-template <> GPUd() bool GPUTPCTrackParamSkeleton<wrapper::const_reference>::TransportToXWithMaterial(float x, float Bz, float maxSinPhi) = delete;
-template <> GPUd() bool GPUTPCTrackParamSkeleton<wrapper::const_reference>::TransportToX(float x, GPUTPCTrackLinearisation& t0, float Bz, float maxSinPhi, float* DL) = delete;
-template <> GPUd() bool GPUTPCTrackParamSkeleton<wrapper::const_reference>::TransportToX(float x, float sinPhi0, float cosPhi0, float Bz, float maxSinPhi) = delete;
-template <> GPUd() bool GPUTPCTrackParamSkeleton<wrapper::const_reference>::TransportToXWithMaterial(float x, GPUTPCTrackLinearisation& t0, GPUTPCTrackFitParam& par, float Bz, float maxSinPhi) = delete;
-template <> GPUd() bool GPUTPCTrackParamSkeleton<wrapper::const_reference>::TransportToXWithMaterial(float x, GPUTPCTrackFitParam& par, float Bz, float maxSinPhi) = delete;
-template <> GPUd() void GPUTPCTrackParamSkeleton<wrapper::const_reference>::CalculateFitParameters(GPUTPCTrackFitParam& par, float mass) = delete;
-template <> GPUd() bool GPUTPCTrackParamSkeleton<wrapper::const_reference>::CorrectForMeanMaterial(float xOverX0, float xTimesRho, const GPUTPCTrackFitParam& par) = delete;
-template <> GPUd() bool GPUTPCTrackParamSkeleton<wrapper::const_reference>::Rotate(float alpha, float maxSinPhi) = delete;
-template <> GPUd() bool GPUTPCTrackParamSkeleton<wrapper::const_reference>::Rotate(float alpha, GPUTPCTrackLinearisation& t0, float maxSinPhi) = delete;
-template <> GPUd() bool GPUTPCTrackParamSkeleton<wrapper::const_reference>::Filter(float y, float z, float err2Y, float err2Z, float maxSinPhi, bool paramOnly) = delete;
-
-template <> GPUd() void GPUTPCTrackParamSkeleton<wrapper::const_reference>::ShiftZ(float z1, float z2, float x1, float x2, float bz, float defaultZOffsetOverR) = delete;
-template <> GPUd() void GPUTPCTrackParamSkeleton<wrapper::const_reference>::ConstrainZ(float& z, int32_t sector, float& z0, float& lastZ) = delete;
-
-template <> GPUdi() void GPUTPCTrackParamSkeleton<wrapper::const_reference>::ConstrainSinPhi(float limit) = delete;
-
-using GPUTPCTrackParam = GPUTPCTrackParamSkeleton<wrapper::value>;
-
 } // namespace o2::gpu
 
 #endif // GPUTPCTRACKPARAM_H

@@ -19,6 +19,8 @@
 
 namespace o2::gpu
 {
+
+using GPUTPCTrackParam = GPUTPCTrackParamSkeleton<wrapper::value>;
 /**
  * @class GPUTPCTrackLinearisation
  *

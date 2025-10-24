@@ -878,4 +878,4 @@ GPUd() int32_t GPUTPCTrackParamSkeleton<F>::GetPropagatedYZ(float bz, float x, f
 
 template class GPUTPCTrackParamSkeleton<wrapper::value>;
 template class GPUTPCTrackParamSkeleton<wrapper::reference>;
-template class GPUTPCTrackParamSkeleton<wrapper::const_reference>;
+//template class GPUTPCTrackParamSkeleton<wrapper::const_reference>;
