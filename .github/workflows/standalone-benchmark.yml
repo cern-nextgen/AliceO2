@@ -42,7 +42,6 @@ jobs:
         run: |
           dnf install -y numactl
           mkdir -p ${STANDALONE_DIR}
-          
           . ${WORK_DIR}/${ALIBUILD_ARCH_PREFIX}/O2/${O2_REVISION}/etc/profile.d/init.sh
 
           curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/cuQAwSojyDrl6FR/events.tar.xz
@@ -56,9 +55,11 @@ jobs:
           cmake -B ${BUILD_DIR} ${{ matrix.cmake_args }} -DENABLE_OPENCL=0 -DGPUCA_BUILD_EVENT_DISPLAY=0 -DGPUCA_DETERMINISTIC_MODE=GPU -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
           cd ${BUILD_DIR}
           make install -j8
+
           cd ${STANDALONE_DIR}
-          numactl --membind 0 --cpunodebind 0 ${STANDALONE_DIR}/ca -e o2-simple -g --seed 0 --memSize 20000000000 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptSpecialCode 1 --debug 1 ${{ matrix.ca_args }} > ${ARTIFACT_FILE}
-          cat ${ARTIFACT_FILE}
+          numactl --membind 0 --cpunodebind 0 ${STANDALONE_DIR}/ca -e o2-simple -g --seed 0 --memSize 20000000000 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptSpecialCode 1 --debug 6 ${{ matrix.ca_args }}
+          cmp ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/GPU.out
+          numactl --membind 0 --cpunodebind 0 ${STANDALONE_DIR}/ca -e o2-simple -g --seed 0 --memSize 15000000000 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptSpecialCode 1 --debug 1 ${{ matrix.ca_args }} > ${ARTIFACT_FILE}
         env:
           WORK_DIR: /cvmfs/alice.cern.ch
           ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
