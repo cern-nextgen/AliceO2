@@ -39,7 +39,6 @@ jobs:
 
       - name: Build and Run
         run: |
-          dnf install -y numactl
           mkdir -p ${STANDALONE_DIR}
           . ${WORK_DIR}/${ALIBUILD_ARCH_PREFIX}/O2/${O2_REVISION}/etc/profile.d/init.sh
 
