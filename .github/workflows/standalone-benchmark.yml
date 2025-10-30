@@ -18,11 +18,11 @@ jobs:
           - name: nvidia-h100
             runner: cern-nextgen-h100
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=90
-            ca_args: --gpuType CUDA
+            ca_args: --gpuType CUDA --RTCTECHloadLaunchBoundsFromFile genGPUArch/nvidia-h100.par
           - name: nvidia-l40s
             runner: cern-nextgen-l40s
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=89
-            ca_args: --gpuType CUDA
+            ca_args: --gpuType CUDA --RTCTECHloadLaunchBoundsFromFile genGPUArch/nvidia-l40s.par
           - name: amd-mi300x
             runner: cern-nextgen-mi300x
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx942
@@ -38,28 +38,40 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build and Run
-        continue-on-error: true
         run: |
           dnf install -y numactl
           mkdir -p ${STANDALONE_DIR}
           . ${WORK_DIR}/${ALIBUILD_ARCH_PREFIX}/O2/${O2_REVISION}/etc/profile.d/init.sh
 
-          curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/cuQAwSojyDrl6FR/events.tar.xz
-          tar -xf /root/events.tar.xz -C ${STANDALONE_DIR}
-          rm -f /root/events.tar.xz
+          #curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/cuQAwSojyDrl6FR/events.tar.xz
+          #tar -xf /root/events.tar.xz -C ${STANDALONE_DIR}
+          #rm -f /root/events.tar.xz
 
-          curl -o /root/genGPUArch.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/3o2pvOVkINFU8qy/genGPUArch.tar.xz
-          tar -xf /root/genGPUArch.tar.xz -C ${STANDALONE_DIR}
-          rm -f /root/genGPUArch.tar.xz
+          #curl -o /root/genGPUArch.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/3o2pvOVkINFU8qy/genGPUArch.tar.xz
+          #tar -xf /root/genGPUArch.tar.xz -C ${STANDALONE_DIR}
+          #rm -f /root/genGPUArch.tar.xz
 
           cmake -B ${BUILD_DIR} ${{ matrix.cmake_args }} -DENABLE_OPENCL=0 -DGPUCA_BUILD_EVENT_DISPLAY=0 -DGPUCA_DETERMINISTIC_MODE=GPU -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
           cd ${BUILD_DIR}
           make install -j8
 
           cd ${STANDALONE_DIR}
+          mkdir -p ${STANDALONE_DIR}/genGPUArch
+          curl -v -o ${STANDALONE_DIR}/genGPUArch/${{ matrix.cmake_args }}.par https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/genGPUArch/${{ matrix.cmake_args }}.par
+
+          mkdir -p ${STANDALONE_DIR}/events
+
+          curl -v -o ${STANDALONE_DIR}/events/50kHz.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/events/50kHz.tar.xz
+          tar -xf ${STANDALONE_DIR}/events/50kHz.tar.xz -C ${STANDALONE_DIR}/events/50kHz
+          numactl --membind 0 --cpunodebind 0 ${STANDALONE_DIR}/ca -e 50kHz -g --seed 0 --memSize 15000000000 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptSpecialCode 1 --debug 1 ${{ matrix.ca_args }} > ${ARTIFACT_FILE}
+
+          curl -v -o ${STANDALONE_DIR}/events/o2-simple.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/events/o2-simple.tar.xz
+          tar -xf ${STANDALONE_DIR}/events/o2-simple.tar.xz -C ${STANDALONE_DIR}/events/o2-simple
           numactl --membind 0 --cpunodebind 0 ${STANDALONE_DIR}/ca -e o2-simple -g --seed 0 --memSize 20000000000 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptSpecialCode 1 --debug 6 ${{ matrix.ca_args }}
           cmp ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/GPU.out
-          numactl --membind 0 --cpunodebind 0 ${STANDALONE_DIR}/ca -e o2-simple -g --seed 0 --memSize 15000000000 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptSpecialCode 1 --debug 1 ${{ matrix.ca_args }} > ${ARTIFACT_FILE}
+          rm -rf ${STANDALONE_DIR}/GPU.out
+
+          rm -rf ${STANDALONE_DIR}/events
         env:
           WORK_DIR: /cvmfs/alice.cern.ch
           ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
