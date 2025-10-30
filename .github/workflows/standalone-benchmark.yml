@@ -13,7 +13,7 @@ jobs:
     container: registry.cern.ch/alisw/slc9-gpu-builder:latest
     strategy:
       matrix:
-        name: [nvidia-h100] #, nvidia-l40s, amd-mi300x, amd-w7900]
+        name: [nvidia-h100, nvidia-l40s, amd-mi300x, amd-w7900]
         include:
           - name: nvidia-h100
             runner: cern-nextgen-h100
@@ -43,14 +43,6 @@ jobs:
           mkdir -p ${STANDALONE_DIR}
           . ${WORK_DIR}/${ALIBUILD_ARCH_PREFIX}/O2/${O2_REVISION}/etc/profile.d/init.sh
 
-          #curl -o /root/events.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/cuQAwSojyDrl6FR/events.tar.xz
-          #tar -xf /root/events.tar.xz -C ${STANDALONE_DIR}
-          #rm -f /root/events.tar.xz
-
-          #curl -o /root/genGPUArch.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/3o2pvOVkINFU8qy/genGPUArch.tar.xz
-          #tar -xf /root/genGPUArch.tar.xz -C ${STANDALONE_DIR}
-          #rm -f /root/genGPUArch.tar.xz
-
           cmake -B ${BUILD_DIR} ${{ matrix.cmake_args }} -DENABLE_OPENCL=0 -DGPUCA_BUILD_EVENT_DISPLAY=0 -DGPUCA_DETERMINISTIC_MODE=GPU -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
           cd ${BUILD_DIR}
           make install -j8
@@ -69,9 +61,9 @@ jobs:
           tar -xf ${STANDALONE_DIR}/events/o2-simple.tar.xz -C ${STANDALONE_DIR}/events
           numactl --membind 1 --cpunodebind 1 ${STANDALONE_DIR}/ca -e o2-simple -g --seed 0 --memSize 20000000000 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptSpecialCode 1 --debug 6 ${{ matrix.ca_args }}
           
-          curl -v -o ${STANDALONE_DIR}/o2-simple-GPU.out https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/o2-simple-GPU.out
-          cmp ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/o2-simple-GPU.out
-          rm -rf ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/o2-simple-GPU.out
+          curl -v -o ${STANDALONE_DIR}/different-GPU.out https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/different-GPU.out
+          cmp ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/different-GPU.out
+          rm -rf ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/different-GPU.out
 
           rm -rf ${STANDALONE_DIR}/events
         env:
