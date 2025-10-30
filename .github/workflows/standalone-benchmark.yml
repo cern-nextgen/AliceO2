@@ -63,11 +63,11 @@ jobs:
 
           curl -v -o ${STANDALONE_DIR}/events/50kHz.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/events/50kHz.tar.xz
           tar -xf ${STANDALONE_DIR}/events/50kHz.tar.xz -C ${STANDALONE_DIR}/events
-          numactl --membind 0 --cpunodebind 0 ${STANDALONE_DIR}/ca -e 50kHz -g --seed 0 --memSize 15000000000 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptSpecialCode 1 --debug 1 ${{ matrix.ca_args }} > ${ARTIFACT_FILE}
+          numactl --membind 1 --cpunodebind 1 ${STANDALONE_DIR}/ca -e 50kHz -g --seed 0 --memSize 15000000000 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptSpecialCode 1 --debug 1 ${{ matrix.ca_args }} > ${ARTIFACT_FILE}
 
           curl -v -o ${STANDALONE_DIR}/events/o2-simple.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/events/o2-simple.tar.xz
           tar -xf ${STANDALONE_DIR}/events/o2-simple.tar.xz -C ${STANDALONE_DIR}/events
-          numactl --membind 0 --cpunodebind 0 ${STANDALONE_DIR}/ca -e o2-simple -g --seed 0 --memSize 20000000000 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptSpecialCode 1 --debug 6 ${{ matrix.ca_args }}
+          numactl --membind 1 --cpunodebind 1 ${STANDALONE_DIR}/ca -e o2-simple -g --seed 0 --memSize 20000000000 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptSpecialCode 1 --debug 6 ${{ matrix.ca_args }}
           cmp ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/GPU.out
           rm -rf ${STANDALONE_DIR}/GPU.out
 
