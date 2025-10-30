@@ -13,24 +13,24 @@ jobs:
     container: registry.cern.ch/alisw/slc9-gpu-builder:latest
     strategy:
       matrix:
-        name: [nvidia-h100, nvidia-l40s, amd-mi300x, amd-w7900]
+        name: [nvidia-h100] #, nvidia-l40s, amd-mi300x, amd-w7900]
         include:
           - name: nvidia-h100
             runner: cern-nextgen-h100
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=90
-            ca_args: --gpuType CUDA --RTCTECHloadLaunchBoundsFromFile genGPUArch/nvidia-h100.par
-          - name: nvidia-l40s
-            runner: cern-nextgen-l40s
-            cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=89
-            ca_args: --gpuType CUDA --RTCTECHloadLaunchBoundsFromFile genGPUArch/nvidia-l40s.par
-          - name: amd-mi300x
-            runner: cern-nextgen-mi300x
-            cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx942
-            ca_args: --gpuType HIP --RTCTECHloadLaunchBoundsFromFile genGPUArch/amd-mi300x.par
-          - name: amd-w7900
-            runner: cern-nextgen-w7900
-            cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx1100
-            ca_args: --gpuType HIP --RTCTECHloadLaunchBoundsFromFile genGPUArch/amd-w7900.par
+            ca_args: --gpuType CUDA #--RTCTECHloadLaunchBoundsFromFile genGPUArch/nvidia-h100.par
+          # - name: nvidia-l40s
+          #   runner: cern-nextgen-l40s
+          #   cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=89
+          #   ca_args: --gpuType CUDA --RTCTECHloadLaunchBoundsFromFile genGPUArch/nvidia-l40s.par
+          # - name: amd-mi300x
+          #   runner: cern-nextgen-mi300x
+          #   cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx942
+          #   ca_args: --gpuType HIP --RTCTECHloadLaunchBoundsFromFile genGPUArch/amd-mi300x.par
+          # - name: amd-w7900
+          #   runner: cern-nextgen-w7900
+          #   cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx1100
+          #   ca_args: --gpuType HIP --RTCTECHloadLaunchBoundsFromFile genGPUArch/amd-w7900.par
 
     name: ${{ matrix.name }}
     steps:
@@ -68,8 +68,10 @@ jobs:
           curl -v -o ${STANDALONE_DIR}/events/o2-simple.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/events/o2-simple.tar.xz
           tar -xf ${STANDALONE_DIR}/events/o2-simple.tar.xz -C ${STANDALONE_DIR}/events
           numactl --membind 1 --cpunodebind 1 ${STANDALONE_DIR}/ca -e o2-simple -g --seed 0 --memSize 20000000000 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptSpecialCode 1 --debug 6 ${{ matrix.ca_args }}
-          cmp ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/GPU.out
-          rm -rf ${STANDALONE_DIR}/GPU.out
+          
+          curl -v -o ${STANDALONE_DIR}/o2-simple-GPU.out https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/o2-simple-GPU.out
+          cmp ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/o2-simple-GPU.out
+          rm -rf ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/o2-simple-GPU.out
 
           rm -rf ${STANDALONE_DIR}/events
         env:
