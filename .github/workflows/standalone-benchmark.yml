@@ -57,7 +57,7 @@ jobs:
 
           cd ${STANDALONE_DIR}
           mkdir -p ${STANDALONE_DIR}/genGPUArch
-          curl -v -o ${STANDALONE_DIR}/genGPUArch/${{ matrix.cmake_args }}.par https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/genGPUArch/${{ matrix.cmake_args }}.par
+          curl -v -o ${STANDALONE_DIR}/genGPUArch/${{ matrix.name }}.par https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/genGPUArch/${{ matrix.name }}.par
 
           mkdir -p ${STANDALONE_DIR}/events
 
