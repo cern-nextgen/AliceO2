@@ -32,7 +32,7 @@ namespace o2::gpu
 struct GPUTPCClusterData;
 struct GPUParam;
 template <template <class> class F>
-struct GPUTPCTrackSkeleton;
+class GPUTPCTrackSkeleton;
 class GPUTPCRow;
 
 class GPUTPCTracker : public GPUProcessor

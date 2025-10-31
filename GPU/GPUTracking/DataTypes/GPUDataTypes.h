@@ -99,7 +99,7 @@ struct TPCZSLinkMapping;
 #include "utils/bitfield.h"
 
 template <template <class> class F>
-struct GPUTPCTrackSkeleton;
+class GPUTPCTrackSkeleton;
 class GPUTPCHitId;
 class GPUTPCGMMergedTrack;
 struct GPUTPCGMMergedTrackHit;
