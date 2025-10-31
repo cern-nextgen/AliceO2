@@ -27,13 +27,45 @@ struct BaseCRTP { };
 template <template <template <class> class> class S>
 struct BaseCRTP<S, wrapper::value> {
   using Derived = S<wrapper::value>;
+
   constexpr operator S<wrapper::reference>() { return {{}, static_cast<Derived*>(this)->mX, static_cast<Derived*>(this)->mC, static_cast<Derived*>(this)->mZOffset, static_cast<Derived*>(this)->mP}; };
+  constexpr operator S<wrapper::reference_restrict>() { return {{}, static_cast<Derived*>(this)->mX, static_cast<Derived*>(this)->mC, static_cast<Derived*>(this)->mZOffset, static_cast<Derived*>(this)->mP}; };
+  
   constexpr operator S<wrapper::const_reference>() const { return {{}, static_cast<const Derived*>(this)->mX, static_cast<const Derived*>(this)->mC, static_cast<const Derived*>(this)->mZOffset, static_cast<const Derived*>(this)->mP}; };
+  constexpr operator S<wrapper::const_reference_restrict>() const { return {{}, static_cast<const Derived*>(this)->mX, static_cast<const Derived*>(this)->mC, static_cast<const Derived*>(this)->mZOffset, static_cast<const Derived*>(this)->mP}; };
 };
 
 template <template <template <class> class> class S>
 struct BaseCRTP<S, wrapper::reference> {
   using Derived = S<wrapper::reference>;
+
+  constexpr operator S<wrapper::reference_restrict>() { return {{}, static_cast<Derived*>(this)->mX, static_cast<Derived*>(this)->mC, static_cast<Derived*>(this)->mZOffset, static_cast<Derived*>(this)->mP}; };
+
+  constexpr operator S<wrapper::const_reference>() const { return {{}, static_cast<const Derived*>(this)->mX, static_cast<const Derived*>(this)->mC, static_cast<const Derived*>(this)->mZOffset, static_cast<const Derived*>(this)->mP}; };
+  constexpr operator S<wrapper::const_reference_restrict>() const { return {{}, static_cast<const Derived*>(this)->mX, static_cast<const Derived*>(this)->mC, static_cast<const Derived*>(this)->mZOffset, static_cast<const Derived*>(this)->mP}; };
+};
+
+template <template <template <class> class> class S>
+struct BaseCRTP<S, wrapper::reference_restrict> {
+  using Derived = S<wrapper::reference_restrict>;
+
+  constexpr operator S<wrapper::reference>() { return {{}, static_cast<Derived*>(this)->mX, static_cast<Derived*>(this)->mC, static_cast<Derived*>(this)->mZOffset, static_cast<Derived*>(this)->mP}; };
+
+  constexpr operator S<wrapper::const_reference>() const { return {{}, static_cast<const Derived*>(this)->mX, static_cast<const Derived*>(this)->mC, static_cast<const Derived*>(this)->mZOffset, static_cast<const Derived*>(this)->mP}; };
+  constexpr operator S<wrapper::const_reference_restrict>() const { return {{}, static_cast<const Derived*>(this)->mX, static_cast<const Derived*>(this)->mC, static_cast<const Derived*>(this)->mZOffset, static_cast<const Derived*>(this)->mP}; };
+};
+
+template <template <template <class> class> class S>
+struct BaseCRTP<S, wrapper::const_reference> {
+  using Derived = S<wrapper::const_reference>;
+
+  constexpr operator S<wrapper::const_reference_restrict>() const { return {{}, static_cast<const Derived*>(this)->mX, static_cast<const Derived*>(this)->mC, static_cast<const Derived*>(this)->mZOffset, static_cast<const Derived*>(this)->mP}; };
+};
+
+template <template <template <class> class> class S>
+struct BaseCRTP<S, wrapper::const_reference_restrict> {
+  using Derived = S<wrapper::const_reference_restrict>;
+
   constexpr operator S<wrapper::const_reference>() const { return {{}, static_cast<const Derived*>(this)->mX, static_cast<const Derived*>(this)->mC, static_cast<const Derived*>(this)->mZOffset, static_cast<const Derived*>(this)->mP}; };
 };
 

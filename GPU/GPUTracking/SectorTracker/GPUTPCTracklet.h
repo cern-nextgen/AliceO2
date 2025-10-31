@@ -79,7 +79,6 @@ class GPUTPCTrackletSkeleton
 };
 
 using GPUTPCTracklet = GPUTPCTrackletSkeleton<wrapper::value>;
-using GPUTPCTracklet_reference = GPUTPCTrackletSkeleton<wrapper::reference>;
 
 } // namespace o2::gpu
 

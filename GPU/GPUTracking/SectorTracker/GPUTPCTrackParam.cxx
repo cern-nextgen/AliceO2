@@ -879,5 +879,6 @@ GPUd() int32_t GPUTPCTrackParamSkeleton<F>::GetPropagatedYZ(float bz, float x, f
 namespace o2::gpu {
   template class GPUTPCTrackParamSkeleton<wrapper::value>;
   template class GPUTPCTrackParamSkeleton<wrapper::reference>;
+  template class GPUTPCTrackParamSkeleton<wrapper::reference_restrict>;
   //template class GPUTPCTrackParamSkeleton<wrapper::const_reference>;
 } // namespace o2::gpu

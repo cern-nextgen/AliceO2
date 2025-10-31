@@ -186,7 +186,7 @@ class GPUTPCTracker : public GPUProcessor
   GPUhd() GPUglobalref() GPUTPCHitId* TrackletStartHits() { return mTrackletStartHits; }
   GPUhd() GPUglobalref() GPUTPCHitId* TrackletTmpStartHits() const { return mTrackletTmpStartHits; }
 
-  GPUhd() GPUglobalref() GPUTPCTracklet_reference Tracklet(int32_t i) {
+  GPUhd() GPUglobalref() GPUTPCTrackletSkeleton<wrapper::reference_restrict> Tracklet(int32_t i) {
     return {
         mTracklets.mFirstRow[i],
         mTracklets.mLastRow[i],
