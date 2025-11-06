@@ -78,8 +78,6 @@ class GPUTPCTrackletSkeleton
   F<uint32_t> mFirstHit;          // first hit in row hit array
 };
 
-using GPUTPCTracklet = GPUTPCTrackletSkeleton<wrapper::value>;
-
 } // namespace o2::gpu
 
 #endif // GPUTPCTRACKLET_H

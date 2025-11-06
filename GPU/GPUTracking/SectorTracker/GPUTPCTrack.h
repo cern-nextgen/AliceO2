@@ -33,7 +33,9 @@ class GPUTPCTrackSkeleton
 {
  public:
 #if !defined(GPUCA_GPUCODE)
-  GPUTPCTrackSkeleton() : mFirstHitID(0), mNHits(0), mLocalTrackId(-1), mParam() {}
+  GPUTPCTrackSkeleton() : mFirstHitID(0), mNHits(0), mLocalTrackId(-1), mParam()
+  {
+  }
   ~GPUTPCTrackSkeleton() = default;
 #endif //! GPUCA_GPUCODE
 
