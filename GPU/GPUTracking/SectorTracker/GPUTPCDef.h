@@ -31,22 +31,6 @@ typedef uint32_t calink;
 typedef uint32_t cahit;
 #endif
 struct cahit2 { cahit x, y; };
-
-  namespace wrapper
-  {
-    template <class T> using value = T;
-
-    template <class T> using reference = T&;
-    template <class T> using const_reference = const T&;
-    template <class T> using reference_restrict = T& GPUrestrict();
-    template <class T> using const_reference_restrict = const T& GPUrestrict();
-
-    template <class T> using pointer = T*;
-    template <class T> using const_pointer = const T*;
-    template <class T> using pointer_restrict = T* GPUrestrict();
-    template <class T> using const_pointer_restrict = const T* GPUrestrict();
-  } // namespace o2::gpu::wrapper
-
 } // namespace o2::GPU
 
 #endif //GPUDTPCEF_H

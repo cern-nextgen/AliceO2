@@ -17,6 +17,7 @@
 
 #include "GPUChain.h"
 #include "GPUDataTypes.h"
+#include "MemLayout.h"
 #include <atomic>
 #include <mutex>
 #include <functional>
@@ -107,7 +108,7 @@ class GPUChainTracking : public GPUChain
     std::unique_ptr<AliHLTTPCRawCluster[]> rawClusters[NSECTORS];
     std::unique_ptr<o2::tpc::ClusterNative[]> clustersNative;
     std::unique_ptr<o2::tpc::ClusterNativeAccess> clusterNativeAccess;
-    std::unique_ptr<GPUTPCTrackSkeleton<wrapper::value>[]> sectorTracks[NSECTORS];
+    std::unique_ptr<GPUTPCTrackSkeleton<MemLayout::value>[]> sectorTracks[NSECTORS];
     std::unique_ptr<GPUTPCHitId[]> sectorClusters[NSECTORS];
     std::unique_ptr<AliHLTTPCClusterMCLabel[]> mcLabelsTPC;
     std::unique_ptr<GPUTPCMCInfo[]> mcInfosTPC;

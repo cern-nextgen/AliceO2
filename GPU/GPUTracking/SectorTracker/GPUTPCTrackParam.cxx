@@ -16,7 +16,7 @@
 #include "GPUTPCTrackParam.h"
 #include "GPUTPCGeometry.h"
 #include "GPUTPCDef.h"
-// #include "wrapper.h"
+#include "MemLayout.h"
 
 using namespace o2::gpu;
 
@@ -31,7 +31,7 @@ using namespace o2::gpu;
 //
 
 template <template <class> class F>
-GPUd() float GPUTPCTrackParamSkeleton<F>::GetDist2(GPUTPCTrackParamSkeleton<wrapper::const_reference_restrict> t) const
+GPUd() float GPUTPCTrackParamSkeleton<F>::GetDist2(GPUTPCTrackParamSkeleton<MemLayout::const_reference_restrict> t) const
 {
   // get squared distance between tracks
 
@@ -42,7 +42,7 @@ GPUd() float GPUTPCTrackParamSkeleton<F>::GetDist2(GPUTPCTrackParamSkeleton<wrap
 }
 
 template <template <class> class F>
-GPUd() float GPUTPCTrackParamSkeleton<F>::GetDistXZ2(GPUTPCTrackParamSkeleton<wrapper::const_reference_restrict> t) const
+GPUd() float GPUTPCTrackParamSkeleton<F>::GetDistXZ2(GPUTPCTrackParamSkeleton<MemLayout::const_reference_restrict> t) const
 {
   // get squared distance between tracks in X&Z
 
@@ -877,7 +877,7 @@ GPUd() int32_t GPUTPCTrackParamSkeleton<F>::GetPropagatedYZ(float bz, float x, f
 }
 
 namespace o2::gpu {
-  template class GPUTPCTrackParamSkeleton<wrapper::value>;
-  template class GPUTPCTrackParamSkeleton<wrapper::reference>;
-  template class GPUTPCTrackParamSkeleton<wrapper::reference_restrict>;
+  template class GPUTPCTrackParamSkeleton<MemLayout::value>;
+  template class GPUTPCTrackParamSkeleton<MemLayout::reference>;
+  template class GPUTPCTrackParamSkeleton<MemLayout::reference_restrict>;
 } // namespace o2::gpu

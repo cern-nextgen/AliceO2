@@ -17,7 +17,7 @@
 
 #include "GPUTPCBaseTrackParam.h"
 #include "GPUTPCDef.h"
-// #include "wrapper.h"
+#include "MemLayout.h"
 
 namespace o2::gpu
 {
@@ -31,6 +31,7 @@ template <template <class> class F>
 class GPUTPCTrackletSkeleton
 {
  public:
+  MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCTrackletSkeleton, mFirstRow, mLastRow, mParam, mHitWeight, mFirstHit)
 #if !defined(GPUCA_GPUCODE)
   //GPUTPCTrackletSkeleton() : mFirstRow(0), mLastRow(0), mParam(), mHitWeight(0), mFirstHit(0) {};
 #endif //! GPUCA_GPUCODE
@@ -39,12 +40,12 @@ class GPUTPCTrackletSkeleton
   GPUhd() int32_t LastRow() const { return mLastRow; }
   GPUhd() int32_t HitWeight() const { return mHitWeight; }
   GPUhd() uint32_t FirstHit() const { return mFirstHit; }
-  GPUhd() GPUTPCBaseTrackParamSkeleton<wrapper::const_reference> Param() const { return mParam; }
+  GPUhd() GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> Param() const { return mParam; }
 
   GPUhd() void SetFirstRow(int32_t v) { mFirstRow = v; }
   GPUhd() void SetLastRow(int32_t v) { mLastRow = v; }
   GPUhd() void SetFirstHit(uint32_t v) { mFirstHit = v; }
-  GPUhd() void SetParam(GPUTPCBaseTrackParamSkeleton<wrapper::const_reference> v) {
+  GPUhd() void SetParam(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v) {
     mParam.mX = v.mX;
     mParam.mC[0] = v.mC[0];
     mParam.mC[1] = v.mC[1];

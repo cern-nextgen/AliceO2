@@ -26,16 +26,17 @@
 #include "CalibdEdxContainer.h"
 #include "GPUParam.inc"
 #include "GPUCommonMath.h"
+#include "MemLayout.h"
 
 using namespace o2::gpu;
 
-GPUdii() void GPUTPCTrackletConstructor::InitTracklet(GPUTPCTrackParamSkeleton<wrapper::reference_restrict> tParam)
+GPUdii() void GPUTPCTrackletConstructor::InitTracklet(GPUTPCTrackParamSkeleton<MemLayout::reference_restrict> tParam)
 {
   // Initialize Tracklet Parameters using default values
   tParam.InitParam();
 }
 
-GPUd() bool GPUTPCTrackletConstructor::CheckCov(GPUTPCTrackParamSkeleton<wrapper::reference_restrict> tParam)
+GPUd() bool GPUTPCTrackletConstructor::CheckCov(GPUTPCTrackParamSkeleton<MemLayout::reference_restrict> tParam)
 {
   bool ok = 1;
   const float* c = tParam.Cov();
@@ -52,7 +53,7 @@ GPUd() bool GPUTPCTrackletConstructor::CheckCov(GPUTPCTrackParamSkeleton<wrapper
   return (ok);
 }
 
-GPUd() void GPUTPCTrackletConstructor::StoreTracklet(int32_t /*nBlocks*/, int32_t /*nThreads*/, int32_t /*iBlock*/, int32_t /*iThread*/, GPUsharedref() GPUSharedMemory& s, GPUTPCThreadMemory& GPUrestrict() r, GPUconstantref() GPUTPCTracker& GPUrestrict() tracker, GPUTPCTrackParamSkeleton<wrapper::reference_restrict> tParam, calink* rowHits)
+GPUd() void GPUTPCTrackletConstructor::StoreTracklet(int32_t /*nBlocks*/, int32_t /*nThreads*/, int32_t /*iBlock*/, int32_t /*iThread*/, GPUsharedref() GPUSharedMemory& s, GPUTPCThreadMemory& GPUrestrict() r, GPUconstantref() GPUTPCTracker& GPUrestrict() tracker, GPUTPCTrackParamSkeleton<MemLayout::reference_restrict> tParam, calink* rowHits)
 {
   // reconstruction of tracklets, tracklet store step
   const uint32_t nHits = r.mLastRow + 1 - r.mFirstRow;
@@ -78,7 +79,7 @@ GPUd() void GPUTPCTrackletConstructor::StoreTracklet(int32_t /*nBlocks*/, int32_
     return;
   }
 
-  GPUglobalref() GPUTPCTrackletSkeleton<wrapper::reference_restrict> tracklet = tracker.Tracklet(itrout);
+  GPUglobalref() GPUTPCTrackletSkeleton<MemLayout::reference_restrict> tracklet = tracker.Tracklet(itrout);
 
   CADEBUG(printf("    Storing tracklet: %d rows\n", nHits));
 
@@ -103,7 +104,7 @@ GPUd() void GPUTPCTrackletConstructor::StoreTracklet(int32_t /*nBlocks*/, int32_
 }
 
 template <class T>
-GPUdic(2, 1) void GPUTPCTrackletConstructor::UpdateTracklet(int32_t /*nBlocks*/, int32_t /*nThreads*/, int32_t /*iBlock*/, int32_t /*iThread*/, GPUsharedref() T& s, GPUTPCThreadMemory& GPUrestrict() r, GPUconstantref() GPUTPCTracker& GPUrestrict() tracker, GPUTPCTrackParamSkeleton<wrapper::reference_restrict> tParam, int32_t iRow, calink& rowHit, calink* rowHits)
+GPUdic(2, 1) void GPUTPCTrackletConstructor::UpdateTracklet(int32_t /*nBlocks*/, int32_t /*nThreads*/, int32_t /*iBlock*/, int32_t /*iThread*/, GPUsharedref() T& s, GPUTPCThreadMemory& GPUrestrict() r, GPUconstantref() GPUTPCTracker& GPUrestrict() tracker, GPUTPCTrackParamSkeleton<MemLayout::reference_restrict> tParam, int32_t iRow, calink& rowHit, calink* rowHits)
 {
   // reconstruction of tracklets, tracklets update step
   CA_MAKE_SHARED_REF(GPUTPCRow, row, tracker.Row(iRow), s.mRows[iRow]);
@@ -402,7 +403,7 @@ GPUdic(2, 1) void GPUTPCTrackletConstructor::UpdateTracklet(int32_t /*nBlocks*/,
 GPUdic(2, 1) void GPUTPCTrackletConstructor::DoTracklet(GPUconstantref() GPUTPCTracker& GPUrestrict() tracker, GPUsharedref() GPUTPCTrackletConstructor::GPUSharedMemory& s, GPUTPCThreadMemory& GPUrestrict() r)
 {
   int32_t iRow = 0, iRowEnd = GPUCA_ROW_COUNT;
-  GPUTPCTrackParamSkeleton<wrapper::value> tParam;
+  GPUTPCTrackParamSkeleton<MemLayout::value> tParam;
   calink rowHits[GPUCA_ROW_COUNT];
   if (r.mGo) {
     GPUTPCHitId id = tracker.TrackletStartHits()[r.mISH];
@@ -490,7 +491,7 @@ GPUdii() void GPUTPCTrackletConstructor::Thread(int32_t nBlocks, int32_t nThread
 }
 
 template <> // FIXME: GPUgeneric() needed to make the clang spirv output link correctly
-GPUd() int32_t GPUTPCTrackletConstructor::GPUTPCTrackletConstructorExtrapolationTracking<GPUgeneric() GPUTPCExtrapolationTracking::GPUSharedMemory>(GPUconstantref() GPUTPCTracker& GPUrestrict() tracker, GPUsharedref() GPUTPCExtrapolationTracking::GPUSharedMemory& sMem, GPUTPCTrackParamSkeleton<wrapper::reference_restrict> tParam, int32_t row, int32_t increment, int32_t iTracklet, calink* rowHits)
+GPUd() int32_t GPUTPCTrackletConstructor::GPUTPCTrackletConstructorExtrapolationTracking<GPUgeneric() GPUTPCExtrapolationTracking::GPUSharedMemory>(GPUconstantref() GPUTPCTracker& GPUrestrict() tracker, GPUsharedref() GPUTPCExtrapolationTracking::GPUSharedMemory& sMem, GPUTPCTrackParamSkeleton<MemLayout::reference_restrict> tParam, int32_t row, int32_t increment, int32_t iTracklet, calink* rowHits)
 {
   GPUTPCThreadMemory rMem;
   rMem.mISH = iTracklet;

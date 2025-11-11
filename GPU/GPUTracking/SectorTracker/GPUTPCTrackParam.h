@@ -18,58 +18,10 @@
 #include "GPUTPCBaseTrackParam.h"
 #include "GPUTPCDef.h"
 #include "GPUCommonMath.h"
-// #include "wrapper.h"
+#include "MemLayout.h"
 
 namespace o2::gpu
 {
-
-template <template <template <class> class> class S, template <class> class F>
-struct CRTP { };
-
-template <template <template <class> class> class S>
-struct CRTP<S, wrapper::value> {
-  using Derived = S<wrapper::value>;
-
-  constexpr operator S<wrapper::reference>() { return {{}, static_cast<Derived*>(this)->mParam, static_cast<Derived*>(this)->mSignCosPhi, static_cast<Derived*>(this)->mChi2, static_cast<Derived*>(this)->mNDF}; };
-  constexpr operator S<wrapper::reference_restrict>() { return {{}, static_cast<Derived*>(this)->mParam, static_cast<Derived*>(this)->mSignCosPhi, static_cast<Derived*>(this)->mChi2, static_cast<Derived*>(this)->mNDF}; };
-
-  constexpr operator S<wrapper::const_reference>() const { return {{}, static_cast<const Derived*>(this)->mParam, static_cast<const Derived*>(this)->mSignCosPhi, static_cast<const Derived*>(this)->mChi2, static_cast<const Derived*>(this)->mNDF}; };
-  constexpr operator S<wrapper::const_reference_restrict>() const { return {{}, static_cast<const Derived*>(this)->mParam, static_cast<const Derived*>(this)->mSignCosPhi, static_cast<const Derived*>(this)->mChi2, static_cast<const Derived*>(this)->mNDF}; };
-};
-
-template <template <template <class> class> class S>
-struct CRTP<S, wrapper::reference> {
-  using Derived = S<wrapper::reference>;
-
-  constexpr operator S<wrapper::reference_restrict>() { return {{}, static_cast<Derived*>(this)->mParam, static_cast<Derived*>(this)->mSignCosPhi, static_cast<Derived*>(this)->mChi2, static_cast<Derived*>(this)->mNDF}; };
-  constexpr operator S<wrapper::const_reference>() const { return {{}, static_cast<const Derived*>(this)->mParam, static_cast<const Derived*>(this)->mSignCosPhi, static_cast<const Derived*>(this)->mChi2, static_cast<const Derived*>(this)->mNDF}; };
-
-  constexpr operator S<wrapper::const_reference_restrict>() const { return {{}, static_cast<const Derived*>(this)->mParam, static_cast<const Derived*>(this)->mSignCosPhi, static_cast<const Derived*>(this)->mChi2, static_cast<const Derived*>(this)->mNDF}; };
-};
-
-template <template <template <class> class> class S>
-struct CRTP<S, wrapper::reference_restrict> {
-  using Derived = S<wrapper::reference_restrict>;
-
-  constexpr operator S<wrapper::reference>() { return {{}, static_cast<Derived*>(this)->mParam, static_cast<Derived*>(this)->mSignCosPhi, static_cast<Derived*>(this)->mChi2, static_cast<Derived*>(this)->mNDF}; };
-
-  constexpr operator S<wrapper::const_reference>() const { return {{}, static_cast<const Derived*>(this)->mParam, static_cast<const Derived*>(this)->mSignCosPhi, static_cast<const Derived*>(this)->mChi2, static_cast<const Derived*>(this)->mNDF}; };
-  constexpr operator S<wrapper::const_reference_restrict>() const { return {{}, static_cast<const Derived*>(this)->mParam, static_cast<const Derived*>(this)->mSignCosPhi, static_cast<const Derived*>(this)->mChi2, static_cast<const Derived*>(this)->mNDF}; };
-};
-
-template <template <template <class> class> class S>
-struct CRTP<S, wrapper::const_reference> {
-  using Derived = S<wrapper::const_reference>;
-
-  constexpr operator S<wrapper::const_reference_restrict>() const { return {{}, static_cast<const Derived*>(this)->mParam, static_cast<const Derived*>(this)->mSignCosPhi, static_cast<const Derived*>(this)->mChi2, static_cast<const Derived*>(this)->mNDF}; };
-};
-
-template <template <template <class> class> class S>
-struct CRTP<S, wrapper::const_reference_restrict> {
-  using Derived = S<wrapper::const_reference_restrict>;
-  
-  constexpr operator S<wrapper::const_reference>() const { return {{}, static_cast<const Derived*>(this)->mParam, static_cast<const Derived*>(this)->mSignCosPhi, static_cast<const Derived*>(this)->mChi2, static_cast<const Derived*>(this)->mNDF}; };
-};
 
 class GPUTPCTrackLinearisation;
 
@@ -81,16 +33,17 @@ class GPUTPCTrackLinearisation;
  *
  */
 template <template <class> class F>
-class GPUTPCTrackParamSkeleton : public CRTP<GPUTPCTrackParamSkeleton, F>
+class GPUTPCTrackParamSkeleton
 {
  public:
+  MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCTrackParamSkeleton, mParam, mSignCosPhi, mChi2, mNDF)
 
   struct GPUTPCTrackFitParam {
     float bethe, e, theta2, EP2, sigmadE2, k22, k33, k43, k44; // parameters
   };
 
-  GPUd() GPUTPCBaseTrackParamSkeleton<wrapper::const_reference> GetParam() const { return mParam; }
-  GPUd() void SetParam(GPUTPCBaseTrackParamSkeleton<wrapper::const_reference> v);
+  GPUd() GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> GetParam() const { return mParam; }
+  GPUd() void SetParam(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v);
   GPUd() void InitParam();
 
   GPUd() float X() const { return mParam.X(); }
@@ -144,8 +97,8 @@ class GPUTPCTrackParamSkeleton : public CRTP<GPUTPCTrackParamSkeleton, F>
   GPUd() void SetChi2(float v) { mChi2 = v; }
   GPUd() void SetNDF(int32_t v) { mNDF = v; }
 
-  GPUd() float GetDist2(GPUTPCTrackParamSkeleton<wrapper::const_reference_restrict> t) const;
-  GPUd() float GetDistXZ2(GPUTPCTrackParamSkeleton<wrapper::const_reference_restrict> t) const;
+  GPUd() float GetDist2(GPUTPCTrackParamSkeleton<MemLayout::const_reference_restrict> t) const;
+  GPUd() float GetDistXZ2(GPUTPCTrackParamSkeleton<MemLayout::const_reference_restrict> t) const;
 
   GPUd() float GetS(float x, float y, float Bz) const;
 
@@ -206,7 +159,7 @@ class GPUTPCTrackParamSkeleton : public CRTP<GPUTPCTrackParamSkeleton, F>
 };
 
 template <template <class> class F>
-GPUd() void GPUTPCTrackParamSkeleton<F>::SetParam(GPUTPCBaseTrackParamSkeleton<wrapper::const_reference> v) {
+GPUd() void GPUTPCTrackParamSkeleton<F>::SetParam(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v) {
   mParam.mX = v.mX;
   mParam.mC[0] = v.mC[0];
   mParam.mC[1] = v.mC[1];

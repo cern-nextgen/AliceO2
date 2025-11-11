@@ -17,6 +17,7 @@
 #include "GPUTPCHitId.h"
 #include "GPUTPCTrack.h"
 #include "GPULogging.h"
+#include "MemLayout.h"
 
 #include <iostream>
 #include <cstring>
@@ -101,7 +102,7 @@ void GPUTPCTracker::DumpTrackHits(std::ostream& out)
     if (Tracks()[j].NHits() == 0) {
       continue;
     }
-    GPUTPCBaseTrackParamSkeleton<wrapper::const_reference> p = Tracks()[j].Param();
+    GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> p = Tracks()[j].Param();
     out << "  " << j << " x " << p.GetX() << " offset " << p.GetZOffset() << " y " << p.GetY() << " z " << p.GetZ() << " snp " << p.GetSinPhi() << " tgl " << p.GetDzDs() << " qpt " << p.GetQPt() << " - ";
     for (int32_t k = 0; k < 15; k++) {
       out << p.GetCov(k) << " ";

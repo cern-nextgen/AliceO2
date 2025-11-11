@@ -17,7 +17,7 @@
 
 #include "GPUTPCBaseTrackParam.h"
 #include "GPUTPCDef.h"
-// #include "wrapper.h"
+#include "MemLayout.h"
 
 namespace o2::gpu
 {
@@ -32,6 +32,7 @@ template <template <class> class F>
 class GPUTPCTrackSkeleton
 {
  public:
+  MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCTrackSkeleton, mFirstHitID, mNHits, mLocalTrackId, mParam)
 #if !defined(GPUCA_GPUCODE)
   GPUTPCTrackSkeleton() : mFirstHitID(0), mNHits(0), mLocalTrackId(-1), mParam()
   {
@@ -42,12 +43,12 @@ class GPUTPCTrackSkeleton
   GPUhd() int32_t NHits() const { return mNHits; }
   GPUhd() int32_t LocalTrackId() const { return mLocalTrackId; }
   GPUhd() int32_t FirstHitID() const { return mFirstHitID; }
-  GPUhd() GPUTPCBaseTrackParamSkeleton<wrapper::const_reference> Param() const { return mParam; }
+  GPUhd() GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> Param() const { return mParam; }
 
   GPUhd() void SetNHits(int32_t v) { mNHits = v; }
   GPUhd() void SetLocalTrackId(int32_t v) { mLocalTrackId = v; }
   GPUhd() void SetFirstHitID(int32_t v) { mFirstHitID = v; }
-  GPUhd() void SetParam(GPUTPCBaseTrackParamSkeleton<wrapper::const_reference> v) {
+  GPUhd() void SetParam(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v) {
     mParam.mX = v.mX;
     mParam.mC[0] = v.mC[0];
     mParam.mC[1] = v.mC[1];
@@ -77,11 +78,9 @@ class GPUTPCTrackSkeleton
   F<int32_t> mNHits;              // number of track cells
   F<int32_t> mLocalTrackId;       // Id of local track this extrapolated track belongs to, index of this track itself if it is a local track
   GPUTPCBaseTrackParamSkeleton<F> mParam; // track parameters
-
- private:
 };
 
-using GPUTPCTrack = GPUTPCTrackSkeleton<wrapper::value>;
+using GPUTPCTrack = GPUTPCTrackSkeleton<MemLayout::value>;
 
 } // namespace o2::gpu
 

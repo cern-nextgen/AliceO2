@@ -16,11 +16,10 @@
 #define GPUTPCTRACKLINEARISATION_H
 
 #include "GPUTPCTrackParam.h"
+#include "MemLayout.h"
 
 namespace o2::gpu
 {
-
-using GPUTPCTrackParam = GPUTPCTrackParamSkeleton<wrapper::value>;
 /**
  * @class GPUTPCTrackLinearisation
  *
@@ -41,7 +40,7 @@ class GPUTPCTrackLinearisation
   GPUTPCTrackLinearisation() : mSinPhi(0), mCosPhi(1), mDzDs(0), mQPt(0) {}
   GPUTPCTrackLinearisation(float SinPhi1, float CosPhi1, float DzDs1, float QPt1) : mSinPhi(SinPhi1), mCosPhi(CosPhi1), mDzDs(DzDs1), mQPt(QPt1) {}
 
-  GPUd() GPUTPCTrackLinearisation(GPUTPCTrackParamSkeleton<wrapper::const_reference> t);
+  GPUd() GPUTPCTrackLinearisation(GPUTPCTrackParamSkeleton<MemLayout::const_reference> t);
 
   GPUd() void Set(float SinPhi1, float CosPhi1, float DzDs1, float QPt1);
 
@@ -67,7 +66,7 @@ class GPUTPCTrackLinearisation
   float mQPt;    // QPt
 };
 
-GPUdi() GPUTPCTrackLinearisation::GPUTPCTrackLinearisation(GPUTPCTrackParamSkeleton<wrapper::const_reference> t) : mSinPhi(t.SinPhi()), mCosPhi(0), mDzDs(t.DzDs()), mQPt(t.QPt())
+GPUdi() GPUTPCTrackLinearisation::GPUTPCTrackLinearisation(GPUTPCTrackParamSkeleton<MemLayout::const_reference> t) : mSinPhi(t.SinPhi()), mCosPhi(0), mDzDs(t.DzDs()), mQPt(t.QPt())
 {
   if (mSinPhi > GPUCA_MAX_SIN_PHI) {
     mSinPhi = GPUCA_MAX_SIN_PHI;

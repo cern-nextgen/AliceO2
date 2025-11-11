@@ -26,6 +26,7 @@
 #include "GPUTPCTrackParam.h"
 #include "GPUTPCTracklet.h"
 #include "GPUProcessor.h"
+#include "MemLayout.h"
 
 namespace o2::gpu
 {
@@ -80,13 +81,13 @@ class GPUTPCTracker : public GPUProcessor
     return (mCommonMem);
   }
 
-  GPUdi() static void GetErrors2Seeding(const GPUParam& param, char sector, int32_t iRow, GPUTPCTrackParamSkeleton<wrapper::const_reference> t, float time, float& ErrY2, float& ErrZ2)
+  GPUdi() static void GetErrors2Seeding(const GPUParam& param, char sector, int32_t iRow, GPUTPCTrackParamSkeleton<MemLayout::const_reference> t, float time, float& ErrY2, float& ErrZ2)
   {
     // param.GetClusterErrors2(sector, iRow, param.GetContinuousTracking() != 0. ? 125.f : t.Z(), t.SinPhi(), t.DzDs(), time, 0.f, 0.f, ErrY2, ErrZ2);
     param.GetClusterErrorsSeeding2(sector, iRow, param.par.continuousTracking != 0.f ? 125.f : t.Z(), t.SinPhi(), t.DzDs(), time, ErrY2, ErrZ2);
   }
 
-  GPUdi() void GetErrors2Seeding(int32_t iRow, GPUTPCTrackParamSkeleton<wrapper::const_reference> t, float time, float& ErrY2, float& ErrZ2) const
+  GPUdi() void GetErrors2Seeding(int32_t iRow, GPUTPCTrackParamSkeleton<MemLayout::const_reference> t, float time, float& ErrY2, float& ErrZ2) const
   {
     // Param().GetClusterErrors2(mISector, iRow, Param().GetContinuousTracking() != 0. ? 125.f : t.Z(), t.SinPhi(), t.DzDs(), time, 0.f, 0.f, ErrY2, ErrZ2);
     Param().GetClusterErrorsSeeding2(mISector, iRow, Param().par.continuousTracking != 0.f ? 125.f : t.Z(), t.SinPhi(), t.DzDs(), time, ErrY2, ErrZ2);
@@ -186,21 +187,21 @@ class GPUTPCTracker : public GPUProcessor
   GPUhd() GPUglobalref() GPUTPCHitId* TrackletStartHits() { return mTrackletStartHits; }
   GPUhd() GPUglobalref() GPUTPCHitId* TrackletTmpStartHits() const { return mTrackletTmpStartHits; }
 
-  GPUhd() GPUglobalref() GPUTPCTrackletSkeleton<wrapper::reference_restrict> Tracklet(int32_t i) {
+  GPUhd() GPUglobalref() GPUTPCTrackletSkeleton<MemLayout::reference_restrict> Tracklet(int32_t i) {
     return {
         mTracklets.mFirstRow[i],
         mTracklets.mLastRow[i],
-        {{}, mTracklets.mParam.mX[i], mTracklets.mParam.mC[i], mTracklets.mParam.mZOffset[i], mTracklets.mParam.mP[i]},
+        {mTracklets.mParam.mX[i], mTracklets.mParam.mC[i], mTracklets.mParam.mZOffset[i], mTracklets.mParam.mP[i]},
         mTracklets.mHitWeight[i],
         mTracklets.mFirstHit[i]
     };
   }
 
-  GPUhd() GPUglobalref() GPUTPCTrackletSkeleton<wrapper::pointer> Tracklets() const { return mTracklets; }
+  GPUhd() GPUglobalref() GPUTPCTrackletSkeleton<MemLayout::pointer> Tracklets() const { return mTracklets; }
   GPUhd() GPUglobalref() calink* TrackletRowHits() const { return mTrackletRowHits; }
 
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NTracks() const { return &mCommonMem->nTracks; }
-  GPUhd() GPUglobalref() GPUTPCTrackSkeleton<wrapper::value>* Tracks() const { return mTracks; }
+  GPUhd() GPUglobalref() GPUTPCTrackSkeleton<MemLayout::value>* Tracks() const { return mTracks; }
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NTrackHits() const { return &mCommonMem->nTrackHits; }
   GPUhd() GPUglobalref() GPUTPCHitId* TrackHits() const { return mTrackHits; }
 
@@ -250,9 +251,9 @@ class GPUTPCTracker : public GPUProcessor
   // event
   GPUglobalref() commonMemoryStruct* mCommonMem = nullptr;  // common event memory
   GPUglobalref() GPUTPCHitId* mTrackletStartHits = nullptr; // start hits for the tracklets
-  GPUglobalref() GPUTPCTrackletSkeleton<wrapper::pointer> mTracklets; // tracklets
+  GPUglobalref() GPUTPCTrackletSkeleton<MemLayout::pointer> mTracklets; // tracklets
   GPUglobalref() calink* mTrackletRowHits = nullptr;        // Hits for each Tracklet in each row
-  GPUglobalref() GPUTPCTrackSkeleton<wrapper::value>* mTracks = nullptr;            // reconstructed tracks
+  GPUglobalref() GPUTPCTrackSkeleton<MemLayout::value>* mTracks = nullptr;            // reconstructed tracks
   GPUglobalref() GPUTPCHitId* mTrackHits = nullptr;         // array of track hit numbers
 
   static int32_t StarthitSortComparison(const void* a, const void* b);

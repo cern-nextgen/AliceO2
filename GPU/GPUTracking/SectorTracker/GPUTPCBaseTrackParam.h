@@ -16,58 +16,10 @@
 #define GPUTPCBASETRACKPARAM_H
 
 #include "GPUTPCDef.h"
-// #include "wrapper.h"
+#include "MemLayout.h"
 
 namespace o2::gpu
 {
-
-template <template <template <class> class> class S, template <class> class F>
-struct BaseCRTP { };
-
-template <template <template <class> class> class S>
-struct BaseCRTP<S, wrapper::value> {
-  using Derived = S<wrapper::value>;
-
-  constexpr operator S<wrapper::reference>() { return {{}, static_cast<Derived*>(this)->mX, static_cast<Derived*>(this)->mC, static_cast<Derived*>(this)->mZOffset, static_cast<Derived*>(this)->mP}; };
-  constexpr operator S<wrapper::reference_restrict>() { return {{}, static_cast<Derived*>(this)->mX, static_cast<Derived*>(this)->mC, static_cast<Derived*>(this)->mZOffset, static_cast<Derived*>(this)->mP}; };
-  
-  constexpr operator S<wrapper::const_reference>() const { return {{}, static_cast<const Derived*>(this)->mX, static_cast<const Derived*>(this)->mC, static_cast<const Derived*>(this)->mZOffset, static_cast<const Derived*>(this)->mP}; };
-  constexpr operator S<wrapper::const_reference_restrict>() const { return {{}, static_cast<const Derived*>(this)->mX, static_cast<const Derived*>(this)->mC, static_cast<const Derived*>(this)->mZOffset, static_cast<const Derived*>(this)->mP}; };
-};
-
-template <template <template <class> class> class S>
-struct BaseCRTP<S, wrapper::reference> {
-  using Derived = S<wrapper::reference>;
-
-  constexpr operator S<wrapper::reference_restrict>() { return {{}, static_cast<Derived*>(this)->mX, static_cast<Derived*>(this)->mC, static_cast<Derived*>(this)->mZOffset, static_cast<Derived*>(this)->mP}; };
-
-  constexpr operator S<wrapper::const_reference>() const { return {{}, static_cast<const Derived*>(this)->mX, static_cast<const Derived*>(this)->mC, static_cast<const Derived*>(this)->mZOffset, static_cast<const Derived*>(this)->mP}; };
-  constexpr operator S<wrapper::const_reference_restrict>() const { return {{}, static_cast<const Derived*>(this)->mX, static_cast<const Derived*>(this)->mC, static_cast<const Derived*>(this)->mZOffset, static_cast<const Derived*>(this)->mP}; };
-};
-
-template <template <template <class> class> class S>
-struct BaseCRTP<S, wrapper::reference_restrict> {
-  using Derived = S<wrapper::reference_restrict>;
-
-  constexpr operator S<wrapper::reference>() { return {{}, static_cast<Derived*>(this)->mX, static_cast<Derived*>(this)->mC, static_cast<Derived*>(this)->mZOffset, static_cast<Derived*>(this)->mP}; };
-
-  constexpr operator S<wrapper::const_reference>() const { return {{}, static_cast<const Derived*>(this)->mX, static_cast<const Derived*>(this)->mC, static_cast<const Derived*>(this)->mZOffset, static_cast<const Derived*>(this)->mP}; };
-  constexpr operator S<wrapper::const_reference_restrict>() const { return {{}, static_cast<const Derived*>(this)->mX, static_cast<const Derived*>(this)->mC, static_cast<const Derived*>(this)->mZOffset, static_cast<const Derived*>(this)->mP}; };
-};
-
-template <template <template <class> class> class S>
-struct BaseCRTP<S, wrapper::const_reference> {
-  using Derived = S<wrapper::const_reference>;
-
-  constexpr operator S<wrapper::const_reference_restrict>() const { return {{}, static_cast<const Derived*>(this)->mX, static_cast<const Derived*>(this)->mC, static_cast<const Derived*>(this)->mZOffset, static_cast<const Derived*>(this)->mP}; };
-};
-
-template <template <template <class> class> class S>
-struct BaseCRTP<S, wrapper::const_reference_restrict> {
-  using Derived = S<wrapper::const_reference_restrict>;
-
-  constexpr operator S<wrapper::const_reference>() const { return {{}, static_cast<const Derived*>(this)->mX, static_cast<const Derived*>(this)->mC, static_cast<const Derived*>(this)->mZOffset, static_cast<const Derived*>(this)->mP}; };
-};
 
 /**
  * @class GPUTPCBaseTrackParam
@@ -77,7 +29,9 @@ struct BaseCRTP<S, wrapper::const_reference_restrict> {
  * This class is used for transfer between tracker and merger and does not contain the covariance matrice
  */
 template <template <class> class F>
-struct GPUTPCBaseTrackParamSkeleton : BaseCRTP<GPUTPCBaseTrackParamSkeleton, F> {
+struct GPUTPCBaseTrackParamSkeleton {
+  MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCBaseTrackParamSkeleton, mX, mC, mZOffset, mP)
+  
   GPUd() float X() const { return mX; }
   GPUd() float Y() const { return mP[0]; }
   GPUd() float Z() const { return mP[1]; }
@@ -128,7 +82,7 @@ struct GPUTPCBaseTrackParamSkeleton : BaseCRTP<GPUTPCBaseTrackParamSkeleton, F> 
   F<float[5]> mP;    // 'active' track parameters: Y, Z, SinPhi, DzDs, q/Pt
 };
 
-using GPUTPCBaseTrackParam = GPUTPCBaseTrackParamSkeleton<wrapper::value>;
+using GPUTPCBaseTrackParam = GPUTPCBaseTrackParamSkeleton<MemLayout::value>;
 
 } // namespace o2::gpu
 
