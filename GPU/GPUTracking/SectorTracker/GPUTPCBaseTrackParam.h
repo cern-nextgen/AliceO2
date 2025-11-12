@@ -31,7 +31,32 @@ namespace o2::gpu
 template <template <class> class F>
 struct GPUTPCBaseTrackParamSkeleton {
   MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCBaseTrackParamSkeleton, mX, mC, mZOffset, mP)
-  
+
+  GPUhd() void ElementwiseAssignment(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v) {
+    mX = v.mX;
+    mC[0] = v.mC[0];
+    mC[1] = v.mC[1];
+    mC[2] = v.mC[2];
+    mC[3] = v.mC[3];
+    mC[4] = v.mC[4];
+    mC[5] = v.mC[5];
+    mC[6] = v.mC[6];
+    mC[7] = v.mC[7];
+    mC[8] = v.mC[8];
+    mC[9] = v.mC[9];
+    mC[10] = v.mC[10];
+    mC[11] = v.mC[11];
+    mC[12] = v.mC[12];
+    mC[13] = v.mC[13];
+    mC[14] = v.mC[14];
+    mZOffset = v.mZOffset;
+    mP[0] = v.mP[0];
+    mP[1] = v.mP[1];
+    mP[2] = v.mP[2];
+    mP[3] = v.mP[3];
+    mP[4] = v.mP[4];
+  }
+
   GPUd() float X() const { return mX; }
   GPUd() float Y() const { return mP[0]; }
   GPUd() float Z() const { return mP[1]; }

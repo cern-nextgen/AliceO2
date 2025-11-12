@@ -97,6 +97,52 @@ struct wrapper<S, F, Flag::soa> : public S<F> {
 template <template <template <class> class> class S, template <class> class F>
 using SoA = wrapper<S, F, Flag::soa>;
 
+namespace type_traits {
+
+template<bool B, class T = void>
+struct enable_if {};
+ 
+template<class T>
+struct enable_if<true, T> { typedef T type; };
+
+template< bool B, class T = void >
+using enable_if_t = typename enable_if<B, T>::type;
+
+struct false_type {
+    static constexpr bool value = false;
+    constexpr operator bool() const noexcept { return value; }
+};
+
+struct true_type {
+    static constexpr bool value = true;
+    constexpr operator bool() const noexcept { return value; }
+};
+
+template<class T, class U>
+struct is_same : false_type {};
+
+template<class T>
+struct is_same<T, T> : true_type {};
+
+}  // namespace type_traits
+
+template<class T_left, class T_right>
+using enable_if_equal = type_traits::enable_if_t<type_traits::is_same<T_left, T_right>::value>;
+
+template<class T_left, class T_right>
+using disable_if_equal = type_traits::enable_if_t<!type_traits::is_same<T_left, T_right>::value>;
+
+#if __cplusplus >= 202002L
+template<template <class> class F_left, template <class> class F_right>
+concept is_same = type_traits::is_same<F_left<int>, F_right<int>>::value;
+template<template <class> class F>
+concept is_value = is_same<F, value>;
+template<template <class> class F>
+concept is_reference = is_same<F, reference>;
+template<template <class> class F>
+concept is_const_reference = is_same<F, const_reference>;
+#endif
+
 }  // namespace MemLayout
 
 #endif // MEMLAYOUT_H
