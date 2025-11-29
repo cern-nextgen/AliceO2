@@ -36,7 +36,7 @@ template <template <class> class F>
 class GPUTPCTrackParamSkeleton
 {
  public:
-  MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCTrackParamSkeleton, mParam, mSignCosPhi, mChi2, mNDF)
+  MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCTrackParamSkeleton, F, mParam, mSignCosPhi, mChi2, mNDF)
 
   struct GPUTPCTrackFitParam {
     float bethe, e, theta2, EP2, sigmadE2, k22, k33, k43, k44; // parameters
@@ -188,7 +188,6 @@ GPUd() void GPUTPCTrackParamSkeleton<F>::InitParam()
   SetCov(14, 1000.f);
   SetZOffset(0);
 }
-
 } // namespace o2::gpu
 
 #endif // GPUTPCTRACKPARAM_H

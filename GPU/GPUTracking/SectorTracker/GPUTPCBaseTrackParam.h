@@ -30,7 +30,7 @@ namespace o2::gpu
  */
 template <template <class> class F>
 struct GPUTPCBaseTrackParamSkeleton {
-  MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCBaseTrackParamSkeleton, mX, mC, mZOffset, mP)
+  MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCBaseTrackParamSkeleton, F, mX, mC, mZOffset, mP)
 
   GPUhd() void ElementwiseAssignment(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v) {
     mX = v.mX;

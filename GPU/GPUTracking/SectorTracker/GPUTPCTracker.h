@@ -187,15 +187,7 @@ class GPUTPCTracker : public GPUProcessor
   GPUhd() GPUglobalref() GPUTPCHitId* TrackletStartHits() { return mTrackletStartHits; }
   GPUhd() GPUglobalref() GPUTPCHitId* TrackletTmpStartHits() const { return mTrackletTmpStartHits; }
 
-  GPUhd() GPUglobalref() GPUTPCTrackletSkeleton<MemLayout::reference_restrict> Tracklet(int32_t i) {
-    return {
-        mTracklets.mFirstRow[i],
-        mTracklets.mLastRow[i],
-        {mTracklets.mParam.mX[i], mTracklets.mParam.mC[i], mTracklets.mParam.mZOffset[i], mTracklets.mParam.mP[i]},
-        mTracklets.mHitWeight[i],
-        mTracklets.mFirstHit[i]
-    };
-  }
+  GPUhd() GPUglobalref() GPUTPCTrackletSkeleton<MemLayout::reference_restrict> Tracklet(int32_t i) { return mTracklets[i]; }
 
   GPUhd() GPUglobalref() GPUTPCTrackletSkeleton<MemLayout::pointer> Tracklets() const { return mTracklets; }
   GPUhd() GPUglobalref() calink* TrackletRowHits() const { return mTrackletRowHits; }
@@ -253,7 +245,7 @@ class GPUTPCTracker : public GPUProcessor
   GPUglobalref() GPUTPCHitId* mTrackletStartHits = nullptr; // start hits for the tracklets
   GPUglobalref() GPUTPCTrackletSkeleton<MemLayout::pointer> mTracklets; // tracklets
   GPUglobalref() calink* mTrackletRowHits = nullptr;        // Hits for each Tracklet in each row
-  GPUglobalref() GPUTPCTrackSkeleton<MemLayout::value>* mTracks = nullptr;            // reconstructed tracks
+  GPUglobalref() GPUTPCTrackSkeleton<MemLayout::value>* mTracks = nullptr; // reconstructed tracks
   GPUglobalref() GPUTPCHitId* mTrackHits = nullptr;         // array of track hit numbers
 
   static int32_t StarthitSortComparison(const void* a, const void* b);

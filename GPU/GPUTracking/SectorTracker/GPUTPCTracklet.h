@@ -31,7 +31,7 @@ template <template <class> class F>
 class GPUTPCTrackletSkeleton
 {
  public:
-  MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCTrackletSkeleton, mFirstRow, mLastRow, mParam, mHitWeight, mFirstHit)
+  MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCTrackletSkeleton, F, mFirstRow, mLastRow, mParam, mHitWeight, mFirstHit)
 #if !defined(GPUCA_GPUCODE)
   //GPUTPCTrackletSkeleton() : mFirstRow(0), mLastRow(0), mParam(), mHitWeight(0), mFirstHit(0) {};
 #endif //! GPUCA_GPUCODE

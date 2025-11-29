@@ -32,11 +32,15 @@ template <template <class> class F>
 class GPUTPCTrackSkeleton
 {
  public:
-  MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCTrackSkeleton, mFirstHitID, mNHits, mLocalTrackId, mParam)
+  MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCTrackSkeleton, F, mFirstHitID, mNHits, mLocalTrackId, mParam)
 #if !defined(GPUCA_GPUCODE)
-  GPUTPCTrackSkeleton() : mFirstHitID(0), mNHits(0), mLocalTrackId(-1), mParam()
-  {
-  }
+  constexpr GPUTPCTrackSkeleton() : mFirstHitID(0), mNHits(0), mLocalTrackId(-1), mParam() { }
+  constexpr GPUTPCTrackSkeleton(
+    F<int32_t> FirstHitID,
+    F<int32_t> NHits,
+    F<int32_t> LocalTrackId,
+    GPUTPCBaseTrackParamSkeleton<F> Param
+  ) : mFirstHitID(FirstHitID), mNHits(NHits), mLocalTrackId(LocalTrackId), mParam(Param) { }
   ~GPUTPCTrackSkeleton() = default;
 #endif //! GPUCA_GPUCODE
 
@@ -50,7 +54,7 @@ class GPUTPCTrackSkeleton
   GPUhd() void SetFirstHitID(int32_t v) { mFirstHitID = v; }
   GPUhd() void SetParam(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v) { mParam.ElementwiseAssignment(v); }
 
- private:
+ //private:
   F<int32_t> mFirstHitID;         // index of the first track cell in the track->cell pointer array
   F<int32_t> mNHits;              // number of track cells
   F<int32_t> mLocalTrackId;       // Id of local track this extrapolated track belongs to, index of this track itself if it is a local track

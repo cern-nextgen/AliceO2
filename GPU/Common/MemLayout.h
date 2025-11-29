@@ -3,17 +3,6 @@
 
 #include "GPUCommonDefAPI.h"
 
-#define EXPAND(...) __VA_ARGS__
-#define MEMLAYOUT_MEMBERFUNCTIONS(STRUCT_NAME, ...)                                                             \
-    template <template <class> class F_out>                                                                     \
-    constexpr operator STRUCT_NAME<F_out>() { return { EXPAND(__VA_ARGS__) }; }                                 \
-    template <template <class> class F_out>                                                                     \
-    constexpr operator STRUCT_NAME<F_out>() const { return { EXPAND(__VA_ARGS__) }; }                           \
-    template <template <class> class F_out, class FunctionObject>                                               \
-    constexpr STRUCT_NAME<F_out> invoke_on_members(FunctionObject f) { return {f(EXPAND(__VA_ARGS__))}; }       \
-    template <template <class> class F_out, class FunctionObject>                                               \
-    constexpr STRUCT_NAME<F_out> invoke_on_members(FunctionObject f) const { return {f(EXPAND(__VA_ARGS__))}; } \
-
 namespace MemLayout {
 
 using size_t = decltype(sizeof 0);
@@ -62,6 +51,8 @@ using AoS = wrapper<S, F, Flag::aos>;
 // The types S<value>, S<reference>, and S<const_reference> need to be aggregate constructible
 template <template <template <class> class> class S, template <class> class F>
 struct wrapper<S, F, Flag::soa> : public S<F> {
+    using Base = S<F>;
+
     template <template <class> class F_out>
     constexpr operator wrapper<S, F_out, Flag::soa>() { return {*this}; };
 
@@ -69,29 +60,12 @@ struct wrapper<S, F, Flag::soa> : public S<F> {
     constexpr operator wrapper<S, F_out, Flag::soa>() const { return {*this}; };
 
     constexpr S<reference> operator[](size_t i) {
-        return this->template invoke_on_members<reference>(memberwise<reference, evaluate_at>{{i}});
+        return static_cast<Base*>(this)->operator[](i);
     }
 
     constexpr S<const_reference> operator[](size_t i) const {
-        return this->template invoke_on_members<reference>(memberwise<const_reference, evaluate_at>{{i}});
+        return static_cast<const Base*>(this)->operator[](i);
     }
-
-  private:
-
-    struct evaluate_at {
-        size_t i;
-        template <template <class> class F_in, class T>
-        constexpr reference<T> operator()(F_in<T> & t) const { return t[i]; }
-        template <template <class> class F_in, class T>
-        constexpr const_reference<T> operator()(const F_in<T> & t) const { return t[i]; }
-    };
-
-    template <template <class> class F_out, class FunctionObject>
-    struct memberwise {
-        FunctionObject f;
-        template <class... Args>  // HACK: NVCC cannot deduce template parameters of f.operator() like so: { f(args)... }
-        constexpr S<F_out> operator()(Args&... args) const { return {f.template operator()<F>(args)...}; }
-    };
 };
 
 template <template <template <class> class> class S, template <class> class F>
@@ -132,6 +106,14 @@ using enable_if_equal = type_traits::enable_if_t<type_traits::is_same<T_left, T_
 template<class T_left, class T_right>
 using disable_if_equal = type_traits::enable_if_t<!type_traits::is_same<T_left, T_right>::value>;
 
+template<class T>
+using disable_if_scalar = type_traits::enable_if_t<
+    !type_traits::is_same<T, value<int>>::value &&
+    !type_traits::is_same<T, reference<int>>::value &&
+    !type_traits::is_same<T, reference_restrict<int>>::value &&
+    !type_traits::is_same<T, const_reference_restrict<int>>::value
+>;
+
 #if __cplusplus >= 202002L
 template<template <class> class F_left, template <class> class F_right>
 concept is_same = type_traits::is_same<F_left<int>, F_right<int>>::value;
@@ -143,6 +125,34 @@ template<template <class> class F>
 concept is_const_reference = is_same<F, const_reference>;
 #endif
 
+template <
+    template <template <class> class> class S,
+    template <class> class F_out,
+    class... Args
+>
+constexpr S<F_out> eval_at(size_t i, Args& ...args) { return {(args[i])...}; }
+
+template <
+    template <template <class> class> class S,
+    template <class> class F_out,
+    class... Args
+>
+constexpr S<F_out> eval_at(size_t i, const Args& ...args) { return {(args[i])...}; }
+
 }  // namespace MemLayout
+
+#define MEMLAYOUT_MEMBERFUNCTIONS(STRUCT, CONTAINER, ...)                                 \
+    template <template <class> class F_out>                                               \
+    constexpr operator STRUCT<F_out>() { return { __VA_ARGS__ }; }                        \
+    template <template <class> class F_out>                                               \
+    constexpr operator STRUCT<F_out>() const { return { __VA_ARGS__ }; }                  \
+    template<class T = int, class R = MemLayout::disable_if_scalar<CONTAINER<T>>>         \
+    constexpr STRUCT<MemLayout::reference> operator[] (MemLayout::size_t i) {             \
+        return MemLayout::eval_at<STRUCT, MemLayout::reference>(i, __VA_ARGS__);          \
+    }                                                                                     \
+    template<class T = int, class R = MemLayout::disable_if_scalar<CONTAINER<T>>>         \
+    constexpr STRUCT<MemLayout::const_reference> operator[] (MemLayout::size_t i) const { \
+        return MemLayout::eval_at<STRUCT, MemLayout::const_reference>(i, __VA_ARGS__);    \
+    }                                                                                     \
 
 #endif // MEMLAYOUT_H
