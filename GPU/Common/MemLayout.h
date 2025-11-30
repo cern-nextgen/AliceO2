@@ -23,53 +23,15 @@ template <class T> using const_pointer_restrict = const T* GPUrestrict();
 
 enum Flag { soa, aos };
 
+// The types S<value>, S<reference>, and S<const_reference> need to be aggregate constructible
 template <template <template <class> class> class S, template <class> class F, Flag L>
 struct wrapper;
 
 template <template <template <class> class> class S, template <class> class F>
-struct wrapper<S, F, Flag::aos> : public F<S<value>> {
-    using Base = F<S<value>>;
-
-    template <template <class> class F_out>
-    constexpr operator wrapper<S, F_out, Flag::aos>() { return {*static_cast<Base*>(this)}; };
-
-    template <template <class> class F_out>
-    constexpr operator wrapper<S, F_out, Flag::aos>() const { return {*static_cast<const Base*>(this)}; };
-
-    constexpr S<reference> operator[](size_t i) {
-        return static_cast<Base*>(this)->operator[](i);
-    }
-
-    constexpr S<const_reference> operator[](size_t i) const {
-        return static_cast<const Base*>(this)->operator[](i);
-    }
-};
+struct wrapper<S, F, Flag::aos> { using type = F<S<value>>; };
 
 template <template <template <class> class> class S, template <class> class F>
-using AoS = wrapper<S, F, Flag::aos>;
-
-// The types S<value>, S<reference>, and S<const_reference> need to be aggregate constructible
-template <template <template <class> class> class S, template <class> class F>
-struct wrapper<S, F, Flag::soa> : public S<F> {
-    using Base = S<F>;
-
-    template <template <class> class F_out>
-    constexpr operator wrapper<S, F_out, Flag::soa>() { return {*this}; };
-
-    template <template <class> class F_out>
-    constexpr operator wrapper<S, F_out, Flag::soa>() const { return {*this}; };
-
-    constexpr S<reference> operator[](size_t i) {
-        return static_cast<Base*>(this)->operator[](i);
-    }
-
-    constexpr S<const_reference> operator[](size_t i) const {
-        return static_cast<const Base*>(this)->operator[](i);
-    }
-};
-
-template <template <template <class> class> class S, template <class> class F>
-using SoA = wrapper<S, F, Flag::soa>;
+struct wrapper<S, F, Flag::soa> { using type = S<F>; };
 
 namespace type_traits {
 
@@ -91,6 +53,9 @@ struct true_type {
     static constexpr bool value = true;
     constexpr operator bool() const noexcept { return value; }
 };
+
+template <class T>
+struct always_false : false_type {};
 
 template<class T, class U>
 struct is_same : false_type {};
@@ -143,11 +108,11 @@ constexpr S<F_out> eval_at(size_t i, const Args& ...args) { return {(args[i])...
 
 #define MEMLAYOUT_MEMBERFUNCTIONS(STRUCT, CONTAINER, ...)                                 \
     template <template <class> class F_out>                                               \
-    constexpr operator STRUCT<F_out>() { return { __VA_ARGS__ }; }                        \
+    constexpr operator STRUCT<F_out>() { return { __VA_ARGS__ }; }               \
     template <template <class> class F_out>                                               \
-    constexpr operator STRUCT<F_out>() const { return { __VA_ARGS__ }; }                  \
+    constexpr operator STRUCT<F_out>() const { return { __VA_ARGS__ }; }         \
     template<class T = int, class R = MemLayout::disable_if_scalar<CONTAINER<T>>>         \
-    constexpr STRUCT<MemLayout::reference> operator[] (MemLayout::size_t i) {             \
+    constexpr STRUCT<MemLayout::reference> operator[] (MemLayout::size_t i) {    \
         return MemLayout::eval_at<STRUCT, MemLayout::reference>(i, __VA_ARGS__);          \
     }                                                                                     \
     template<class T = int, class R = MemLayout::disable_if_scalar<CONTAINER<T>>>         \

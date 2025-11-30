@@ -61,6 +61,9 @@ class GPUTPCTracker : public GPUProcessor
   void DumpTrackletHits(std::ostream& out);         // Same for Track Hits
 #endif
 
+  template <MemLayout::Flag layout>
+  using TrackletArrayType = MemLayout::wrapper<GPUTPCTrackletSkeleton, MemLayout::pointer, layout>::type;
+
   struct commonMemoryStruct {
     GPUAtomic(uint32_t) nStartHits = 0; // number of start hits
     GPUAtomic(uint32_t) nTracklets = 0; // number of tracklets
@@ -106,6 +109,8 @@ class GPUTPCTracker : public GPUProcessor
   void* SetPointersScratch(void* mem);
   void* SetPointersScratchHost(void* mem);
   void* SetPointersCommon(void* mem);
+  void SetPointersTrackletsHelper(void* & mem, TrackletArrayType<MemLayout::Flag::aos>& tracklets);
+  void SetPointersTrackletsHelper(void* & mem, TrackletArrayType<MemLayout::Flag::soa>& tracklets);
   void* SetPointersTracklets(void* mem);
   void* SetPointersOutput(void* mem);
   void RegisterMemoryAllocation();
@@ -189,7 +194,8 @@ class GPUTPCTracker : public GPUProcessor
 
   GPUhd() GPUglobalref() GPUTPCTrackletSkeleton<MemLayout::reference_restrict> Tracklet(int32_t i) { return mTracklets[i]; }
 
-  GPUhd() GPUglobalref() GPUTPCTrackletSkeleton<MemLayout::pointer> Tracklets() const { return mTracklets; }
+  template <MemLayout::Flag layout>
+  GPUhd() GPUglobalref() TrackletArrayType<layout> Tracklets() const { return mTracklets; }
   GPUhd() GPUglobalref() calink* TrackletRowHits() const { return mTrackletRowHits; }
 
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NTracks() const { return &mCommonMem->nTracks; }
@@ -243,7 +249,7 @@ class GPUTPCTracker : public GPUProcessor
   // event
   GPUglobalref() commonMemoryStruct* mCommonMem = nullptr;  // common event memory
   GPUglobalref() GPUTPCHitId* mTrackletStartHits = nullptr; // start hits for the tracklets
-  GPUglobalref() GPUTPCTrackletSkeleton<MemLayout::pointer> mTracklets; // tracklets
+  GPUglobalref() TrackletArrayType<MemLayout::Flag::soa> mTracklets; // tracklets
   GPUglobalref() calink* mTrackletRowHits = nullptr;        // Hits for each Tracklet in each row
   GPUglobalref() GPUTPCTrackSkeleton<MemLayout::value>* mTracks = nullptr; // reconstructed tracks
   GPUglobalref() GPUTPCHitId* mTrackHits = nullptr;         // array of track hit numbers

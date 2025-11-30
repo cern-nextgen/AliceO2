@@ -108,18 +108,26 @@ void GPUTPCTracker::RegisterMemoryAllocation()
   mMemoryResOutput = mRec->RegisterMemoryAllocation(this, &GPUTPCTracker::SetPointersOutput, type, "TPCTrackerTracks");
 }
 
+GPUhd() void GPUTPCTracker::SetPointersTrackletsHelper(void* & mem, GPUTPCTracker::TrackletArrayType<MemLayout::Flag::aos>& tracklets) {
+    computePointerWithAlignment(mem, tracklets, mNMaxTracklets);
+}
+
+GPUhd() void GPUTPCTracker::SetPointersTrackletsHelper(void* & mem, GPUTPCTracker::TrackletArrayType<MemLayout::Flag::soa>& tracklets) {
+  computePointerWithAlignment(mem, tracklets.mFirstRow, mNMaxTracklets);
+  computePointerWithAlignment(mem, tracklets.mLastRow, mNMaxTracklets);
+
+  computePointerWithAlignment(mem, tracklets.mParam.mX, mNMaxTracklets);
+  computePointerWithAlignment(mem, tracklets.mParam.mC, mNMaxTracklets);
+  computePointerWithAlignment(mem, tracklets.mParam.mZOffset, mNMaxTracklets);
+  computePointerWithAlignment(mem, tracklets.mParam.mP, mNMaxTracklets);
+
+  computePointerWithAlignment(mem, tracklets.mHitWeight, mNMaxTracklets);
+  computePointerWithAlignment(mem, tracklets.mFirstHit, mNMaxTracklets);
+}
+
 GPUhd() void* GPUTPCTracker::SetPointersTracklets(void* mem)
 {
-  computePointerWithAlignment(mem, mTracklets.mFirstRow, mNMaxTracklets);
-  computePointerWithAlignment(mem, mTracklets.mLastRow, mNMaxTracklets);
-
-  computePointerWithAlignment(mem, mTracklets.mParam.mX, mNMaxTracklets);
-  computePointerWithAlignment(mem, mTracklets.mParam.mC, mNMaxTracklets);
-  computePointerWithAlignment(mem, mTracklets.mParam.mZOffset, mNMaxTracklets);
-  computePointerWithAlignment(mem, mTracklets.mParam.mP, mNMaxTracklets);
-
-  computePointerWithAlignment(mem, mTracklets.mHitWeight, mNMaxTracklets);
-  computePointerWithAlignment(mem, mTracklets.mFirstHit, mNMaxTracklets);
+  SetPointersTrackletsHelper(mem, mTracklets);
   computePointerWithAlignment(mem, mTrackletRowHits, mNMaxRowHits);
   return mem;
 }
