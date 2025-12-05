@@ -45,7 +45,7 @@ class GPUTPCTrackletSkeleton
   GPUhd() void SetFirstRow(int32_t v) { mFirstRow = v; }
   GPUhd() void SetLastRow(int32_t v) { mLastRow = v; }
   GPUhd() void SetFirstHit(uint32_t v) { mFirstHit = v; }
-  GPUhd() void SetParam(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v) { mParam.ElementwiseAssignment(v); }
+  GPUhd() void SetParam(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v) { mParam = v; }
   GPUhd() void SetHitWeight(const int32_t w) { mHitWeight = w; }
 
 // private:

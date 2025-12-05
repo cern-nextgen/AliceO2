@@ -159,7 +159,7 @@ class GPUTPCTrackParamSkeleton
 };
 
 template <template <class> class F>
-GPUd() void GPUTPCTrackParamSkeleton<F>::SetParam(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v) { mParam.ElementwiseAssignment(v); }
+GPUd() void GPUTPCTrackParamSkeleton<F>::SetParam(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v) { mParam = v; }
 
 template <template <class> class F>
 GPUd() void GPUTPCTrackParamSkeleton<F>::InitParam()

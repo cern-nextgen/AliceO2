@@ -52,7 +52,7 @@ class GPUTPCTrackSkeleton
   GPUhd() void SetNHits(int32_t v) { mNHits = v; }
   GPUhd() void SetLocalTrackId(int32_t v) { mLocalTrackId = v; }
   GPUhd() void SetFirstHitID(int32_t v) { mFirstHitID = v; }
-  GPUhd() void SetParam(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v) { mParam.ElementwiseAssignment(v); }
+  GPUhd() void SetParam(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v) { mParam = v; }
 
  //private:
   F<int32_t> mFirstHitID;         // index of the first track cell in the track->cell pointer array

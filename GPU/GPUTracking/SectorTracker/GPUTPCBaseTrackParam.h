@@ -21,6 +21,22 @@
 namespace o2::gpu
 {
 
+struct Covariance {
+    float m00, m01, m02, m03, m04, m05, m06, m07, m08, m09, m10, m11, m12, m13, m14;
+    constexpr operator float*() { return &m00; }
+    constexpr operator const float*() const { return &m00; }
+    constexpr float& operator[](int32_t i) { return *((&m00) + i); }
+    constexpr const float& operator[](int32_t i) const { return *((&m00) + i); }
+};
+
+struct Parameters {
+    float mY, mZ, mSinPhi, mDzDs, mQPt;
+    constexpr operator float*() { return &mY; }
+    constexpr operator const float*() const { return &mY; }
+    constexpr float& operator[](int32_t i) { return *((&mY) + i); }
+    constexpr const float& operator[](int32_t i) const { return *((&mY) + i); }
+};
+
 /**
  * @class GPUTPCBaseTrackParam
  *
@@ -31,31 +47,6 @@ namespace o2::gpu
 template <template <class> class F>
 struct GPUTPCBaseTrackParamSkeleton {
   MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCBaseTrackParamSkeleton, F, mX, mC, mZOffset, mP)
-
-  GPUhd() void ElementwiseAssignment(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v) {
-    mX = v.mX;
-    mC[0] = v.mC[0];
-    mC[1] = v.mC[1];
-    mC[2] = v.mC[2];
-    mC[3] = v.mC[3];
-    mC[4] = v.mC[4];
-    mC[5] = v.mC[5];
-    mC[6] = v.mC[6];
-    mC[7] = v.mC[7];
-    mC[8] = v.mC[8];
-    mC[9] = v.mC[9];
-    mC[10] = v.mC[10];
-    mC[11] = v.mC[11];
-    mC[12] = v.mC[12];
-    mC[13] = v.mC[13];
-    mC[14] = v.mC[14];
-    mZOffset = v.mZOffset;
-    mP[0] = v.mP[0];
-    mP[1] = v.mP[1];
-    mP[2] = v.mP[2];
-    mP[3] = v.mP[3];
-    mP[4] = v.mP[4];
-  }
 
   GPUd() float X() const { return mX; }
   GPUd() float Y() const { return mP[0]; }
@@ -98,13 +89,39 @@ struct GPUTPCBaseTrackParamSkeleton {
   GPUd() void SetQPt(float v) { mP[4] = v; }
   GPUd() void SetZOffset(float v) { mZOffset = v; }
 
+  // Needed for iterators and std::sort
+  template <template <class> class F_in>
+  constexpr GPUTPCBaseTrackParamSkeleton& operator=(GPUTPCBaseTrackParamSkeleton<F_in> other) {
+    mX = other.mX;
+    mC = other.mC;
+    mZOffset = other.mZOffset;
+    mP = other.mP;
+    return *this;
+  }
+  //GPUTPCBaseTrackParamSkeleton() = default;
+  //GPUTPCBaseTrackParamSkeleton(F<float> X, F<Covariance> C, F<float> ZOffset, F<Parameters> P) : mX(X), mC(C), mZOffset(ZOffset), mP(P) { }
+  /*GPUTPCBaseTrackParamSkeleton(const GPUTPCBaseTrackParamSkeleton& other) = default;
+  GPUTPCBaseTrackParamSkeleton& operator=(const GPUTPCBaseTrackParamSkeleton& other) {
+    mX = other.mX;
+    mC = other.mC;
+    mZOffset = other.mZOffset;
+    mP = other.mP;
+    return *this;
+  }
+  friend void swap(GPUTPCBaseTrackParamSkeleton& a, GPUTPCBaseTrackParamSkeleton& b) {
+    std::swap(a.mX, b.mX);
+    std::swap(a.mC, b.mC);
+    std::swap(a.mZOffset, b.mZOffset);
+    std::swap(a.mP, b.mP);
+  }*/
+
   // WARNING, Track Param Data is copied in the GPU Tracklet Constructor element by element instead of using copy constructor!!!
   // This is neccessary for performance reasons!!!
   // Changes to Elements of this class therefore must also be applied to TrackletConstructor!!!
   F<float> mX;       // x position
-  F<float[15]> mC;   // the covariance matrix for Y,Z,SinPhi,..
+  F<Covariance> mC;   // the covariance matrix for Y,Z,SinPhi,..
   F<float> mZOffset; // z offset
-  F<float[5]> mP;    // 'active' track parameters: Y, Z, SinPhi, DzDs, q/Pt
+  F<Parameters> mP;    // 'active' track parameters: Y, Z, SinPhi, DzDs, q/Pt
 };
 
 using GPUTPCBaseTrackParam = GPUTPCBaseTrackParamSkeleton<MemLayout::value>;
