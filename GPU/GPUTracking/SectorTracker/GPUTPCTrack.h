@@ -29,10 +29,13 @@ namespace o2::gpu
  * The track parameters at both ends are stored separately in the GPUTPCEndPoint class
  */
 template <template <class> class F>
-class GPUTPCTrackSkeleton
+class GPUTPCTrackSkeleton : public MemLayout::CRTP<GPUTPCTrackSkeleton, F>
 {
  public:
+    using Base = MemLayout::CRTP<GPUTPCTrackSkeleton, F>;
+    using Base::operator=;
   MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCTrackSkeleton, F, mFirstHitID, mNHits, mLocalTrackId, mParam)
+    
 #if !defined(GPUCA_GPUCODE)
   constexpr GPUTPCTrackSkeleton() : mFirstHitID(0), mNHits(0), mLocalTrackId(-1), mParam() { }
   constexpr GPUTPCTrackSkeleton(
@@ -60,6 +63,18 @@ class GPUTPCTrackSkeleton
   F<int32_t> mLocalTrackId;       // Id of local track this extrapolated track belongs to, index of this track itself if it is a local track
   GPUTPCBaseTrackParamSkeleton<F> mParam; // track parameters
 };
+
+template <
+    template <class> class F_left,
+    template <class> class F_right,
+    class FunctionObject
+>
+constexpr void memberwise(GPUTPCTrackSkeleton<F_left>& left, GPUTPCTrackSkeleton<F_right>& right, FunctionObject&& f) {
+    f(left.mFirstHitID, right.mFirstHitID);
+    f(left.mNHits, right.mNHits);
+    f(left.mLocalTrackId, right.mLocalTrackId);
+    f(left.mParam, right.mParam);
+}
 
 using GPUTPCTrack = GPUTPCTrackSkeleton<MemLayout::value>;
 
