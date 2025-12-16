@@ -28,9 +28,11 @@ namespace o2::gpu
  * The class is dedicated for internal use by the GPUTPCTracker algorithm.
  */
 template <template <class> class F>
-class GPUTPCTrackletSkeleton
+class GPUTPCTrackletSkeleton : public MemLayout::CRTP<GPUTPCTrackletSkeleton, F>
 {
  public:
+  using Base = MemLayout::CRTP<GPUTPCTrackletSkeleton, F>;
+  using Base::operator=;
   MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCTrackletSkeleton, F, mFirstRow, mLastRow, mParam, mHitWeight, mFirstHit)
 #if !defined(GPUCA_GPUCODE)
   //GPUTPCTrackletSkeleton() : mFirstRow(0), mLastRow(0), mParam(), mHitWeight(0), mFirstHit(0) {};
@@ -55,6 +57,19 @@ class GPUTPCTrackletSkeleton
   F<int32_t> mHitWeight;          // Hit Weight of Tracklet
   F<uint32_t> mFirstHit;          // first hit in row hit array
 };
+
+template <
+    template <class> class F_left,
+    template <class> class F_right,
+    class FunctionObject
+>
+constexpr void memberwise(GPUTPCTrackletSkeleton<F_left>& left, GPUTPCTrackletSkeleton<F_right>& right, FunctionObject&& f) {
+    f(left.mFirstRow, right.mFirstRow);
+    f(left.mLastRow, right.mLastRow);
+    f(left.mParam, right.mParam);
+    f(left.mHitWeight, right.mHitWeight);
+    f(left.mFirstHit, right.mFirstHit);
+}
 
 } // namespace o2::gpu
 

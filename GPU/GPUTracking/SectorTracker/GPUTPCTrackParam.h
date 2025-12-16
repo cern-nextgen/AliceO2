@@ -33,9 +33,11 @@ class GPUTPCTrackLinearisation;
  *
  */
 template <template <class> class F>
-class GPUTPCTrackParamSkeleton
+class GPUTPCTrackParamSkeleton : public MemLayout::CRTP<GPUTPCTrackParamSkeleton, F>
 {
  public:
+    using Base = MemLayout::CRTP<GPUTPCTrackParamSkeleton, F>;
+    using Base::operator=;
   MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCTrackParamSkeleton, F, mParam, mSignCosPhi, mChi2, mNDF)
 
   struct GPUTPCTrackFitParam {
@@ -157,6 +159,18 @@ class GPUTPCTrackParamSkeleton
   F<float> mChi2;       // the chi^2 value
   F<int32_t> mNDF;      // the Number of Degrees of Freedom
 };
+
+template <
+    template <class> class F_left,
+    template <class> class F_right,
+    class FunctionObject
+>
+constexpr void memberwise(GPUTPCTrackParamSkeleton<F_left>& left, GPUTPCTrackParamSkeleton<F_right>& right, FunctionObject&& f) {
+    f(left.mParam, right.mParam);
+    f(left.mSignCosPhi, right.mSignCosPhi);
+    f(left.mChi2, right.mChi2);
+    f(left.mNDF, right.mNDF);
+}
 
 template <template <class> class F>
 GPUd() void GPUTPCTrackParamSkeleton<F>::SetParam(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v) { mParam = v; }

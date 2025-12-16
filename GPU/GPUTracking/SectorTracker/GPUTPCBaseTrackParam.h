@@ -45,7 +45,10 @@ struct Parameters {
  * This class is used for transfer between tracker and merger and does not contain the covariance matrice
  */
 template <template <class> class F>
-struct GPUTPCBaseTrackParamSkeleton {
+struct GPUTPCBaseTrackParamSkeleton : public MemLayout::CRTP<GPUTPCBaseTrackParamSkeleton, F>
+{
+  using Base = MemLayout::CRTP<GPUTPCBaseTrackParamSkeleton, F>;
+  using Base::operator=;
   MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCBaseTrackParamSkeleton, F, mX, mC, mZOffset, mP)
 
   GPUd() float X() const { return mX; }
@@ -90,14 +93,14 @@ struct GPUTPCBaseTrackParamSkeleton {
   GPUd() void SetZOffset(float v) { mZOffset = v; }
 
   // Needed for iterators and std::sort
-  template <template <class> class F_in>
+  /*template <template <class> class F_in>
   constexpr GPUTPCBaseTrackParamSkeleton& operator=(GPUTPCBaseTrackParamSkeleton<F_in> other) {
     mX = other.mX;
     mC = other.mC;
     mZOffset = other.mZOffset;
     mP = other.mP;
     return *this;
-  }
+  }*/
   //GPUTPCBaseTrackParamSkeleton() = default;
   //GPUTPCBaseTrackParamSkeleton(F<float> X, F<Covariance> C, F<float> ZOffset, F<Parameters> P) : mX(X), mC(C), mZOffset(ZOffset), mP(P) { }
   /*GPUTPCBaseTrackParamSkeleton(const GPUTPCBaseTrackParamSkeleton& other) = default;
@@ -123,6 +126,18 @@ struct GPUTPCBaseTrackParamSkeleton {
   F<float> mZOffset; // z offset
   F<Parameters> mP;    // 'active' track parameters: Y, Z, SinPhi, DzDs, q/Pt
 };
+
+template <
+    template <class> class F_left,
+    template <class> class F_right,
+    class FunctionObject
+>
+constexpr void memberwise(GPUTPCBaseTrackParamSkeleton<F_left>& left, GPUTPCBaseTrackParamSkeleton<F_right>& right, FunctionObject&& f) {
+    f(left.mX, right.mX);
+    f(left.mC, right.mC);
+    f(left.mZOffset, right.mZOffset);
+    f(left.mP, right.mP);
+}
 
 using GPUTPCBaseTrackParam = GPUTPCBaseTrackParamSkeleton<MemLayout::value>;
 
