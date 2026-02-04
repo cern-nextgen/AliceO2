@@ -554,7 +554,18 @@ void GPUChainTracking::AllocateIOMemory()
   for (uint32_t i = 0; i < NSECTORS; i++) {
     AllocateIOMemoryHelper(mIOPtrs.nClusterData[i], mIOPtrs.clusterData[i], mIOMem.clusterData[i]);
     AllocateIOMemoryHelper(mIOPtrs.nRawClusters[i], mIOPtrs.rawClusters[i], mIOMem.rawClusters[i]);
-    AllocateIOMemoryHelper(mIOPtrs.nSectorTracks[i], mIOPtrs.sectorTracks[i], mIOMem.sectorTracks[i]);
+    
+    //AllocateIOMemoryHelper(mIOPtrs.nSectorTracks[i], mIOPtrs.sectorTracks[i], mIOMem.sectorTracks[i]);
+
+    AllocateIOMemoryHelper(mIOPtrs.nSectorTracks[i], mIOPtrs.sectorTracks[i].mFirstHitID, mIOMem.sectorTracks[i].mFirstHitID);
+    AllocateIOMemoryHelper(mIOPtrs.nSectorTracks[i], mIOPtrs.sectorTracks[i].mNHits, mIOMem.sectorTracks[i].mNHits);
+    AllocateIOMemoryHelper(mIOPtrs.nSectorTracks[i], mIOPtrs.sectorTracks[i].mLocalTrackId, mIOMem.sectorTracks[i].mLocalTrackId);
+
+    AllocateIOMemoryHelper(mIOPtrs.nSectorTracks[i], mIOPtrs.sectorTracks[i].mParam.mX, mIOMem.sectorTracks[i].mParam.mX);
+    AllocateIOMemoryHelper(mIOPtrs.nSectorTracks[i], mIOPtrs.sectorTracks[i].mParam.mC, mIOMem.sectorTracks[i].mParam.mC);
+    AllocateIOMemoryHelper(mIOPtrs.nSectorTracks[i], mIOPtrs.sectorTracks[i].mParam.mZOffset, mIOMem.sectorTracks[i].mParam.mZOffset);
+    AllocateIOMemoryHelper(mIOPtrs.nSectorTracks[i], mIOPtrs.sectorTracks[i].mParam.mP, mIOMem.sectorTracks[i].mParam.mP);
+
     AllocateIOMemoryHelper(mIOPtrs.nSectorClusters[i], mIOPtrs.sectorClusters[i], mIOMem.sectorClusters[i]);
   }
   mIOMem.clusterNativeAccess.reset(new ClusterNativeAccess);

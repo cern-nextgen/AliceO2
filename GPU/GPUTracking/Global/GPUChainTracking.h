@@ -108,7 +108,12 @@ class GPUChainTracking : public GPUChain
     std::unique_ptr<AliHLTTPCRawCluster[]> rawClusters[NSECTORS];
     std::unique_ptr<o2::tpc::ClusterNative[]> clustersNative;
     std::unique_ptr<o2::tpc::ClusterNativeAccess> clusterNativeAccess;
-    std::unique_ptr<GPUTPCTrackSkeleton<MemLayout::value>[]> sectorTracks[NSECTORS];
+
+    template <class T>
+    using unique_ptr_array = std::unique_ptr<T[]>;
+
+    MemLayout::wrapper<GPUTPCTrackSkeleton, unique_ptr_array> sectorTracks[NSECTORS];
+
     std::unique_ptr<GPUTPCHitId[]> sectorClusters[NSECTORS];
     std::unique_ptr<AliHLTTPCClusterMCLabel[]> mcLabelsTPC;
     std::unique_ptr<GPUTPCMCInfo[]> mcInfosTPC;

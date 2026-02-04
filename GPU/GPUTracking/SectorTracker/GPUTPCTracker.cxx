@@ -134,7 +134,14 @@ GPUhd() void* GPUTPCTracker::SetPointersTracklets(void* mem)
 
 GPUhd() void* GPUTPCTracker::SetPointersOutput(void* mem)
 {
-  computePointerWithAlignment(mem, mTracks, mNMaxTracks);
+  computePointerWithAlignment(mem, mTracks.mFirstHitID, mNMaxTracklets);
+  computePointerWithAlignment(mem, mTracks.mNHits, mNMaxTracklets);
+  computePointerWithAlignment(mem, mTracks.mLocalTrackId, mNMaxTracklets);
+  computePointerWithAlignment(mem, mTracks.mParam.mX, mNMaxTracklets);
+  computePointerWithAlignment(mem, mTracks.mParam.mC, mNMaxTracklets);
+  computePointerWithAlignment(mem, mTracks.mParam.mZOffset, mNMaxTracklets);
+  computePointerWithAlignment(mem, mTracks.mParam.mP, mNMaxTracklets);
+  //computePointerWithAlignment(mem, mTracks, mNMaxTracks);
   computePointerWithAlignment(mem, mTrackHits, mNMaxTrackHits);
   return mem;
 }

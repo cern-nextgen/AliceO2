@@ -25,6 +25,7 @@
 #include "GPUTPCTrackingData.h"
 #include "GPUTPCTrackParam.h"
 #include "GPUTPCTracklet.h"
+#include "GPUTPCTrack.h"
 #include "GPUProcessor.h"
 #include "MemLayout.h"
 
@@ -62,7 +63,7 @@ class GPUTPCTracker : public GPUProcessor
 #endif
 
   template <MemLayout::Flag layout>
-  using TrackletArrayType = MemLayout::wrapper<GPUTPCTrackletSkeleton, MemLayout::pointer, layout>::type;
+  using TrackletArrayType = MemLayout::interface<GPUTPCTrackletSkeleton, MemLayout::pointer, layout>::type;
 
   struct commonMemoryStruct {
     GPUAtomic(uint32_t) nStartHits = 0; // number of start hits
@@ -84,13 +85,13 @@ class GPUTPCTracker : public GPUProcessor
     return (mCommonMem);
   }
 
-  GPUdi() static void GetErrors2Seeding(const GPUParam& param, char sector, int32_t iRow, GPUTPCTrackParamSkeleton<MemLayout::const_reference> t, float time, float& ErrY2, float& ErrZ2)
+  GPUdi() static void GetErrors2Seeding(const GPUParam& param, char sector, int32_t iRow, MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::const_reference> t, float time, float& ErrY2, float& ErrZ2)
   {
     // param.GetClusterErrors2(sector, iRow, param.GetContinuousTracking() != 0. ? 125.f : t.Z(), t.SinPhi(), t.DzDs(), time, 0.f, 0.f, ErrY2, ErrZ2);
     param.GetClusterErrorsSeeding2(sector, iRow, param.par.continuousTracking != 0.f ? 125.f : t.Z(), t.SinPhi(), t.DzDs(), time, ErrY2, ErrZ2);
   }
 
-  GPUdi() void GetErrors2Seeding(int32_t iRow, GPUTPCTrackParamSkeleton<MemLayout::const_reference> t, float time, float& ErrY2, float& ErrZ2) const
+  GPUdi() void GetErrors2Seeding(int32_t iRow, MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::const_reference> t, float time, float& ErrY2, float& ErrZ2) const
   {
     // Param().GetClusterErrors2(mISector, iRow, Param().GetContinuousTracking() != 0. ? 125.f : t.Z(), t.SinPhi(), t.DzDs(), time, 0.f, 0.f, ErrY2, ErrZ2);
     Param().GetClusterErrorsSeeding2(mISector, iRow, Param().par.continuousTracking != 0.f ? 125.f : t.Z(), t.SinPhi(), t.DzDs(), time, ErrY2, ErrZ2);
@@ -192,14 +193,14 @@ class GPUTPCTracker : public GPUProcessor
   GPUhd() GPUglobalref() GPUTPCHitId* TrackletStartHits() { return mTrackletStartHits; }
   GPUhd() GPUglobalref() GPUTPCHitId* TrackletTmpStartHits() const { return mTrackletTmpStartHits; }
 
-  GPUhd() GPUglobalref() GPUTPCTrackletSkeleton<MemLayout::reference_restrict> Tracklet(int32_t i) { return mTracklets[i]; }
+  GPUhd() GPUglobalref() MemLayout::wrapper<GPUTPCTrackletSkeleton, MemLayout::reference> Tracklet(int32_t i) { return mTracklets[i]; } // reference_restrict
 
   template <MemLayout::Flag layout>
   GPUhd() GPUglobalref() TrackletArrayType<layout> Tracklets() const { return mTracklets; }
   GPUhd() GPUglobalref() calink* TrackletRowHits() const { return mTrackletRowHits; }
 
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NTracks() const { return &mCommonMem->nTracks; }
-  GPUhd() GPUglobalref() GPUTPCTrackSkeleton<MemLayout::value>* Tracks() const { return mTracks; }
+  GPUhd() GPUglobalref() MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::pointer> Tracks() const { return mTracks; }
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NTrackHits() const { return &mCommonMem->nTrackHits; }
   GPUhd() GPUglobalref() GPUTPCHitId* TrackHits() const { return mTrackHits; }
 
@@ -251,7 +252,7 @@ class GPUTPCTracker : public GPUProcessor
   GPUglobalref() GPUTPCHitId* mTrackletStartHits = nullptr; // start hits for the tracklets
   GPUglobalref() TrackletArrayType<MemLayout::Flag::soa> mTracklets; // tracklets
   GPUglobalref() calink* mTrackletRowHits = nullptr;        // Hits for each Tracklet in each row
-  GPUglobalref() GPUTPCTrackSkeleton<MemLayout::value>* mTracks = nullptr; // reconstructed tracks
+  GPUglobalref() MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::pointer> mTracks; // reconstructed tracks
   GPUglobalref() GPUTPCHitId* mTrackHits = nullptr;         // array of track hit numbers
 
   static int32_t StarthitSortComparison(const void* a, const void* b);

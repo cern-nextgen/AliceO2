@@ -1,257 +1,212 @@
 #ifndef MEMLAYOUT_H
 #define MEMLAYOUT_H
 
-#include "GPUCommonDefAPI.h"
-
 namespace MemLayout {
 
-template <class T> using value = T;
-
-template <class T> using reference = T&;
-template <class T> using reference_restrict = T& GPUrestrict();
-
-template <class T> using const_reference = const T&;
-template <class T> using const_reference_restrict = const T& GPUrestrict();
-
-template <class T> using pointer = T*;
-template <class T> using pointer_restrtict = T* GPUrestrict();
-
-template <class T> using const_pointer = const T*;
-template <class T> using const_pointer_restrict = const T* GPUrestrict();
-
-using size_t = decltype(sizeof 0);
+using size_t = decltype(sizeof(0));
 using ptrdiff_t = decltype(static_cast<int*>(nullptr) - static_cast<int*>(nullptr));
 
-enum Flag { soa, aos };
-
-// The types S<value>, S<reference>, and S<const_reference> need to be aggregate constructible
-template <template <template <class> class> class S, template <class> class F, Flag L>
-struct wrapper;
-
-template <template <template <class> class> class S, template <class> class F>
-struct wrapper<S, F, Flag::aos> { using type = F<S<value>>; };
-
-template <template <template <class> class> class S, template <class> class F>
-struct wrapper<S, F, Flag::soa> { using type = S<F>; };
-
-namespace type_traits {
-
-template<class T> struct remove_reference { using type = T; };
-template<class T> struct remove_reference<T&> { using type = T; };
-template<class T> struct remove_reference<T&&> { using type = T; };
-
-}  // namespace type_traits
-
-template< class T >
-constexpr type_traits::remove_reference<T>::type&& move(T&& t) noexcept {
-    return static_cast<typename type_traits::remove_reference<T>::type&&>(t);
-}
+template <class T> using value = T;
+template <class T> using reference = T&;
+template <class T> using const_reference = const T&;
+template <class T> using pointer = T*;
+template <class T> using const_pointer = const T*;
 
 template <class SF>
 struct RandomAccessAt {
-    size_t i;
+    MemLayout::size_t i;
     template <class... Args>
-    constexpr SF operator()(Args& ...args) const { return {{}, args[i]...}; }
+    constexpr SF operator()(Args& ...args) const { return {{args[i]...}}; }
+    template <class... Args>
+    constexpr SF operator()(const Args& ...args) const { return {{args[i]...}}; }
 };
 
 template <class SF>
 struct GetPointer {
     template <class... Args>
-    constexpr SF operator()(Args& ...args) const { return {{}, &args...}; }
+    constexpr SF operator()(Args& ...args) const { return {{&args...}}; }
+    template <class... Args>
+    constexpr SF operator()(const Args& ...args) const { return {{&args...}}; }
 };
 
 template <class SF>
 struct AggregateConstructor {
     template <class... Args>
-    constexpr SF operator()(Args& ...args) const { return {{}, args...}; } 
+    constexpr SF operator()(Args& ...args) const { return {{args...}}; }
+    template <class... Args>
+    constexpr SF operator()(const Args& ...args) const { return {{args...}}; } 
 };
 
-template <
-    template <class> class F_left,
-    template <class> class F_right
->
+struct FirstMember {
+    template <class T, class... Args>
+    constexpr T& operator()(T& t, Args& ...args) const { return t; }
+    template <class T, class... Args>
+    constexpr const T& operator()(const T& t, const Args& ...args) const { return t; }
+};
+
+template <class SF>
+struct PreIncrement {
+    template <class... Args>
+    constexpr SF operator()(Args& ...args) const { return {{++args...}}; }
+};
+
+template <class SF>
+struct PreDecrement {
+    template <class... Args>
+    constexpr SF operator()(Args& ...args) const { return {{--args...}}; }
+};
+
+template <class SF>
+struct Advance {
+    ptrdiff_t i;
+    template <class... Args>
+    constexpr SF operator()(const Args& ...args) const { return {{(args + i)...}}; }
+};
+
 struct CopyAssignment {
-    template <class T>
-    constexpr void operator()(F_left<T>& left, F_right<T>& right) const { left = right; }
-};
-
-template <
-    template <class> class F_left,
-    template <class> class F_right
->
-struct MoveAssignment {
-    template <class T>
-    constexpr void operator()(F_left<T>& left, F_right<T>& right) const { left = move(right); }
+    template <class Left, class Right>
+    constexpr Left& operator()(Left& left, const Right& right) const { return left = right; }
 };
 
 template <
     template <template <class> class> class S,
     template <class> class F
 >
-struct CRTP {
-    using Derived = S<F>;
-    template <template <class> class F_out>
-    constexpr operator S<F_out>() {
-        return static_cast<Derived*>(this)->apply(AggregateConstructor<S<F_out>>{});
-    }
-    template <template <class> class F_out>
-    constexpr operator S<F_out>() const {
-        return static_cast<const Derived*>(this)->apply(AggregateConstructor<S<F_out>>{});
-    }
-    constexpr S<reference> operator[] (size_t i) {
-        return static_cast<Derived*>(this)->apply(RandomAccessAt<S<reference>>{i});
-    }
-    constexpr S<const_reference> operator[] (size_t i) const {
-        return static_cast<const Derived*>(this)->apply(RandomAccessAt<S<const_reference>>{i});
-    }
-    constexpr S<pointer> operator& () {
-        return static_cast<Derived*>(this)->apply(GetPointer<S<pointer>>{});
-    }
-    constexpr S<const_pointer> operator& () const {
-        return static_cast<const Derived*>(this)->apply(GetPointer<S<const_pointer>>{});
-    }
-    constexpr S<reference> operator*() {
-        return static_cast<Derived*>(this)->operator[](0);
-    }
-    constexpr S<const_reference> operator*() const {
-        return static_cast<const Derived*>(this)->operator[](0);
-    }
-};
+struct wrapper : public S<F> {
+    using Base = S<F>;
 
-template <template <template <class> class> class S>
-struct CRTP<S, value> {
-    using Derived = S<value>;
-    template <template <class> class F_out>
-    constexpr operator S<F_out>() {
-        return static_cast<Derived*>(this)->apply(AggregateConstructor<S<F_out>>{});
-    }
-    template <template <class> class F_out>
-    constexpr operator S<F_out>() const {
-        return static_cast<const Derived*>(this)->apply(AggregateConstructor<S<F_out>>{});
-    }
-};
-
-template <template <template <class> class> class S>
-struct CRTP<S, reference> {
-    using Derived = S<reference>;
-    template <template <class> class F_out>
-    constexpr operator S<F_out>() {
-        return static_cast<Derived*>(this)->apply(AggregateConstructor<S<F_out>>{});
-    }
-    template <template <class> class F_out>
-    constexpr operator S<F_out>() const {
-        return static_cast<const Derived*>(this)->apply(AggregateConstructor<S<F_out>>{});
-    }
+    constexpr wrapper() = default;
+    constexpr wrapper(Base b) : Base{static_cast<Base&&>(b)} {}
     template <template <class> class F_other>
-    constexpr Derived& operator=(S<F_other>& other) {
-        memberwise(*static_cast<Derived*>(this), other, CopyAssignment<reference, F_other>{});
-        return *static_cast<Derived*>(this);
-    }
-    template <template <class> class F_other>
-    constexpr Derived& operator=(S<F_other>&& other) {
-        memberwise(*static_cast<Derived*>(this), other, MoveAssignment<reference, F_other>{});
-        return *static_cast<Derived*>(this);
-    }
-    constexpr S<pointer> operator& () {
-        return static_cast<Derived*>(this)->apply(GetPointer<S<pointer>>{});
-    }
-    constexpr S<const_pointer> operator& () const {
-        return static_cast<const Derived*>(this)->apply(GetPointer<S<const_pointer>>{});
-    }
+    constexpr wrapper(wrapper<S, F_other>& other) : Base{other.apply(AggregateConstructor<wrapper>{})} {}
+
+    constexpr wrapper<S, reference> operator[] (size_t i) { return Base::apply(RandomAccessAt<wrapper<S, reference>>{i}); }
+    constexpr wrapper<S, const_reference> operator[] (size_t i) const { return Base::apply(RandomAccessAt<wrapper<S, const_reference>>{i}); }
+
+    constexpr wrapper<S, reference> operator*() { return operator[](0); }
+    constexpr wrapper<S, const_reference> operator*(ptrdiff_t) const { return operator[](0); }
 };
 
 template <template <template <class> class> class S>
-struct CRTP<S, const_reference> {
-    using Derived = S<const_reference>;
-    template <template <class> class F_out>
-    constexpr operator S<F_out>() const {
-        return static_cast<const Derived*>(this)->apply(AggregateConstructor<S<F_out>>{});
-    }
-    constexpr S<const_pointer> operator& () const {
-        return static_cast<const Derived*>(this)->apply(GetPointer<S<const_pointer>>{});
-    }
+struct wrapper<S, value> : public S<value> {
+    using Base = S<value>;
+
+    constexpr wrapper() = default;
+    constexpr wrapper(Base b) : Base{static_cast<Base&&>(b)} {}
+    constexpr wrapper(wrapper<S, reference> other) : Base(other.apply(AggregateConstructor<wrapper>{})) {}
+    constexpr wrapper(wrapper<S, const_reference> other) : Base(other.apply(AggregateConstructor<wrapper>{})) {}
+
+    //constexpr S<MemLayout::pointer> operator& () { return apply(GetPointer<S<MemLayout::pointer>>{}); }
+    //constexpr S<MemLayout::const_pointer> operator& () const { return apply(GetPointer<S<MemLayout::const_pointer>>{}); }
 };
 
 template <template <template <class> class> class S>
-struct CRTP<S, reference_restrict> {
-    using Derived = S<reference_restrict>;
-    template <template <class> class F_out>
-    constexpr operator S<F_out>() {
-        return static_cast<Derived*>(this)->apply(AggregateConstructor<S<F_out>>{});
-    }
-    template <template <class> class F_out>
-    constexpr operator S<F_out>() const {
-        return static_cast<const Derived*>(this)->apply(AggregateConstructor<S<F_out>>{});
-    }
-    template <template <class> class F_other>
-    constexpr Derived& operator=(S<F_other>& other) {
-        memberwise(*static_cast<Derived*>(this), other, CopyAssignment<reference_restrict, F_other>{});
-        return *static_cast<Derived*>(this);
-    }
-    template <template <class> class F_other>
-    constexpr Derived& operator=(S<F_other>&& other) {
-        memberwise(*static_cast<Derived*>(this), other, MoveAssignment<reference_restrict, F_other>{});
-        return *static_cast<Derived*>(this);
-    }
-    constexpr S<pointer_restrtict> operator& () {
-        return static_cast<Derived*>(this)->apply(GetPointer<S<pointer_restrtict>>{});
-    }
-    constexpr S<const_pointer_restrict> operator& () const {
-        return static_cast<const Derived*>(this)->apply(GetPointer<S<const_pointer_restrict>>{});
-    }
-};
+struct wrapper<S, reference> : public S<reference> {
+    using Base = S<reference>;
 
-template <template <template <class> class> class S>
-struct CRTP<S, const_reference_restrict> {
-    using Derived = S<const_reference_restrict>;
-    template <template <class> class F_out>
-    constexpr operator S<F_out>() const {
-        return static_cast<const Derived*>(this)->apply(AggregateConstructor<S<F_out>>{});
-    }
-    constexpr S<const_pointer_restrict> operator& () const {
-        return static_cast<const Derived*>(this)->apply(GetPointer<S<const_pointer_restrict>>{});
-    }
-};
-
-template <
-    template <template <class> class> class S,
-    template <class> class F
->
-struct iterator {
-    //using iterator_category = std::random_access_iterator_tag;
-    using difference_type = ptrdiff_t;
-    using value_type = S<value>;
-    using pointer = S<F>;
-    using reference = S<reference>;
-
-    difference_type index;
-    pointer handle;
-
-    constexpr bool operator==(iterator const& other) const { return index == other.index; }
-    constexpr bool operator!=(iterator const& other) const { return index != other.index; }
-    constexpr bool operator<(iterator const& other) const { return index < other.index; }
-
-    constexpr iterator operator+(difference_type i) const { return {index + i, handle}; }
-    constexpr iterator operator-(difference_type i) const { return {index - i, handle}; }
+    constexpr wrapper() = delete;
+    constexpr wrapper(Base b) : Base{static_cast<Base&&>(b)} {}
+    constexpr wrapper(wrapper<S, value>& other) : Base(other.apply(AggregateConstructor<wrapper>{})) {}
     
-    constexpr difference_type operator-(iterator const& other) const { 
-        return difference_type(index) - difference_type(other.index); 
-    }
-    
-    constexpr iterator& operator++() { ++index; return *this; }
-    constexpr iterator& operator--() { --index; return *this; }
+    constexpr wrapper(const wrapper& other) = default;
 
-    constexpr reference operator*() { return handle[index]; }
+    constexpr wrapper& operator=(const wrapper& other) {
+        Base::apply(other, CopyAssignment{});
+        return *this;
+    }
+    constexpr wrapper& operator=(const wrapper<S, const_reference>& other) {
+        Base::apply(other, CopyAssignment{});
+        return *this;
+    }
+    constexpr wrapper& operator=(const wrapper<S, value>& other) {
+        Base::apply(other, CopyAssignment{});
+        return *this;
+    }
+
+    constexpr wrapper(wrapper&& other) = default;
+    
+    constexpr wrapper& operator=(wrapper&& other) { return operator=(other); }
+
+    constexpr wrapper<S, pointer> operator& () { return Base::apply(GetPointer<wrapper<S, pointer>>{}); }
+    //constexpr wrapper<S, const_pointer> operator& () const { return Base::apply(GetPointer<wrapper<S, const_pointer>>{}); }
 };
+
+template <template <template <class> class> class S>
+struct wrapper<S, const_reference> : public S<const_reference> {
+    using Base = S<const_reference>;
+
+    constexpr wrapper() = delete;
+    constexpr wrapper(Base b) : Base{static_cast<Base&&>(b)} {}
+    constexpr wrapper(wrapper<S, value> other) : Base(other.apply(AggregateConstructor<wrapper>{})) {}
+    constexpr wrapper(wrapper<S, reference> other) : Base(other.apply(AggregateConstructor<wrapper>{})) {}
+
+    constexpr wrapper<S, const_pointer> operator&() const { return Base::apply(GetPointer<wrapper<S, const_pointer>>{}); }
+};
+
+template <template <template <class> class> class S>
+struct wrapper<S, pointer> : public S<pointer> {
+    using Base = S<pointer>;
+
+    constexpr wrapper() = default;
+    constexpr wrapper(Base b) : Base{static_cast<Base&&>(b)} {}
+
+    constexpr wrapper<S, reference> operator[] (size_t i) { return Base::apply(RandomAccessAt<wrapper<S, reference>>{i}); }
+    constexpr wrapper<S, const_reference> operator[] (size_t i) const { return Base::apply(RandomAccessAt<wrapper<S, const_reference>>{i}); }
+
+    constexpr wrapper<S, reference> operator*() { return operator[](0); }
+    constexpr wrapper<S, const_reference> operator*() const { return operator[](0); }
+
+    constexpr bool operator==(const wrapper& other) const { return Base::apply(FirstMember{}) == other.apply(FirstMember{}); }
+    constexpr bool operator!=(const wrapper& other) const { return !this->operator==(other); }
+    constexpr bool operator<(const wrapper& other) const { return Base::apply(FirstMember{}) < other.apply(FirstMember{}); }
+
+    constexpr wrapper operator+(ptrdiff_t i) const { return Base::apply(Advance<wrapper>{i}); }
+    constexpr wrapper operator-(ptrdiff_t i) const { return operator+(-i); }
+    constexpr ptrdiff_t operator-(const wrapper& other) const { return Base::apply(FirstMember{}) - other.apply(FirstMember{}); }
+
+    constexpr wrapper& operator++() { Base::apply(PreIncrement<wrapper>{}); return *this; }
+    constexpr wrapper& operator+=(ptrdiff_t i) { return *this = *this + i; }
+    constexpr wrapper& operator--() { Base::apply(PreDecrement<wrapper>{}); return *this; }
+    constexpr wrapper& operator-=(ptrdiff_t i) { return *this = *this - i; }
+};
+
+template <template <template <class> class> class S>
+struct wrapper<S, const_pointer> : public S<const_pointer> {
+    using Base = S<const_pointer>;
+
+    constexpr wrapper() = default;
+    constexpr wrapper(Base b) : Base{static_cast<Base&&>(b)} {}
+    constexpr wrapper(wrapper<S, pointer> other) : Base(other.apply(AggregateConstructor<wrapper>{})) {}
+
+    constexpr wrapper<S, const_reference> operator[] (size_t i) const { return Base::apply(RandomAccessAt<wrapper<S, const_reference>>{i}); }
+    constexpr wrapper<S, const_reference> operator*() const { return operator[](0); }
+};
+
+enum Flag { soa, aos };
+
+template <template <template <class> class> class S, template <class> class F, Flag L>
+struct interface;
+
+template <template <template <class> class> class S, template <class> class F>
+struct interface<S, F, Flag::aos> { using type = F<S<value>>; };
+
+template <template <template <class> class> class S, template <class> class F>
+struct interface<S, F, Flag::soa> { using type = wrapper<S, F>; };
 
 }  // namespace MemLayout
 
-#define MEMLAYOUT_MEMBERFUNCTIONS(STRUCT, CONTAINER, ...)\
+#define MEMLAYOUT_APPLY_UNARY(...)\
     template <class Function>\
     constexpr auto apply(Function&& f) { return f(__VA_ARGS__); }\
     template <class Function>\
     constexpr auto apply(Function&& f) const { return f(__VA_ARGS__); }\
-    template <template <class> class F_left, template <class> class F_right, class FunctionObject>\
-    constexpr friend void memberwise(STRUCT<F_left>& left, STRUCT<F_right>& right, FunctionObject&& f);\
+
+#define MEMLAYOUT_EXPAND(m) f(m, other.m)
+
+#define MEMLAYOUT_APPLY_BINARY(STRUCT_NAME, ...)\
+    template <template <class> class F_other, class Function>\
+    constexpr STRUCT_NAME apply(const STRUCT_NAME<F_other>& other, Function&& f) { return {__VA_ARGS__}; }\
+    template <template <class> class F_other, class Function>\
+    constexpr STRUCT_NAME apply(const STRUCT_NAME<F_other>& other, Function&& f) const { return {__VA_ARGS__}; }\
 
 #endif // MEMLAYOUT_H

@@ -33,19 +33,18 @@ class GPUTPCTrackLinearisation;
  *
  */
 template <template <class> class F>
-class GPUTPCTrackParamSkeleton : public MemLayout::CRTP<GPUTPCTrackParamSkeleton, F>
+class GPUTPCTrackParamSkeleton
 {
  public:
-    using Base = MemLayout::CRTP<GPUTPCTrackParamSkeleton, F>;
-    using Base::operator=;
-  MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCTrackParamSkeleton, F, mParam, mSignCosPhi, mChi2, mNDF)
+  MEMLAYOUT_APPLY_UNARY(mParam, mSignCosPhi, mChi2, mNDF)
+  MEMLAYOUT_APPLY_BINARY(GPUTPCTrackParamSkeleton, MEMLAYOUT_EXPAND(mParam), MEMLAYOUT_EXPAND(mSignCosPhi), MEMLAYOUT_EXPAND(mChi2), MEMLAYOUT_EXPAND(mNDF))
 
   struct GPUTPCTrackFitParam {
     float bethe, e, theta2, EP2, sigmadE2, k22, k33, k43, k44; // parameters
   };
 
-  GPUd() GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> GetParam() const { return mParam; }
-  GPUd() void SetParam(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v);
+  GPUd() MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> GetParam() const { return mParam; }
+  GPUd() void SetParam(MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> v);
   GPUd() void InitParam();
 
   GPUd() float X() const { return mParam.X(); }
@@ -99,8 +98,8 @@ class GPUTPCTrackParamSkeleton : public MemLayout::CRTP<GPUTPCTrackParamSkeleton
   GPUd() void SetChi2(float v) { mChi2 = v; }
   GPUd() void SetNDF(int32_t v) { mNDF = v; }
 
-  GPUd() float GetDist2(GPUTPCTrackParamSkeleton<MemLayout::const_reference_restrict> t) const;
-  GPUd() float GetDistXZ2(GPUTPCTrackParamSkeleton<MemLayout::const_reference_restrict> t) const;
+  GPUd() float GetDist2(MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::const_reference> t) const; // const_reference_restrict
+  GPUd() float GetDistXZ2(MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::const_reference> t) const; // const_reference_restrict
 
   GPUd() float GetS(float x, float y, float Bz) const;
 
@@ -146,10 +145,10 @@ class GPUTPCTrackParamSkeleton : public MemLayout::CRTP<GPUTPCTrackParamSkeleton
 
   GPUd() void Print() const;
 
-#ifndef GPUCA_GPUCODE
+//#ifndef GPUCA_GPUCODE
  //private:
-#endif                         //! GPUCA_GPUCODE
-  GPUTPCBaseTrackParamSkeleton<F> mParam;
+//#endif                         //! GPUCA_GPUCODE
+  MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, F> mParam;
 
  //private:
   // WARNING, Track Param Data is copied in the GPU Tracklet Constructor element by element instead of using copy constructor!!!
@@ -160,20 +159,8 @@ class GPUTPCTrackParamSkeleton : public MemLayout::CRTP<GPUTPCTrackParamSkeleton
   F<int32_t> mNDF;      // the Number of Degrees of Freedom
 };
 
-template <
-    template <class> class F_left,
-    template <class> class F_right,
-    class FunctionObject
->
-constexpr void memberwise(GPUTPCTrackParamSkeleton<F_left>& left, GPUTPCTrackParamSkeleton<F_right>& right, FunctionObject&& f) {
-    f(left.mParam, right.mParam);
-    f(left.mSignCosPhi, right.mSignCosPhi);
-    f(left.mChi2, right.mChi2);
-    f(left.mNDF, right.mNDF);
-}
-
 template <template <class> class F>
-GPUd() void GPUTPCTrackParamSkeleton<F>::SetParam(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v) { mParam = v; }
+GPUd() void GPUTPCTrackParamSkeleton<F>::SetParam(MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> v) { mParam = v; }
 
 template <template <class> class F>
 GPUd() void GPUTPCTrackParamSkeleton<F>::InitParam()

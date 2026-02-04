@@ -45,11 +45,10 @@ struct Parameters {
  * This class is used for transfer between tracker and merger and does not contain the covariance matrice
  */
 template <template <class> class F>
-struct GPUTPCBaseTrackParamSkeleton : public MemLayout::CRTP<GPUTPCBaseTrackParamSkeleton, F>
+struct GPUTPCBaseTrackParamSkeleton
 {
-  using Base = MemLayout::CRTP<GPUTPCBaseTrackParamSkeleton, F>;
-  using Base::operator=;
-  MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCBaseTrackParamSkeleton, F, mX, mC, mZOffset, mP)
+  MEMLAYOUT_APPLY_UNARY(mX, mC, mZOffset, mP)
+  MEMLAYOUT_APPLY_BINARY(GPUTPCBaseTrackParamSkeleton, MEMLAYOUT_EXPAND(mX), MEMLAYOUT_EXPAND(mC), MEMLAYOUT_EXPAND(mZOffset), MEMLAYOUT_EXPAND(mP))
 
   GPUd() float X() const { return mX; }
   GPUd() float Y() const { return mP[0]; }
@@ -92,32 +91,6 @@ struct GPUTPCBaseTrackParamSkeleton : public MemLayout::CRTP<GPUTPCBaseTrackPara
   GPUd() void SetQPt(float v) { mP[4] = v; }
   GPUd() void SetZOffset(float v) { mZOffset = v; }
 
-  // Needed for iterators and std::sort
-  /*template <template <class> class F_in>
-  constexpr GPUTPCBaseTrackParamSkeleton& operator=(GPUTPCBaseTrackParamSkeleton<F_in> other) {
-    mX = other.mX;
-    mC = other.mC;
-    mZOffset = other.mZOffset;
-    mP = other.mP;
-    return *this;
-  }*/
-  //GPUTPCBaseTrackParamSkeleton() = default;
-  //GPUTPCBaseTrackParamSkeleton(F<float> X, F<Covariance> C, F<float> ZOffset, F<Parameters> P) : mX(X), mC(C), mZOffset(ZOffset), mP(P) { }
-  /*GPUTPCBaseTrackParamSkeleton(const GPUTPCBaseTrackParamSkeleton& other) = default;
-  GPUTPCBaseTrackParamSkeleton& operator=(const GPUTPCBaseTrackParamSkeleton& other) {
-    mX = other.mX;
-    mC = other.mC;
-    mZOffset = other.mZOffset;
-    mP = other.mP;
-    return *this;
-  }
-  friend void swap(GPUTPCBaseTrackParamSkeleton& a, GPUTPCBaseTrackParamSkeleton& b) {
-    std::swap(a.mX, b.mX);
-    std::swap(a.mC, b.mC);
-    std::swap(a.mZOffset, b.mZOffset);
-    std::swap(a.mP, b.mP);
-  }*/
-
   // WARNING, Track Param Data is copied in the GPU Tracklet Constructor element by element instead of using copy constructor!!!
   // This is neccessary for performance reasons!!!
   // Changes to Elements of this class therefore must also be applied to TrackletConstructor!!!
@@ -127,19 +100,16 @@ struct GPUTPCBaseTrackParamSkeleton : public MemLayout::CRTP<GPUTPCBaseTrackPara
   F<Parameters> mP;    // 'active' track parameters: Y, Z, SinPhi, DzDs, q/Pt
 };
 
-template <
-    template <class> class F_left,
-    template <class> class F_right,
-    class FunctionObject
->
-constexpr void memberwise(GPUTPCBaseTrackParamSkeleton<F_left>& left, GPUTPCBaseTrackParamSkeleton<F_right>& right, FunctionObject&& f) {
-    f(left.mX, right.mX);
-    f(left.mC, right.mC);
-    f(left.mZOffset, right.mZOffset);
-    f(left.mP, right.mP);
+// Needed for sorting
+constexpr void swap(GPUTPCBaseTrackParamSkeleton<MemLayout::reference> a, GPUTPCBaseTrackParamSkeleton<MemLayout::reference> b) {
+    using std::swap;
+    swap(a.mX, b.mX);
+    swap(a.mC, b.mC);
+    swap(a.mZOffset, b.mZOffset);
+    swap(a.mP, b.mP);
 }
 
-using GPUTPCBaseTrackParam = GPUTPCBaseTrackParamSkeleton<MemLayout::value>;
+using GPUTPCBaseTrackParam = MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::value>;
 
 } // namespace o2::gpu
 

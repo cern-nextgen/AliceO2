@@ -24,6 +24,7 @@
 #include "GPUProcessor.h"
 #include "GPUTPCGMMergerTypes.h"
 #include "GPUGeneralKernels.h"
+#include "MemLayout.h"
 
 #if !defined(GPUCA_GPUCODE)
 #include <cmath>
@@ -73,7 +74,7 @@ class GPUTPCGMMerger : public GPUProcessor
     GPUAtomic(uint32_t) nMergedTrackClusters;
     GPUAtomic(uint32_t) nO2Tracks;
     GPUAtomic(uint32_t) nO2ClusRefs;
-    const GPUTPCTrack* firstExtrapolatedTracks[NSECTORS];
+    MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_pointer> firstExtrapolatedTracks[NSECTORS];
     GPUAtomic(uint32_t) tmpCounter[2 * NSECTORS];
     GPUAtomic(uint32_t) nLooperMatchCandidates;
   };
@@ -153,8 +154,8 @@ class GPUTPCGMMerger : public GPUProcessor
   GPUd() uint16_t MemoryResOutputO2MC() const { return mMemoryResOutputO2MC; }
   GPUd() uint16_t MemoryResOutputO2Scratch() const { return mMemoryResOutputO2Scratch; }
 
-  GPUd() int32_t RefitSectorTrack(GPUTPCGMSectorTrack& sectorTrack, const GPUTPCTrack* inTrack, float alpha, int32_t sector);
-  GPUd() void SetTrackClusterZT(GPUTPCGMSectorTrack& track, int32_t iSector, const GPUTPCTrack* sectorTr);
+  GPUd() int32_t RefitSectorTrack(GPUTPCGMSectorTrack& sectorTrack, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_pointer> inTrack, float alpha, int32_t sector);
+  GPUd() void SetTrackClusterZT(GPUTPCGMSectorTrack& track, int32_t iSector, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_pointer> sectorTr);
 
   int32_t CheckSectors();
   GPUd() void RefitSectorTracks(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, int32_t iSector);
