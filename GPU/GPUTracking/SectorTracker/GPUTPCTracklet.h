@@ -28,48 +28,35 @@ namespace o2::gpu
  * The class is dedicated for internal use by the GPUTPCTracker algorithm.
  */
 template <template <class> class F>
-class GPUTPCTrackletSkeleton : public MemLayout::CRTP<GPUTPCTrackletSkeleton, F>
+class GPUTPCTrackletSkeleton
 {
  public:
-  using Base = MemLayout::CRTP<GPUTPCTrackletSkeleton, F>;
-  using Base::operator=;
-  MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCTrackletSkeleton, F, mFirstRow, mLastRow, mParam, mHitWeight, mFirstHit)
-#if !defined(GPUCA_GPUCODE)
+  MEMLAYOUT_APPLY_UNARY(mFirstRow, mLastRow, mParam, mHitWeight, mFirstHit)
+  MEMLAYOUT_APPLY_BINARY(GPUTPCTrackletSkeleton, MEMLAYOUT_EXPAND(mFirstRow), MEMLAYOUT_EXPAND(mLastRow), MEMLAYOUT_EXPAND(mParam), MEMLAYOUT_EXPAND(mHitWeight), MEMLAYOUT_EXPAND(mFirstHit))
+
+//#if !defined(GPUCA_GPUCODE)
   //GPUTPCTrackletSkeleton() : mFirstRow(0), mLastRow(0), mParam(), mHitWeight(0), mFirstHit(0) {};
-#endif //! GPUCA_GPUCODE
+//#endif //! GPUCA_GPUCODE
 
   GPUhd() int32_t FirstRow() const { return mFirstRow; }
   GPUhd() int32_t LastRow() const { return mLastRow; }
   GPUhd() int32_t HitWeight() const { return mHitWeight; }
   GPUhd() uint32_t FirstHit() const { return mFirstHit; }
-  GPUhd() GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> Param() const { return mParam; }
+  GPUhd() MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> Param() const { return mParam; }
 
   GPUhd() void SetFirstRow(int32_t v) { mFirstRow = v; }
   GPUhd() void SetLastRow(int32_t v) { mLastRow = v; }
   GPUhd() void SetFirstHit(uint32_t v) { mFirstHit = v; }
-  GPUhd() void SetParam(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v) { mParam = v; }
+  GPUhd() void SetParam(MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> v) { mParam = v; }
   GPUhd() void SetHitWeight(const int32_t w) { mHitWeight = w; }
 
 // private:
   F<int32_t> mFirstRow;           // first TPC row // TODO: We can use smaller data format here!
   F<int32_t> mLastRow;            // last TPC row
-  GPUTPCBaseTrackParamSkeleton<F> mParam; // tracklet parameters
+  MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, F> mParam; // tracklet parameters
   F<int32_t> mHitWeight;          // Hit Weight of Tracklet
   F<uint32_t> mFirstHit;          // first hit in row hit array
 };
-
-template <
-    template <class> class F_left,
-    template <class> class F_right,
-    class FunctionObject
->
-constexpr void memberwise(GPUTPCTrackletSkeleton<F_left>& left, GPUTPCTrackletSkeleton<F_right>& right, FunctionObject&& f) {
-    f(left.mFirstRow, right.mFirstRow);
-    f(left.mLastRow, right.mLastRow);
-    f(left.mParam, right.mParam);
-    f(left.mHitWeight, right.mHitWeight);
-    f(left.mFirstHit, right.mFirstHit);
-}
 
 } // namespace o2::gpu
 

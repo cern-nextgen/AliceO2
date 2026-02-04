@@ -29,55 +29,60 @@ namespace o2::gpu
  * The track parameters at both ends are stored separately in the GPUTPCEndPoint class
  */
 template <template <class> class F>
-class GPUTPCTrackSkeleton : public MemLayout::CRTP<GPUTPCTrackSkeleton, F>
+class GPUTPCTrackSkeleton
 {
  public:
-    using Base = MemLayout::CRTP<GPUTPCTrackSkeleton, F>;
-    using Base::operator=;
-  MEMLAYOUT_MEMBERFUNCTIONS(GPUTPCTrackSkeleton, F, mFirstHitID, mNHits, mLocalTrackId, mParam)
-    
-#if !defined(GPUCA_GPUCODE)
-  constexpr GPUTPCTrackSkeleton() : mFirstHitID(0), mNHits(0), mLocalTrackId(-1), mParam() { }
-  constexpr GPUTPCTrackSkeleton(
-    F<int32_t> FirstHitID,
-    F<int32_t> NHits,
-    F<int32_t> LocalTrackId,
-    GPUTPCBaseTrackParamSkeleton<F> Param
-  ) : mFirstHitID(FirstHitID), mNHits(NHits), mLocalTrackId(LocalTrackId), mParam(Param) { }
-  ~GPUTPCTrackSkeleton() = default;
-#endif //! GPUCA_GPUCODE
+    MEMLAYOUT_APPLY_UNARY(mFirstHitID, mNHits, mLocalTrackId, mParam)
+    MEMLAYOUT_APPLY_BINARY(GPUTPCTrackSkeleton, MEMLAYOUT_EXPAND(mFirstHitID), MEMLAYOUT_EXPAND(mNHits), MEMLAYOUT_EXPAND(mLocalTrackId), MEMLAYOUT_EXPAND(mParam))
+
+//#if !defined(GPUCA_GPUCODE)
+//  ~GPUTPCTrackSkeleton() = default;
+//#endif //! GPUCA_GPUCODE
 
   GPUhd() int32_t NHits() const { return mNHits; }
   GPUhd() int32_t LocalTrackId() const { return mLocalTrackId; }
   GPUhd() int32_t FirstHitID() const { return mFirstHitID; }
-  GPUhd() GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> Param() const { return mParam; }
+  GPUhd() MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> Param() const { return mParam; }
 
   GPUhd() void SetNHits(int32_t v) { mNHits = v; }
   GPUhd() void SetLocalTrackId(int32_t v) { mLocalTrackId = v; }
   GPUhd() void SetFirstHitID(int32_t v) { mFirstHitID = v; }
-  GPUhd() void SetParam(GPUTPCBaseTrackParamSkeleton<MemLayout::const_reference> v) { mParam = v; }
+  GPUhd() void SetParam(MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> v) { mParam = v; }
 
  //private:
   F<int32_t> mFirstHitID;         // index of the first track cell in the track->cell pointer array
   F<int32_t> mNHits;              // number of track cells
   F<int32_t> mLocalTrackId;       // Id of local track this extrapolated track belongs to, index of this track itself if it is a local track
-  GPUTPCBaseTrackParamSkeleton<F> mParam; // track parameters
+  MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, F> mParam; // track parameters
 };
 
-template <
-    template <class> class F_left,
-    template <class> class F_right,
-    class FunctionObject
->
-constexpr void memberwise(GPUTPCTrackSkeleton<F_left>& left, GPUTPCTrackSkeleton<F_right>& right, FunctionObject&& f) {
-    f(left.mFirstHitID, right.mFirstHitID);
-    f(left.mNHits, right.mNHits);
-    f(left.mLocalTrackId, right.mLocalTrackId);
-    f(left.mParam, right.mParam);
+// Needed for sorting
+constexpr void swap(GPUTPCTrackSkeleton<MemLayout::reference> a, GPUTPCTrackSkeleton<MemLayout::reference> b) {
+    using std::swap;
+    swap(a.mFirstHitID, b.mFirstHitID);
+    swap(a.mNHits, b.mNHits);
+    swap(a.mLocalTrackId, b.mLocalTrackId);
+    swap(a.mParam, b.mParam);
 }
 
-using GPUTPCTrack = GPUTPCTrackSkeleton<MemLayout::value>;
+using GPUTPCTrack = MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::value>;
 
 } // namespace o2::gpu
+
+namespace std {
+
+template<class T> class iterator_traits;
+class random_access_iterator_tag;
+
+template<>
+struct iterator_traits<MemLayout::wrapper<o2::gpu::GPUTPCTrackSkeleton, MemLayout::pointer>> {
+    using iterator_category = random_access_iterator_tag;
+    using difference_type = MemLayout::ptrdiff_t;
+    using value_type = MemLayout::wrapper<o2::gpu::GPUTPCTrackSkeleton, MemLayout::value>;
+    using pointer = void; //MemLayout::wrapper<o2::gpu::GPUTPCTrackSkeleton, MemLayout::pointer>;
+    using reference = MemLayout::wrapper<o2::gpu::GPUTPCTrackSkeleton, MemLayout::reference>;
+};
+
+}
 
 #endif // GPUTPCTRACK_H

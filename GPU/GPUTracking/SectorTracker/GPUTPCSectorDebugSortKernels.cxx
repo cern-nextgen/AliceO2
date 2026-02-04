@@ -91,7 +91,7 @@ GPUdii() void GPUTPCSectorDebugSortKernels::Thread<GPUTPCSectorDebugSortKernels:
   if (iThread || iBlock) {
     return;
   }
-  auto sorter = [&tracker](const GPUTPCTrack& trk1, const GPUTPCTrack& trk2) {
+  auto sorter = [&tracker](MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> trk1, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> trk2) {
     if (trk1.NHits() != trk2.NHits()) {
       return trk1.NHits() > trk2.NHits();
     }
@@ -106,6 +106,6 @@ GPUdii() void GPUTPCSectorDebugSortKernels::Thread<GPUTPCSectorDebugSortKernels:
     }
     return tracker.TrackHits()[trk1.FirstHitID()].HitIndex() > tracker.TrackHits()[trk2.FirstHitID()].HitIndex();
   };
-  GPUCommonAlgorithm::sortDeviceDynamic(tracker.Tracks(), tracker.Tracks() + tracker.CommonMemory()->nLocalTracks, sorter);
-  GPUCommonAlgorithm::sortDeviceDynamic(tracker.Tracks() + tracker.CommonMemory()->nLocalTracks, tracker.Tracks() + *tracker.NTracks(), sorter);
+  GPUCommonAlgorithm::sortDeviceDynamic(tracker.Tracks(), &tracker.Tracks()[tracker.CommonMemory()->nLocalTracks], sorter);
+  GPUCommonAlgorithm::sortDeviceDynamic(&tracker.Tracks()[tracker.CommonMemory()->nLocalTracks], &tracker.Tracks()[*tracker.NTracks()], sorter);
 }

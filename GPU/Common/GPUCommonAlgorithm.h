@@ -16,6 +16,7 @@
 #define GPUCOMMONALGORITHM_H
 
 #include "GPUCommonDef.h"
+#include "MemLayout.h"
 
 #if !defined(GPUCA_GPUCODE) // Could also enable custom search on the CPU, but it is not always faster, so we stick to std::sort
 #include <algorithm>
@@ -28,19 +29,20 @@ namespace o2::gpu
 {
 class GPUCommonAlgorithm
 {
+
  public:
   template <class T>
-  GPUd() static void sort(T* begin, T* end);
+  GPUd() static void sort(T begin, T end);
   template <class T>
   GPUd() static void sortInBlock(T* begin, T* end);
   template <class T>
-  GPUd() static void sortDeviceDynamic(T* begin, T* end);
+  GPUd() static void sortDeviceDynamic(T begin, T end);
   template <class T, class S>
-  GPUd() static void sort(T* begin, T* end, const S& comp);
+  GPUd() static void sort(T begin, T end, const S& comp);
   template <class T, class S>
   GPUd() static void sortInBlock(T* begin, T* end, const S& comp);
   template <class T, class S>
-  GPUd() static void sortDeviceDynamic(T* begin, T* end, const S& comp);
+  GPUd() static void sortDeviceDynamic(T begin, T end, const S& comp);
 #ifndef __OPENCL__
   template <class T, class S>
   GPUh() static void sortOnDevice(auto* rec, int32_t stream, T* begin, size_t N, const S& comp);
@@ -224,7 +226,7 @@ namespace o2::gpu
 {
 
 template <class T>
-GPUdi() void GPUCommonAlgorithm::sortDeviceDynamic(T* begin, T* end)
+GPUdi() void GPUCommonAlgorithm::sortDeviceDynamic(T begin, T end)
 {
 #ifndef GPUCA_GPUCODE
   GPUCommonAlgorithm::sort(begin, end);
@@ -234,7 +236,7 @@ GPUdi() void GPUCommonAlgorithm::sortDeviceDynamic(T* begin, T* end)
 }
 
 template <class T, class S>
-GPUdi() void GPUCommonAlgorithm::sortDeviceDynamic(T* begin, T* end, const S& comp)
+GPUdi() void GPUCommonAlgorithm::sortDeviceDynamic(T begin, T end, const S& comp)
 {
   GPUCommonAlgorithm::sort(begin, end, comp);
 }
@@ -248,7 +250,7 @@ namespace o2::gpu
 {
 
 template <class T>
-GPUdi() void GPUCommonAlgorithm::sort(T* begin, T* end)
+GPUdi() void GPUCommonAlgorithm::sort(T begin, T end)
 {
 #ifdef GPUCA_ALGORITHM_STD
   std::sort(begin, end);
@@ -258,7 +260,7 @@ GPUdi() void GPUCommonAlgorithm::sort(T* begin, T* end)
 }
 
 template <class T, class S>
-GPUdi() void GPUCommonAlgorithm::sort(T* begin, T* end, const S& comp)
+GPUdi() void GPUCommonAlgorithm::sort(T begin, T end, const S& comp)
 {
 #ifdef GPUCA_ALGORITHM_STD
   std::sort(begin, end, comp);
