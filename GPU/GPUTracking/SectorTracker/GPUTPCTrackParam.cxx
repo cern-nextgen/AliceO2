@@ -15,7 +15,6 @@
 #include "GPUTPCTrackLinearisation.h"
 #include "GPUTPCTrackParam.h"
 #include "GPUTPCGeometry.h"
-#include "GPUTPCDef.h"
 #include "MemLayout.h"
 
 using namespace o2::gpu;
@@ -31,7 +30,7 @@ using namespace o2::gpu;
 //
 
 template <template <class> class F>
-GPUd() float GPUTPCTrackParamSkeleton<F>::GetDist2(MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::const_reference> t) const // const_reference_restrict
+GPUd() float GPUTPCTrackParamSkeleton<F>::GetDist2(MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::const_reference_restrict> t) const
 {
   // get squared distance between tracks
 
@@ -42,7 +41,7 @@ GPUd() float GPUTPCTrackParamSkeleton<F>::GetDist2(MemLayout::wrapper<GPUTPCTrac
 }
 
 template <template <class> class F>
-GPUd() float GPUTPCTrackParamSkeleton<F>::GetDistXZ2(MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::const_reference> t) const // const_reference_restrict
+GPUd() float GPUTPCTrackParamSkeleton<F>::GetDistXZ2(MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::const_reference_restrict> t) const
 {
   // get squared distance between tracks in X&Z
 
@@ -305,12 +304,12 @@ template <template <class> class F>
 GPUd() bool GPUTPCTrackParamSkeleton<F>::TransportToX(float x, float Bz, float maxSinPhi)
 {
   //* Transport the track parameters to X=x
-  GPUTPCTrackLinearisation t0(*static_cast<MemLayout::wrapper<GPUTPCTrackParamSkeleton, F>*>(this));
+  GPUTPCTrackLinearisation t0{{*this}};
   return TransportToX(x, t0, Bz, maxSinPhi);
 }
 
 template <template <class> class F>
-GPUd() bool GPUTPCTrackParamSkeleton<F>::TransportToXWithMaterial(float x, GPUTPCTrackLinearisation& GPUrestrict() t0, GPUTPCTrackFitParam& GPUrestrict() par, float Bz, float maxSinPhi)
+GPUd() bool GPUTPCTrackParamSkeleton<F>::TransportToXWithMaterial(float x, GPUTPCTrackLinearisation& GPUrestrict() t0, detail::GPUTPCTrackFitParam& GPUrestrict() par, float Bz, float maxSinPhi)
 {
   //* Transport the track parameters to X=x  taking into account material budget
 
@@ -329,10 +328,10 @@ GPUd() bool GPUTPCTrackParamSkeleton<F>::TransportToXWithMaterial(float x, GPUTP
 }
 
 template <template <class> class F>
-GPUd() bool GPUTPCTrackParamSkeleton<F>::TransportToXWithMaterial(float x, GPUTPCTrackFitParam& GPUrestrict() par, float Bz, float maxSinPhi)
+GPUd() bool GPUTPCTrackParamSkeleton<F>::TransportToXWithMaterial(float x, detail::GPUTPCTrackFitParam& GPUrestrict() par, float Bz, float maxSinPhi)
 {
   //* Transport the track parameters to X=x  taking into account material budget
-  GPUTPCTrackLinearisation t0(*static_cast<MemLayout::wrapper<GPUTPCTrackParamSkeleton, F>*>(this));
+  GPUTPCTrackLinearisation t0{{*this}};
   return TransportToXWithMaterial(x, t0, par, Bz, maxSinPhi);
 }
 
@@ -341,7 +340,7 @@ GPUd() bool GPUTPCTrackParamSkeleton<F>::TransportToXWithMaterial(float x, float
 {
   //* Transport the track parameters to X=x taking into account material budget
 
-  GPUTPCTrackFitParam par;
+  detail::GPUTPCTrackFitParam par;
   CalculateFitParameters(par);
   return TransportToXWithMaterial(x, par, Bz, maxSinPhi);
 }
@@ -440,7 +439,7 @@ GPUd() float GPUTPCTrackParamSkeleton<F>::ApproximateBetheBloch(float beta2)
 }
 
 template <template <class> class F>
-GPUd() void GPUTPCTrackParamSkeleton<F>::CalculateFitParameters(GPUTPCTrackFitParam& par, float mass)
+GPUd() void GPUTPCTrackParamSkeleton<F>::CalculateFitParameters(detail::GPUTPCTrackFitParam& par, float mass)
 {
   //*!
 
@@ -475,7 +474,7 @@ GPUd() void GPUTPCTrackParamSkeleton<F>::CalculateFitParameters(GPUTPCTrackFitPa
 }
 
 template <template <class> class F>
-GPUd() bool GPUTPCTrackParamSkeleton<F>::CorrectForMeanMaterial(float xOverX0, float xTimesRho, const GPUTPCTrackFitParam& par)
+GPUd() bool GPUTPCTrackParamSkeleton<F>::CorrectForMeanMaterial(float xOverX0, float xTimesRho, const detail::GPUTPCTrackFitParam& par)
 {
   //------------------------------------------------------------------
   // This function corrects the track parameters for the crossed material.
@@ -879,5 +878,5 @@ GPUd() int32_t GPUTPCTrackParamSkeleton<F>::GetPropagatedYZ(float bz, float x, f
 namespace o2::gpu {
   template class GPUTPCTrackParamSkeleton<MemLayout::value>;
   template class GPUTPCTrackParamSkeleton<MemLayout::reference>;
-  //template class GPUTPCTrackParamSkeleton<MemLayout::reference_restrict>;
+  template class GPUTPCTrackParamSkeleton<MemLayout::reference_restrict>;
 } // namespace o2::gpu

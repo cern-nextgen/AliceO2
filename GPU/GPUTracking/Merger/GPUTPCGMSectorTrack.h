@@ -74,9 +74,9 @@ class GPUTPCGMSectorTrack
     mClusterZT[1] = v2;
   }
 
-  GPUd() void Set(const GPUTPCGMTrackParam& trk, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_pointer> sectorTr, float alpha, int32_t sector);
+  GPUd() void Set(const GPUTPCGMTrackParam& trk, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> sectorTr, float alpha, int32_t sector);
   GPUd() void SetParam2(const GPUTPCGMTrackParam& trk);
-  GPUd() void Set(const GPUTPCGMMerger* merger, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_pointer> sectorTr, float alpha, int32_t sector);
+  GPUd() void Set(const GPUTPCGMMerger* merger, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> sectorTr, float alpha, int32_t sector);
   GPUd() void UseParam2() { mParam = mParam2; }
   GPUd() void SetX2(float v) { mParam2.mX = v; }
   GPUd() float X2() const { return mParam2.mX; }

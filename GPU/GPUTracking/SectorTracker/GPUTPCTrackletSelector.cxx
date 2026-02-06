@@ -40,7 +40,7 @@ GPUdii() void GPUTPCTrackletSelector::Thread<0>(int32_t nBlocks, int32_t nThread
   for (int32_t itr = s.mItr0 + iThread; itr < s.mNTracklets; itr += s.mNThreadsTotal) {
     GPUbarrierWarp();
 
-    GPUglobalref() MemLayout::wrapper<GPUTPCTrackletSkeleton, MemLayout::reference> tracklet = tracker.Tracklet(itr); // reference_restrict
+    GPUglobalref() MemLayout::wrapper<GPUTPCTrackletSkeleton, MemLayout::reference_restrict> tracklet = tracker.Tracklets()[itr];
 
     int32_t firstRow = tracklet.FirstRow();
     int32_t lastRow = tracklet.LastRow();

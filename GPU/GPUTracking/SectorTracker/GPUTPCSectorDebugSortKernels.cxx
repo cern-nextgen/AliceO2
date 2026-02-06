@@ -106,6 +106,6 @@ GPUdii() void GPUTPCSectorDebugSortKernels::Thread<GPUTPCSectorDebugSortKernels:
     }
     return tracker.TrackHits()[trk1.FirstHitID()].HitIndex() > tracker.TrackHits()[trk2.FirstHitID()].HitIndex();
   };
-  GPUCommonAlgorithm::sortDeviceDynamic(tracker.Tracks(), &tracker.Tracks()[tracker.CommonMemory()->nLocalTracks], sorter);
-  GPUCommonAlgorithm::sortDeviceDynamic(&tracker.Tracks()[tracker.CommonMemory()->nLocalTracks], &tracker.Tracks()[*tracker.NTracks()], sorter);
+  GPUCommonAlgorithm::sortDeviceDynamic(tracker.Tracks(), tracker.Tracks() + tracker.CommonMemory()->nLocalTracks, sorter);
+  GPUCommonAlgorithm::sortDeviceDynamic(tracker.Tracks() + tracker.CommonMemory()->nLocalTracks, tracker.Tracks() + *tracker.NTracks(), sorter);
 }

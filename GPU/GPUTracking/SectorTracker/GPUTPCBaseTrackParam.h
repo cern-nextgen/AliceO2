@@ -21,21 +21,28 @@
 namespace o2::gpu
 {
 
-struct Covariance {
-    float m00, m01, m02, m03, m04, m05, m06, m07, m08, m09, m10, m11, m12, m13, m14;
-    constexpr operator float*() { return &m00; }
-    constexpr operator const float*() const { return &m00; }
-    constexpr float& operator[](int32_t i) { return *((&m00) + i); }
-    constexpr const float& operator[](int32_t i) const { return *((&m00) + i); }
+namespace detail
+{
+
+struct GPUTPCCovariance
+{
+  float data[15];
+  constexpr operator float*() { return data; }
+  constexpr operator const float*() const { return data; }
+  constexpr float& operator[](int32_t i) { return data[i]; }
+  constexpr const float& operator[](int32_t i) const { return data[i]; }
 };
 
-struct Parameters {
-    float mY, mZ, mSinPhi, mDzDs, mQPt;
-    constexpr operator float*() { return &mY; }
-    constexpr operator const float*() const { return &mY; }
-    constexpr float& operator[](int32_t i) { return *((&mY) + i); }
-    constexpr const float& operator[](int32_t i) const { return *((&mY) + i); }
+struct GPUTPCParameter
+{
+  float data[5]; // mY, mZ, mSinPhi, mDzDs, mQPt
+  constexpr operator float*() { return data; }
+  constexpr operator const float*() const { return data; }
+  constexpr float& operator[](int32_t i) { return data[i]; }
+  constexpr const float& operator[](int32_t i) const { return data[i]; }
 };
+
+}
 
 /**
  * @class GPUTPCBaseTrackParam
@@ -95,9 +102,9 @@ struct GPUTPCBaseTrackParamSkeleton
   // This is neccessary for performance reasons!!!
   // Changes to Elements of this class therefore must also be applied to TrackletConstructor!!!
   F<float> mX;       // x position
-  F<Covariance> mC;   // the covariance matrix for Y,Z,SinPhi,..
+  F<detail::GPUTPCCovariance> mC;  // the covariance matrix for Y,Z,SinPhi,..
   F<float> mZOffset; // z offset
-  F<Parameters> mP;    // 'active' track parameters: Y, Z, SinPhi, DzDs, q/Pt
+  F<detail::GPUTPCParameter> mP;  // 'active' track parameters: Y, Z, SinPhi, DzDs, q/Pt
 };
 
 // Needed for sorting

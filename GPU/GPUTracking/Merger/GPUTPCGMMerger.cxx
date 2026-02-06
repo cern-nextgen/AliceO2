@@ -237,7 +237,7 @@ int64_t GPUTPCGMMerger::GetTrackLabelA(const S& trk) const
   int32_t nClusters = 0;
   if constexpr (std::is_same_v<S, GPUTPCGMBorderTrack&>) {
     sectorTrack = &mSectorTrackInfos[trk.TrackID()];
-    nClusters = (*sectorTrack->OrigTrack()).NHits();
+    nClusters = sectorTrack->OrigTrack()->NHits();
   } else {
     nClusters = trk.NClusters();
   }
@@ -246,7 +246,7 @@ int64_t GPUTPCGMMerger::GetTrackLabelA(const S& trk) const
     int32_t id;
     if constexpr (std::is_same_v<S, GPUTPCGMBorderTrack&>) {
       const GPUTPCTracker& tracker = GetConstantMem()->tpcTrackers[sectorTrack->Sector()];
-      const GPUTPCHitId& ic = tracker.TrackHits()[(*sectorTrack->OrigTrack()).FirstHitID() + i];
+      const GPUTPCHitId& ic = tracker.TrackHits()[sectorTrack->OrigTrack()->FirstHitID() + i];
       id = tracker.Data().ClusterDataIndex(tracker.Data().Row(ic.RowIndex()), ic.HitIndex()) + GetConstantMem()->ioPtrs.clustersNative->clusterOffset[sectorTrack->Sector()][0];
     } else {
       id = mClusters[trk.FirstClusterRef() + i].num;
@@ -488,7 +488,7 @@ GPUd() void GPUTPCGMMerger::ClearTrackLinks(int32_t nBlocks, int32_t nThreads, i
   }
 }
 
-GPUd() int32_t GPUTPCGMMerger::RefitSectorTrack(GPUTPCGMSectorTrack& sectorTrack, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_pointer> inTrack, float alpha, int32_t sector)
+GPUd() int32_t GPUTPCGMMerger::RefitSectorTrack(GPUTPCGMSectorTrack& sectorTrack, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> inTrack, float alpha, int32_t sector)
 {
   GPUTPCGMPropagator prop;
   prop.SetMaterialTPC();
@@ -497,15 +497,14 @@ GPUd() int32_t GPUTPCGMMerger::RefitSectorTrack(GPUTPCGMSectorTrack& sectorTrack
   prop.SetFitInProjections(false);
   prop.SetPolynomialField(&Param().polynomialField);
   GPUTPCGMTrackParam trk;
-  MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> inTrack_cref = *inTrack;
-  trk.X() = inTrack_cref.Param().GetX();
-  trk.Y() = inTrack_cref.Param().GetY();
-  trk.Z() = inTrack_cref.Param().GetZ();
-  trk.SinPhi() = inTrack_cref.Param().GetSinPhi();
-  trk.DzDs() = inTrack_cref.Param().GetDzDs();
-  trk.QPt() = inTrack_cref.Param().GetQPt();
-  trk.TZOffset() = Param().par.earlyTpcTransform ? inTrack_cref.Param().GetZOffset() : GetConstantMem()->calibObjects.fastTransformHelper->getCorrMap()->convZOffsetToVertexTime(sector, inTrack_cref.Param().GetZOffset(), Param().continuousMaxTimeBin);
-  trk.ShiftZ(this, sector, sectorTrack.ClusterZT0(), sectorTrack.ClusterZTN(), inTrack_cref.Param().GetX(), inTrack_cref.Param().GetX()); // We do not store the inner / outer cluster X, so we just use the track X instead
+  trk.X() = inTrack.Param().GetX();
+  trk.Y() = inTrack.Param().GetY();
+  trk.Z() = inTrack.Param().GetZ();
+  trk.SinPhi() = inTrack.Param().GetSinPhi();
+  trk.DzDs() = inTrack.Param().GetDzDs();
+  trk.QPt() = inTrack.Param().GetQPt();
+  trk.TZOffset() = Param().par.earlyTpcTransform ? inTrack.Param().GetZOffset() : GetConstantMem()->calibObjects.fastTransformHelper->getCorrMap()->convZOffsetToVertexTime(sector, inTrack.Param().GetZOffset(), Param().continuousMaxTimeBin);
+  trk.ShiftZ(this, sector, sectorTrack.ClusterZT0(), sectorTrack.ClusterZTN(), inTrack.Param().GetX(), inTrack.Param().GetX()); // We do not store the inner / outer cluster X, so we just use the track X instead
   sectorTrack.SetX2(0.f);
   for (int32_t way = 0; way < 2; way++) {
     if (way) {
@@ -514,14 +513,14 @@ GPUd() int32_t GPUTPCGMMerger::RefitSectorTrack(GPUTPCGMSectorTrack& sectorTrack
     }
     trk.ResetCovariance();
     prop.SetTrack(&trk, alpha);
-    int32_t start = way ? inTrack_cref.NHits() - 1 : 0;
-    int32_t end = way ? 0 : (inTrack_cref.NHits() - 1);
+    int32_t start = way ? inTrack.NHits() - 1 : 0;
+    int32_t end = way ? 0 : (inTrack.NHits() - 1);
     int32_t incr = way ? -1 : 1;
     for (int32_t i = start; i != end; i += incr) {
       float x, y, z;
       int32_t row, flags;
       const GPUTPCTracker& tracker = GetConstantMem()->tpcTrackers[sector];
-      const GPUTPCHitId& ic = tracker.TrackHits()[inTrack_cref.FirstHitID() + i];
+      const GPUTPCHitId& ic = tracker.TrackHits()[inTrack.FirstHitID() + i];
       int32_t clusterIndex = tracker.Data().ClusterDataIndex(tracker.Data().Row(ic.RowIndex()), ic.HitIndex());
       row = ic.RowIndex();
       const ClusterNative& cl = GetConstantMem()->ioPtrs.clustersNative->clustersLinear[GetConstantMem()->ioPtrs.clustersNative->clusterOffset[sector][0] + clusterIndex];
@@ -551,12 +550,11 @@ GPUd() int32_t GPUTPCGMMerger::RefitSectorTrack(GPUTPCGMSectorTrack& sectorTrack
   return 0;
 }
 
-GPUd() void GPUTPCGMMerger::SetTrackClusterZT(GPUTPCGMSectorTrack& track, int32_t iSector, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_pointer> sectorTr)
+GPUd() void GPUTPCGMMerger::SetTrackClusterZT(GPUTPCGMSectorTrack& track, int32_t iSector, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> sectorTr)
 {
-  MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> sectorTr_cref = *sectorTr;
   const GPUTPCTracker& trk = GetConstantMem()->tpcTrackers[iSector];
-  const GPUTPCHitId& ic1 = trk.TrackHits()[sectorTr_cref.FirstHitID()];
-  const GPUTPCHitId& ic2 = trk.TrackHits()[sectorTr_cref.FirstHitID() + sectorTr_cref.NHits() - 1];
+  const GPUTPCHitId& ic1 = trk.TrackHits()[sectorTr.FirstHitID()];
+  const GPUTPCHitId& ic2 = trk.TrackHits()[sectorTr.FirstHitID() + sectorTr.NHits() - 1];
   int32_t clusterIndex1 = trk.Data().ClusterDataIndex(trk.Data().Row(ic1.RowIndex()), ic1.HitIndex());
   int32_t clusterIndex2 = trk.Data().ClusterDataIndex(trk.Data().Row(ic2.RowIndex()), ic2.HitIndex());
   if (Param().par.earlyTpcTransform) {
@@ -576,13 +574,11 @@ GPUd() void GPUTPCGMMerger::UnpackSectorGlobal(int32_t nBlocks, int32_t nThreads
 {
   const GPUTPCTracker& trk = GetConstantMem()->tpcTrackers[iSector];
   float alpha = Param().Alpha(iSector);
-  // GPUTPCTrackSkeleton<MemLayout::const_pointer> sectorTr = mMemory->firstExtrapolatedTracks[iSector];
-  MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_pointer> sectorTr = mMemory->firstExtrapolatedTracks[iSector];
   uint32_t nLocalTracks = trk.CommonMemory()->nLocalTracks;
   uint32_t nTracks = *trk.NTracks();
   for (uint32_t itr = nLocalTracks + iBlock * nThreads + iThread; itr < nTracks; itr += nBlocks * nThreads) {
-    sectorTr = &trk.Tracks()[itr];
-    int32_t localId = mTrackIDs[((*sectorTr).LocalTrackId() >> 24) * mNMaxSingleSectorTracks + ((*sectorTr).LocalTrackId() & 0xFFFFFF)];
+    MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> sectorTr = trk.Tracks()[itr];
+    int32_t localId = mTrackIDs[(sectorTr.LocalTrackId() >> 24) * mNMaxSingleSectorTracks + (sectorTr.LocalTrackId() & 0xFFFFFF)];
     if (localId == -1) {
       continue;
     }
@@ -616,7 +612,7 @@ GPUd() void GPUTPCGMMerger::RefitSectorTracks(int32_t nBlocks, int32_t nThreads,
   float alpha = Param().Alpha(iSector);
 
   for (uint32_t itr = iBlock * nThreads + iThread; itr < nLocalTracks; itr += nBlocks * nThreads) {
-    MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_pointer> sectorTr = &trk.Tracks()[itr];
+    MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> sectorTr = trk.Tracks()[itr];
     GPUTPCGMSectorTrack track;
     SetTrackClusterZT(track, iSector, sectorTr);
     if (Param().rec.tpc.mergerCovSource == 0) {
@@ -644,7 +640,7 @@ GPUd() void GPUTPCGMMerger::RefitSectorTracks(int32_t nBlocks, int32_t nThreads,
     track.SetExtrapolatedTrackId(0, -1);
     track.SetExtrapolatedTrackId(1, -1);
     uint32_t myTrack = CAMath::AtomicAdd(&mMemory->nUnpackedTracks, 1u);
-    mTrackIDs[iSector * mNMaxSingleSectorTracks + (*sectorTr).LocalTrackId()] = myTrack;
+    mTrackIDs[iSector * mNMaxSingleSectorTracks + sectorTr.LocalTrackId()] = myTrack;
     mSectorTrackInfos[myTrack] = track;
   }
 }
@@ -703,7 +699,7 @@ GPUd() void GPUTPCGMMerger::MergeSectorsPrepareStep2(int32_t nBlocks, int32_t nT
       const GPUTPCGMSectorTrack* trackMin = track;
       while (track->NextSegmentNeighbour() >= 0 && track->Sector() == mSectorTrackInfos[track->NextSegmentNeighbour()].Sector()) {
         track = &mSectorTrackInfos[track->NextSegmentNeighbour()];
-        if ((*track->OrigTrack()).Param().X() < (*trackMin->OrigTrack()).Param().X()) {
+        if (track->OrigTrack()->Param().X() < trackMin->OrigTrack()->Param().X()) {
           trackMin = track;
         }
       }
@@ -712,7 +708,7 @@ GPUd() void GPUTPCGMMerger::MergeSectorsPrepareStep2(int32_t nBlocks, int32_t nT
       if (Param().rec.tpc.mergerCovSource == 2 && trackTmp.X2() != 0.f) {
         trackTmp.UseParam2();
       } else {
-        trackTmp.Set(this, trackMin->OrigTrack(), trackMin->Alpha(), trackMin->Sector());
+        trackTmp.Set(this, *trackMin->OrigTrack(), trackMin->Alpha(), trackMin->Sector());
       }
     } else {
       if (CAMath::Abs(track->QPt()) * Param().qptB5Scaler < Param().rec.tpc.mergerLooperSecondHorizontalQPtB5Limit) {
@@ -1605,7 +1601,7 @@ GPUd() void GPUTPCGMMerger::CollectMergedTracks(int32_t nBlocks, int32_t nThread
       trackCluster* c2 = trackClusters + nHits + nTrackHits - 1;
       for (int32_t i = 0; i < nTrackHits; i++, c2--) {
         const GPUTPCTracker& trk = GetConstantMem()->tpcTrackers[t->Sector()];
-        const GPUTPCHitId& ic = trk.TrackHits()[(*t->OrigTrack()).FirstHitID() + i];
+        const GPUTPCHitId& ic = trk.TrackHits()[t->OrigTrack()->FirstHitID() + i];
         uint32_t id = trk.Data().ClusterDataIndex(trk.Data().Row(ic.RowIndex()), ic.HitIndex()) + GetConstantMem()->ioPtrs.clustersNative->clusterOffset[t->Sector()][0];
         *c2 = trackCluster{id, (uint8_t)ic.RowIndex(), t->Sector(), t->Leg()};
       }
@@ -1659,9 +1655,9 @@ GPUd() void GPUTPCGMMerger::CollectMergedTracks(int32_t nBlocks, int32_t nThread
           if (trackParts[i]->Leg() != baseLeg) {
             break;
           }
-          if ((*trackParts[i]->OrigTrack()).NHits() > length) {
+          if (trackParts[i]->OrigTrack()->NHits() > length) {
             iLongest = i;
-            length = (*trackParts[i]->OrigTrack()).NHits();
+            length = trackParts[i]->OrigTrack()->NHits();
           }
         }
         bool outwards;

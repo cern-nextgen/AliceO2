@@ -34,7 +34,7 @@ namespace o2::gpu
 struct GPUTPCClusterData;
 struct GPUParam;
 template <template <class> class F>
-class GPUTPCTrackSkeleton;
+class GPUTPCTrackParamSkeleton;
 class GPUTPCRow;
 
 class GPUTPCTracker : public GPUProcessor
@@ -61,9 +61,6 @@ class GPUTPCTracker : public GPUProcessor
   void DumpTrackHits(std::ostream& out);            // Same for Track Hits
   void DumpTrackletHits(std::ostream& out);         // Same for Track Hits
 #endif
-
-  template <MemLayout::Flag layout>
-  using TrackletArrayType = MemLayout::interface<GPUTPCTrackletSkeleton, MemLayout::pointer, layout>::type;
 
   struct commonMemoryStruct {
     GPUAtomic(uint32_t) nStartHits = 0; // number of start hits
@@ -110,9 +107,8 @@ class GPUTPCTracker : public GPUProcessor
   void* SetPointersScratch(void* mem);
   void* SetPointersScratchHost(void* mem);
   void* SetPointersCommon(void* mem);
-  void SetPointersTrackletsHelper(void* & mem, TrackletArrayType<MemLayout::Flag::aos>& tracklets);
-  void SetPointersTrackletsHelper(void* & mem, TrackletArrayType<MemLayout::Flag::soa>& tracklets);
   void* SetPointersTracklets(void* mem);
+  void* SetPointersTracks(void* mem);
   void* SetPointersOutput(void* mem);
   void RegisterMemoryAllocation();
 
@@ -193,14 +189,11 @@ class GPUTPCTracker : public GPUProcessor
   GPUhd() GPUglobalref() GPUTPCHitId* TrackletStartHits() { return mTrackletStartHits; }
   GPUhd() GPUglobalref() GPUTPCHitId* TrackletTmpStartHits() const { return mTrackletTmpStartHits; }
 
-  GPUhd() GPUglobalref() MemLayout::wrapper<GPUTPCTrackletSkeleton, MemLayout::reference> Tracklet(int32_t i) { return mTracklets[i]; } // reference_restrict
-
-  template <MemLayout::Flag layout>
-  GPUhd() GPUglobalref() TrackletArrayType<layout> Tracklets() const { return mTracklets; }
+  GPUhd() GPUglobalref() auto Tracklets() const { return mTracklets; }
   GPUhd() GPUglobalref() calink* TrackletRowHits() const { return mTrackletRowHits; }
 
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NTracks() const { return &mCommonMem->nTracks; }
-  GPUhd() GPUglobalref() MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::pointer> Tracks() const { return mTracks; }
+  GPUhd() GPUglobalref() auto Tracks() const { return mTracks; }
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NTrackHits() const { return &mCommonMem->nTrackHits; }
   GPUhd() GPUglobalref() GPUTPCHitId* TrackHits() const { return mTrackHits; }
 
@@ -248,12 +241,12 @@ class GPUTPCTracker : public GPUProcessor
   GPUglobalref() char* mGPUTrackletTemp = nullptr;             // Temp Memory for GPU Tracklet Constructor
 
   // event
-  GPUglobalref() commonMemoryStruct* mCommonMem = nullptr;  // common event memory
-  GPUglobalref() GPUTPCHitId* mTrackletStartHits = nullptr; // start hits for the tracklets
-  GPUglobalref() TrackletArrayType<MemLayout::Flag::soa> mTracklets; // tracklets
-  GPUglobalref() calink* mTrackletRowHits = nullptr;        // Hits for each Tracklet in each row
-  GPUglobalref() MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::pointer> mTracks; // reconstructed tracks
-  GPUglobalref() GPUTPCHitId* mTrackHits = nullptr;         // array of track hit numbers
+  GPUglobalref() commonMemoryStruct* mCommonMem = nullptr;           // common event memory
+  GPUglobalref() GPUTPCHitId* mTrackletStartHits = nullptr;          // start hits for the tracklets
+  GPUglobalref() MemLayout::interface<GPUTPCTrackletSkeleton, MemLayout::pointer, GPUTPCTrackletLayout>::type mTracklets; // tracklets
+  GPUglobalref() calink* mTrackletRowHits = nullptr;                 // Hits for each Tracklet in each row
+  GPUglobalref() MemLayout::interface<GPUTPCTrackSkeleton, MemLayout::pointer, GPUTPCTrackLayout>::type mTracks;       // reconstructed tracks
+  GPUglobalref() GPUTPCHitId* mTrackHits = nullptr;                  // array of track hit numbers
 
   static int32_t StarthitSortComparison(const void* a, const void* b);
 };

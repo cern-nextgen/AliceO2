@@ -17,7 +17,9 @@
 
 #include "GPUChain.h"
 #include "GPUDataTypes.h"
+#include "GPUTPCTrack.h"
 #include "MemLayout.h"
+
 #include <atomic>
 #include <mutex>
 #include <functional>
@@ -91,6 +93,9 @@ class GPUChainTracking : public GPUChain
   // Structures for input and output data
   GPUTrackingInOutPointers& mIOPtrs;
 
+  template <class T>
+  using unique_ptr_array = std::unique_ptr<T[]>;
+
   struct InOutMemory {
     InOutMemory();
     ~InOutMemory();
@@ -108,12 +113,7 @@ class GPUChainTracking : public GPUChain
     std::unique_ptr<AliHLTTPCRawCluster[]> rawClusters[NSECTORS];
     std::unique_ptr<o2::tpc::ClusterNative[]> clustersNative;
     std::unique_ptr<o2::tpc::ClusterNativeAccess> clusterNativeAccess;
-
-    template <class T>
-    using unique_ptr_array = std::unique_ptr<T[]>;
-
-    MemLayout::wrapper<GPUTPCTrackSkeleton, unique_ptr_array> sectorTracks[NSECTORS];
-
+    MemLayout::interface<GPUTPCTrackSkeleton, unique_ptr_array, GPUTPCTrackLayout>::type sectorTracks[NSECTORS];
     std::unique_ptr<GPUTPCHitId[]> sectorClusters[NSECTORS];
     std::unique_ptr<AliHLTTPCClusterMCLabel[]> mcLabelsTPC;
     std::unique_ptr<GPUTPCMCInfo[]> mcInfosTPC;

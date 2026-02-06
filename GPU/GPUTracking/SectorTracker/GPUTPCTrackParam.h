@@ -25,6 +25,15 @@ namespace o2::gpu
 
 class GPUTPCTrackLinearisation;
 
+namespace detail
+{
+
+struct GPUTPCTrackFitParam {
+  float bethe, e, theta2, EP2, sigmadE2, k22, k33, k43, k44; // parameters
+};
+
+}
+
 /**
  * @class GPUTPCTrackParam
  *
@@ -38,10 +47,6 @@ class GPUTPCTrackParamSkeleton
  public:
   MEMLAYOUT_APPLY_UNARY(mParam, mSignCosPhi, mChi2, mNDF)
   MEMLAYOUT_APPLY_BINARY(GPUTPCTrackParamSkeleton, MEMLAYOUT_EXPAND(mParam), MEMLAYOUT_EXPAND(mSignCosPhi), MEMLAYOUT_EXPAND(mChi2), MEMLAYOUT_EXPAND(mNDF))
-
-  struct GPUTPCTrackFitParam {
-    float bethe, e, theta2, EP2, sigmadE2, k22, k33, k43, k44; // parameters
-  };
 
   GPUd() MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> GetParam() const { return mParam; }
   GPUd() void SetParam(MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> v);
@@ -98,8 +103,8 @@ class GPUTPCTrackParamSkeleton
   GPUd() void SetChi2(float v) { mChi2 = v; }
   GPUd() void SetNDF(int32_t v) { mNDF = v; }
 
-  GPUd() float GetDist2(MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::const_reference> t) const; // const_reference_restrict
-  GPUd() float GetDistXZ2(MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::const_reference> t) const; // const_reference_restrict
+  GPUd() float GetDist2(MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::const_reference_restrict> t) const;
+  GPUd() float GetDistXZ2(MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::const_reference_restrict> t) const;
 
   GPUd() float GetS(float x, float y, float Bz) const;
 
@@ -112,17 +117,17 @@ class GPUTPCTrackParamSkeleton
 
   GPUd() bool TransportToX(float x, float sinPhi0, float cosPhi0, float Bz, float maxSinPhi = GPUCA_MAX_SIN_PHI);
 
-  GPUd() bool TransportToXWithMaterial(float x, GPUTPCTrackLinearisation& t0, GPUTPCTrackFitParam& par, float Bz, float maxSinPhi = GPUCA_MAX_SIN_PHI);
+  GPUd() bool TransportToXWithMaterial(float x, GPUTPCTrackLinearisation& t0, detail::GPUTPCTrackFitParam& par, float Bz, float maxSinPhi = GPUCA_MAX_SIN_PHI);
 
-  GPUd() bool TransportToXWithMaterial(float x, GPUTPCTrackFitParam& par, float Bz, float maxSinPhi = GPUCA_MAX_SIN_PHI);
+  GPUd() bool TransportToXWithMaterial(float x, detail::GPUTPCTrackFitParam& par, float Bz, float maxSinPhi = GPUCA_MAX_SIN_PHI);
 
   GPUd() static float ApproximateBetheBloch(float beta2);
   GPUd() static float BetheBlochGeant(float bg, float kp0 = 2.33f, float kp1 = 0.20f, float kp2 = 3.00f, float kp3 = 173e-9f, float kp4 = 0.49848f);
   GPUd() static float BetheBlochSolid(float bg);
   GPUd() static float BetheBlochGas(float bg);
 
-  GPUd() void CalculateFitParameters(GPUTPCTrackFitParam& par, float mass = 0.13957f);
-  GPUd() bool CorrectForMeanMaterial(float xOverX0, float xTimesRho, const GPUTPCTrackFitParam& par);
+  GPUd() void CalculateFitParameters(detail::GPUTPCTrackFitParam& par, float mass = 0.13957f);
+  GPUd() bool CorrectForMeanMaterial(float xOverX0, float xTimesRho, const detail::GPUTPCTrackFitParam& par);
 
   GPUd() bool Rotate(float alpha, float maxSinPhi = GPUCA_MAX_SIN_PHI);
   GPUd() bool Rotate(float alpha, GPUTPCTrackLinearisation& t0, float maxSinPhi = GPUCA_MAX_SIN_PHI);
