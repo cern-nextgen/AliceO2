@@ -14,12 +14,14 @@
 
 #include "GPUTPCTracker.h"
 #include "GPUTPCRow.h"
-#include "GPUTPCTrack.h"
 #include "GPUCommonMath.h"
+#include "MemLayout.h"
 
 #include "GPUTPCClusterData.h"
 #include "GPUO2DataTypes.h"
 #include "GPUTPCTrackParam.h"
+#include "GPUTPCTracklet.h"
+#include "GPUTPCTrack.h"
 #include "GPUParam.inc"
 #include "GPUTPCConvertImpl.h"
 #include "GPUDefParametersRuntime.h"
@@ -29,6 +31,7 @@
 #include <cmath>
 #include <algorithm>
 #include <stdexcept>
+#include <type_traits>
 
 #include "GPUReconstruction.h"
 #include "GPUMemorySizeScalers.h"
@@ -108,40 +111,41 @@ void GPUTPCTracker::RegisterMemoryAllocation()
   mMemoryResOutput = mRec->RegisterMemoryAllocation(this, &GPUTPCTracker::SetPointersOutput, type, "TPCTrackerTracks");
 }
 
-GPUhd() void GPUTPCTracker::SetPointersTrackletsHelper(void* & mem, GPUTPCTracker::TrackletArrayType<MemLayout::Flag::aos>& tracklets) {
-    computePointerWithAlignment(mem, tracklets, mNMaxTracklets);
-}
+namespace {
 
-GPUhd() void GPUTPCTracker::SetPointersTrackletsHelper(void* & mem, GPUTPCTracker::TrackletArrayType<MemLayout::Flag::soa>& tracklets) {
-  computePointerWithAlignment(mem, tracklets.mFirstRow, mNMaxTracklets);
-  computePointerWithAlignment(mem, tracklets.mLastRow, mNMaxTracklets);
+template <class Function>
+struct ApplyMemberwise {
+    Function g;
 
-  computePointerWithAlignment(mem, tracklets.mParam.mX, mNMaxTracklets);
-  computePointerWithAlignment(mem, tracklets.mParam.mC, mNMaxTracklets);
-  computePointerWithAlignment(mem, tracklets.mParam.mZOffset, mNMaxTracklets);
-  computePointerWithAlignment(mem, tracklets.mParam.mP, mNMaxTracklets);
+    template <class ...Args>
+    void operator()(Args& ...args) const { (g(args), ...); }
+};
 
-  computePointerWithAlignment(mem, tracklets.mHitWeight, mNMaxTracklets);
-  computePointerWithAlignment(mem, tracklets.mFirstHit, mNMaxTracklets);
+template <class Function>
+struct ApplyRecursive {
+    Function f;
+
+    template <class T>
+    void operator()(T * & aos) const { f(aos); }
+
+    template <template <template <class> class> class S>
+    void operator()(S<MemLayout::pointer>& soa) const { soa.apply(ApplyMemberwise<ApplyRecursive>{f}); }
+};
+
 }
 
 GPUhd() void* GPUTPCTracker::SetPointersTracklets(void* mem)
 {
-  SetPointersTrackletsHelper(mem, mTracklets);
+  auto tracklet_helper = [&mem, this](auto& tracklets) -> void { computePointerWithAlignment(mem, tracklets, mNMaxTracklets); };
+  ApplyRecursive{tracklet_helper}(mTracklets);
   computePointerWithAlignment(mem, mTrackletRowHits, mNMaxRowHits);
   return mem;
 }
 
 GPUhd() void* GPUTPCTracker::SetPointersOutput(void* mem)
 {
-  computePointerWithAlignment(mem, mTracks.mFirstHitID, mNMaxTracklets);
-  computePointerWithAlignment(mem, mTracks.mNHits, mNMaxTracklets);
-  computePointerWithAlignment(mem, mTracks.mLocalTrackId, mNMaxTracklets);
-  computePointerWithAlignment(mem, mTracks.mParam.mX, mNMaxTracklets);
-  computePointerWithAlignment(mem, mTracks.mParam.mC, mNMaxTracklets);
-  computePointerWithAlignment(mem, mTracks.mParam.mZOffset, mNMaxTracklets);
-  computePointerWithAlignment(mem, mTracks.mParam.mP, mNMaxTracklets);
-  //computePointerWithAlignment(mem, mTracks, mNMaxTracks);
+  auto track_helper = [&mem, this](auto& tracks) -> void { computePointerWithAlignment(mem, tracks, mNMaxTracks); };
+  ApplyRecursive{track_helper}(mTracks);
   computePointerWithAlignment(mem, mTrackHits, mNMaxTrackHits);
   return mem;
 }

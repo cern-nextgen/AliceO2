@@ -110,8 +110,7 @@ GPUd() int32_t GPUTPCExtrapolationTracking::PerformExtrapolationTrackingRun(GPUT
         rowIndex--;
       }
     }
-    //GPUTPCTrack& GPUrestrict() track = tracker.Tracks()[trackId];
-    MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::reference> track = tracker.Tracks()[trackId]; // reference_restrict
+    MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::reference_restrict> track = tracker.Tracks()[trackId];
     track.SetParam(tParam.GetParam());
     track.SetNHits(nHits);
     track.SetFirstHitID(hitId);

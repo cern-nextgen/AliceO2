@@ -16,7 +16,6 @@
 #define GPUCOMMONALGORITHM_H
 
 #include "GPUCommonDef.h"
-#include "MemLayout.h"
 
 #if !defined(GPUCA_GPUCODE) // Could also enable custom search on the CPU, but it is not always faster, so we stick to std::sort
 #include <algorithm>

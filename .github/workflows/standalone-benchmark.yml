@@ -73,6 +73,7 @@ jobs:
           STANDALONE_DIR: /root/standalone
           BUILD_DIR: /root/standalone/build
           ARTIFACT_FILE: /root/artifact.txt
+          ALIBUILD_O2_FORCE_GPU: 1
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4

@@ -21,6 +21,8 @@
 
 namespace o2::gpu
 {
+constexpr MemLayout::Flag GPUTPCTrackLayout = MemLayout::Flag::aos;
+
 /**
  * @class GPUTPCTrack
  *
@@ -36,6 +38,7 @@ class GPUTPCTrackSkeleton
     MEMLAYOUT_APPLY_BINARY(GPUTPCTrackSkeleton, MEMLAYOUT_EXPAND(mFirstHitID), MEMLAYOUT_EXPAND(mNHits), MEMLAYOUT_EXPAND(mLocalTrackId), MEMLAYOUT_EXPAND(mParam))
 
 //#if !defined(GPUCA_GPUCODE)
+//  GPUTPCTrack() : mFirstHitID(0), mNHits(0), mLocalTrackId(-1), mParam() {}
 //  ~GPUTPCTrackSkeleton() = default;
 //#endif //! GPUCA_GPUCODE
 
@@ -79,7 +82,7 @@ struct iterator_traits<MemLayout::wrapper<o2::gpu::GPUTPCTrackSkeleton, MemLayou
     using iterator_category = random_access_iterator_tag;
     using difference_type = MemLayout::ptrdiff_t;
     using value_type = MemLayout::wrapper<o2::gpu::GPUTPCTrackSkeleton, MemLayout::value>;
-    using pointer = void; //MemLayout::wrapper<o2::gpu::GPUTPCTrackSkeleton, MemLayout::pointer>;
+    using pointer = void;
     using reference = MemLayout::wrapper<o2::gpu::GPUTPCTrackSkeleton, MemLayout::reference>;
 };
 

@@ -40,7 +40,7 @@ class GPUTPCTrackLinearisation
   GPUTPCTrackLinearisation() : mSinPhi(0), mCosPhi(1), mDzDs(0), mQPt(0) {}
   GPUTPCTrackLinearisation(float SinPhi1, float CosPhi1, float DzDs1, float QPt1) : mSinPhi(SinPhi1), mCosPhi(CosPhi1), mDzDs(DzDs1), mQPt(QPt1) {}
 
-  GPUd() GPUTPCTrackLinearisation(MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::const_reference> t); // const_reference_restrict
+  GPUd() GPUTPCTrackLinearisation(MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::const_reference_restrict> t);
 
   GPUd() void Set(float SinPhi1, float CosPhi1, float DzDs1, float QPt1);
 
@@ -66,7 +66,7 @@ class GPUTPCTrackLinearisation
   float mQPt;    // QPt
 };
 
-GPUdi() GPUTPCTrackLinearisation::GPUTPCTrackLinearisation(MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::const_reference> t) : mSinPhi(t.SinPhi()), mCosPhi(0), mDzDs(t.DzDs()), mQPt(t.QPt()) // const_reference_restrict
+GPUdi() GPUTPCTrackLinearisation::GPUTPCTrackLinearisation(MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::const_reference_restrict> t) : mSinPhi(t.SinPhi()), mCosPhi(0), mDzDs(t.DzDs()), mQPt(t.QPt())
 {
   if (mSinPhi > GPUCA_MAX_SIN_PHI) {
     mSinPhi = GPUCA_MAX_SIN_PHI;
