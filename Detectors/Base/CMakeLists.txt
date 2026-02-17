@@ -8,6 +8,7 @@
 # In applying this license CERN does not waive the privileges and immunities
 # granted to it by virtue of its status as an Intergovernmental Organization
 # or submit itself to any jurisdiction.
+#add_compile_options(-O0 -g -fPIC)
 
 o2_add_library(DetectorsBase
                SOURCES src/Detector.cxx
@@ -28,6 +29,8 @@ o2_add_library(DetectorsBase
                        src/Stack.cxx
                        src/VMCSeederService.cxx
                        src/GlobalParams.cxx
+                       src/O2Tessellated.cxx
+                       src/TGeoGeometryUtils.cxx
                PUBLIC_LINK_LIBRARIES FairRoot::Base
                                      O2::CommonUtils
                                      O2::DetectorsCommonDataFormats
@@ -45,6 +48,7 @@ o2_add_library(DetectorsBase
                                      O2::GPUDataTypes
                                      MC::VMC
                                      TBB::tbb
+                                     ROOT::Gdml
                              )
 
 o2_target_root_dictionary(DetectorsBase
@@ -61,7 +65,9 @@ o2_target_root_dictionary(DetectorsBase
                                   include/DetectorsBase/Aligner.h
                                   include/DetectorsBase/Stack.h
                                   include/DetectorsBase/SimFieldUtils.h
-                                  include/DetectorsBase/GlobalParams.h)
+                                  include/DetectorsBase/GlobalParams.h
+                                  include/DetectorsBase/O2Tessellated.h
+                                  )
 
 if(BUILD_SIMULATION)
   if (NOT APPLE)
@@ -87,6 +93,7 @@ endif()
 
 install(FILES test/buildMatBudLUT.C
               test/extractLUTLayers.C
+              test/rescaleLUT.C
               DESTINATION share/macro/)
 
 o2_add_test_root_macro(test/buildMatBudLUT.C
@@ -94,5 +101,9 @@ o2_add_test_root_macro(test/buildMatBudLUT.C
                        LABELS detectorsbase)
 
 o2_add_test_root_macro(test/extractLUTLayers.C
+                       PUBLIC_LINK_LIBRARIES O2::DetectorsBase
+                       LABELS detectorsbase)
+
+o2_add_test_root_macro(test/rescaleLUT.C
                        PUBLIC_LINK_LIBRARIES O2::DetectorsBase
                        LABELS detectorsbase)

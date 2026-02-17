@@ -15,19 +15,14 @@
 #ifndef GPUO2INTERFACE_H
 #define GPUO2INTERFACE_H
 
-// Some defines denoting that we are compiling for O2
-#ifndef GPUCA_TPC_GEOMETRY_O2
-#define GPUCA_TPC_GEOMETRY_O2
-#endif
-#ifndef GPUCA_O2_INTERFACE
-#define GPUCA_O2_INTERFACE
-#endif
+#include "GPUO2ExternalUser.h"
+#include "GPUCommonDef.h"
+#include "GPUDataTypesIO.h"
+#include "GPUDataTypesConfig.h"
 
 #include <memory>
 #include <array>
 #include <vector>
-#include "GPUCommonDef.h"
-#include "GPUDataTypes.h"
 
 namespace o2::base
 {
@@ -45,6 +40,7 @@ namespace o2::its
 {
 template <int>
 class TrackerTraits;
+template <int>
 class VertexerTraits;
 template <int>
 class TimeFrame;
@@ -61,6 +57,8 @@ struct GPUInterfaceInputUpdate;
 struct GPUTrackingOutputs;
 struct GPUConstantMem;
 struct GPUNewCalibValues;
+struct GPUSettingsProcessing;
+struct GPUSettingsRec;
 
 struct GPUO2Interface_processingContext;
 struct GPUO2Interface_Internals;
@@ -76,15 +74,16 @@ class GPUO2Interface
 
   int32_t RunTracking(GPUTrackingInOutPointers* data, GPUInterfaceOutputs* outputs = nullptr, uint32_t iThread = 0, GPUInterfaceInputUpdate* inputUpdateCallback = nullptr);
   void Clear(bool clearOutputs, uint32_t iThread = 0);
-  void DumpEvent(int32_t nEvent, GPUTrackingInOutPointers* data);
-  void DumpSettings();
+  void DumpEvent(int32_t nEvent, GPUTrackingInOutPointers* data, uint32_t iThread, const char* dir = "");
+  void DumpSettings(uint32_t iThread, const char* dir = "");
 
-  void GetITSTraits(o2::its::TrackerTraits<7>*& trackerTraits, o2::its::VertexerTraits*& vertexerTraits, o2::its::TimeFrame<7>*& timeFrame);
+  void GetITSTraits(o2::its::TrackerTraits<7>*& trackerTraits, o2::its::VertexerTraits<7>*& vertexerTraits, o2::its::TimeFrame<7>*& timeFrame);
   const o2::base::Propagator* GetDeviceO2Propagator(int32_t iThread = 0) const;
   void UseGPUPolynomialFieldInPropagator(o2::base::Propagator* prop) const;
 
   // Updates all calibration objects that are != nullptr in newCalib
   int32_t UpdateCalibration(const GPUCalibObjectsConst& newCalib, const GPUNewCalibValues& newVals, uint32_t iThread = 0);
+  static void ApplySyncSettings(GPUSettingsProcessing& proc, GPUSettingsRec& rec, gpudatatypes::RecoStepField& steps, bool syncMode, int32_t dEdxMode = -2);
 
   int32_t registerMemoryForGPU(const void* ptr, size_t size);
   int32_t unregisterMemoryForGPU(const void* ptr);

@@ -40,6 +40,8 @@
 
 #include <cstdio> // for NULL, snprintf
 
+#define MAX_SENSORS 2000
+
 class FairModule;
 
 class TGeoMedium;
@@ -344,6 +346,65 @@ void Detector::buildFT3NewVacuumVessel()
   }
 }
 
+void Detector::buildFT3ScopingV3()
+{
+  // Build the FT3 detector according to v3 layout
+  // https://indico.cern.ch/event/1596309/contributions/6728167/attachments/3190117/5677220/2025-12-10-AW-ALICE3planning.pdf
+  // Middle disks inner radius 10 cm
+  // Outer  disks inner radius 20 cm
+
+  LOG(info) << "Building FT3 Detector: v3 scoping version";
+
+  mNumberOfLayers = 6;
+  float sensorThickness = 30.e-4;
+  float layersx2X0 = 1.e-2;
+  std::vector<std::array<float, 5>> layersConfigCSide{
+    {77., 10.0, 35., layersx2X0}, // {z_layer, r_in, r_out, Layerx2X0}
+    {100., 10.0, 35., layersx2X0},
+    {122., 10.0, 35., layersx2X0},
+    {150., 20.0, 68.f, layersx2X0},
+    {180., 20.0, 68.f, layersx2X0},
+    {220., 20.0, 68.f, layersx2X0}};
+
+  std::vector<std::array<float, 5>> layersConfigASide{
+    {77., 10.0, 35., layersx2X0}, // {z_layer, r_in, r_out, Layerx2X0}
+    {100., 10.0, 35., layersx2X0},
+    {122., 10.0, 35., layersx2X0},
+    {150., 20.0, 68.f, layersx2X0},
+    {180., 20.0, 68.f, layersx2X0},
+    {220., 20.0, 68.f, layersx2X0}};
+
+  mLayerName.resize(2);
+  mLayerName[0].resize(mNumberOfLayers);
+  mLayerName[1].resize(mNumberOfLayers);
+  mLayerID.clear();
+  mLayers.resize(2);
+
+  for (auto direction : {0, 1}) {
+    for (int layerNumber = 0; layerNumber < mNumberOfLayers; layerNumber++) {
+      std::string directionName = std::to_string(direction);
+      std::string layerName = GeometryTGeo::getFT3LayerPattern() + directionName + std::string("_") + std::to_string(layerNumber);
+      mLayerName[direction][layerNumber] = layerName;
+      float z, rIn, rOut, x0;
+      if (direction == 0) { // C-Side
+        z = layersConfigCSide[layerNumber][0];
+        rIn = layersConfigCSide[layerNumber][1];
+        rOut = layersConfigCSide[layerNumber][2];
+        x0 = layersConfigCSide[layerNumber][3];
+      } else if (direction == 1) { // A-Side
+        z = layersConfigASide[layerNumber][0];
+        rIn = layersConfigASide[layerNumber][1];
+        rOut = layersConfigASide[layerNumber][2];
+        x0 = layersConfigASide[layerNumber][3];
+      }
+
+      LOG(info) << "Adding Layer " << layerName << " at z = " << z;
+      // Add layers
+      auto& thisLayer = mLayers[direction].emplace_back(direction, layerNumber, layerName, z, rIn, rOut, x0);
+    }
+  }
+}
+
 //_________________________________________________________________________________________________
 void Detector::buildFT3Scoping()
 {
@@ -409,7 +470,7 @@ Detector::Detector(bool active)
   } else {
     switch (ft3BaseParam.geoModel) {
       case Default:
-        buildFT3NewVacuumVessel(); // FT3 after Upgrade days March 2024
+        buildFT3ScopingV3(); // v3 Dec 25
         break;
       case Telescope:
         buildBasicFT3(ft3BaseParam); // BasicFT3 = Parametrized telescopic detector (equidistant layers)
@@ -729,9 +790,23 @@ void Detector::defineSensitiveVolumes()
     for (int direction : {0, 1}) {
       for (int iLayer = 0; iLayer < mNumberOfLayers; iLayer++) {
         volumeName = o2::ft3::GeometryTGeo::getFT3SensorPattern() + std::to_string(iLayer);
-        v = geoManager->GetVolume(Form("%s_%d_%d", GeometryTGeo::getFT3SensorPattern(), direction, iLayer));
-        LOG(info) << "Adding FT3 Sensitive Volume => " << v->GetName();
-        AddSensitiveVolume(v);
+        if (iLayer < 3) { // ML disks
+          v = geoManager->GetVolume(Form("%s_%d_%d", GeometryTGeo::getFT3SensorPattern(), direction, iLayer));
+          AddSensitiveVolume(v);
+        } else { // OT disks
+          for (int sensor_count = 0; sensor_count < MAX_SENSORS; ++sensor_count) {
+            std::string sensor_name_front = "FT3sensor_front_" + std::to_string(iLayer) + "_" + std::to_string(direction) + "_" + std::to_string(sensor_count);
+            std::string sensor_name_back = "FT3sensor_back_" + std::to_string(iLayer) + "_" + std::to_string(direction) + "_" + std::to_string(sensor_count);
+            v = geoManager->GetVolume(sensor_name_front.c_str());
+            if (v) {
+              AddSensitiveVolume(v);
+            }
+            v = geoManager->GetVolume(sensor_name_back.c_str());
+            if (v) {
+              AddSensitiveVolume(v);
+            }
+          }
+        }
       }
     }
   }

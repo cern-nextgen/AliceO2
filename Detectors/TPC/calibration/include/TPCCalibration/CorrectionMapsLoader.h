@@ -42,6 +42,7 @@ struct CorrectionMapsLoaderGloOpts {
   int lumiMode = 0; ///< what corrections method to use: 0: classical scaling, 1: Using of the derivative map, 2: Using of the derivative map for MC
   bool enableMShapeCorrection = false;
   bool requestCTPLumi = true; //< request CTP Lumi regardless of what is used for corrections scaling
+  bool checkCTPIDCconsistency = true; //< check the selected CTP or IDC scaling source being consistent with mean scaler of the map
 
   bool needTPCScalersWorkflow() const
   {
@@ -63,6 +64,7 @@ class CorrectionMapsLoader : public o2::gpu::CorrectionMapsHelper
   void init(o2::framework::InitContext& ic);
   void copySettings(const CorrectionMapsLoader& src);
   void updateInverse(); /// recalculate inverse correction
+  void checkMeanScaleConsistency(float meanLumi, float threshold) const;
   float getMapMeanRate(const o2::gpu::TPCFastTransform* mp, bool lumiOverridden) const;
 
   static void requestCCDBInputs(std::vector<o2::framework::InputSpec>& inputs, std::vector<o2::framework::ConfigParamSpec>& options, const CorrectionMapsLoaderGloOpts& gloOpts);
@@ -77,6 +79,7 @@ class CorrectionMapsLoader : public o2::gpu::CorrectionMapsHelper
   float mInstLumiCTPFactor = 1.0; // multiplicative factor for inst. lumi
   int mLumiCTPSource = 0;         // 0: main, 1: alternative CTP lumi source
   std::unique_ptr<o2::gpu::TPCFastTransform> mCorrMapMShape{nullptr};
+  bool mIDC2CTPFallbackActive = false; // flag indicating that fallback from IDC to CTP scaling is active
 #endif
 };
 

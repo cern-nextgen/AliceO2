@@ -14,6 +14,8 @@
 /// \author julian.myrcha@cern.ch
 
 #include "EventVisualisationBase/DirectoryLoader.h"
+#include "Framework/DefaultsHelpers.h"
+#include "Framework/DataTakingContext.h"
 #include <filesystem>
 #include <algorithm>
 #include <climits>
@@ -29,10 +31,14 @@ using namespace o2::event_visualisation;
 deque<string> DirectoryLoader::load(const std::string& path, const std::string& marker, const std::vector<std::string>& ext)
 {
   deque<string> result;
-  for (const auto& entry : std::filesystem::directory_iterator(path)) {
-    if (std::find(ext.begin(), ext.end(), entry.path().extension()) != ext.end()) {
-      result.push_back(entry.path().filename());
+  try {
+    for (const auto& entry : std::filesystem::directory_iterator(path)) {
+      if (std::find(ext.begin(), ext.end(), entry.path().extension()) != ext.end()) {
+        result.push_back(entry.path().filename());
+      }
     }
+  } catch (std::filesystem::filesystem_error const& ex) {
+    LOGF(error, "filesystem problem during DirectoryLoader::load: %s", ex.what());
   }
   // comparison with safety if marker not in the filename (-1+1 gives 0)
   std::sort(result.begin(), result.end(),
@@ -56,15 +62,18 @@ bool DirectoryLoader::canCreateNextFile(const std::vector<std::string>& paths, c
         }
       }
     } catch (std::filesystem::filesystem_error const& ex) {
-      LOGF(info, "filesystem problem: %s", ex.what());
+      LOGF(error, "filesystem problem during DirectoryLoader::canCreateNextFile: %s", ex.what());
     }
   }
 
   // comparison with safety if marker not in the filename (-1+1 gives 0)
-  std::ranges::sort(result.begin(), result.end(),
-                    [marker](const std::string& a, const std::string& b) {
-                      return a.substr(a.find_first_of(marker) + 1) > b.substr(b.find_first_of(marker) + 1);
-                    });
+  if (result.size() > 1) {
+    std::ranges::sort(result.begin(), result.end(),
+                      [marker](const std::string& a, const std::string& b) {
+                        return a.substr(a.find_first_of(marker) + 1) > b.substr(b.find_first_of(marker) + 1);
+                      });
+  }
+
   unsigned long accumulatedSize = 0L;
   const std::regex delimiter{"_"};
   for (auto const& file : result) {
@@ -87,12 +96,16 @@ bool DirectoryLoader::canCreateNextFile(const std::vector<std::string>& paths, c
 deque<string> DirectoryLoader::load(const std::vector<std::string>& paths, const std::string& marker, const std::vector<std::string>& ext)
 {
   deque<string> result;
-  for (const auto& path : paths) {
-    for (const auto& entry : std::filesystem::directory_iterator(path)) {
-      if (std::find(ext.begin(), ext.end(), entry.path().extension()) != ext.end()) {
-        result.push_back(entry.path().filename());
+  try {
+    for (const auto& path : paths) {
+      for (const auto& entry : std::filesystem::directory_iterator(path)) {
+        if (std::find(ext.begin(), ext.end(), entry.path().extension()) != ext.end()) {
+          result.push_back(entry.path().filename());
+        }
       }
     }
+  } catch (std::filesystem::filesystem_error const& ex) {
+    LOGF(error, "filesystem problem during DirectoryLoader::load: %s", ex.what());
   }
   // comparison with safety if marker not in the filename (-1+1 gives 0)
   std::sort(result.begin(), result.end(),
@@ -105,11 +118,15 @@ deque<string> DirectoryLoader::load(const std::vector<std::string>& paths, const
 
 std::vector<std::string> DirectoryLoader::allFolders(const std::string& location)
 {
-  auto const pos = location.find_last_of('_');
   std::vector<std::string> folders;
-  folders.push_back(location.substr(0, pos) + "_PHYSICS");
-  folders.push_back(location.substr(0, pos) + "_COSMICS");
-  folders.push_back(location.substr(0, pos) + "_SYNTHETIC");
+  if (o2::framework::DefaultsHelpers::deploymentMode() == o2::framework::DeploymentMode::OnlineDDS) {
+    auto const pos = location.find_last_of('_');
+    folders.push_back(location.substr(0, pos) + "_PHYSICS");
+    folders.push_back(location.substr(0, pos) + "_COSMICS");
+    folders.push_back(location.substr(0, pos) + "_SYNTHETIC");
+  } else {
+    folders.push_back(location);
+  }
   return folders;
 }
 
@@ -135,10 +152,14 @@ std::time_t to_time_t(TP tp)
 int DirectoryLoader::getNumberOfFiles(const std::string& path, std::vector<std::string>& ext)
 {
   int res = 0;
-  for (const auto& entry : std::filesystem::directory_iterator(path)) {
-    if (std::find(ext.begin(), ext.end(), entry.path().extension()) != ext.end()) {
-      res++;
+  try {
+    for (const auto& entry : std::filesystem::directory_iterator(path)) {
+      if (std::find(ext.begin(), ext.end(), entry.path().extension()) != ext.end()) {
+        res++;
+      }
     }
+  } catch (std::filesystem::filesystem_error const& ex) {
+    LOGF(error, "filesystem problem during DirectoryLoader::getNumberOfFiles: %s", ex.what());
   }
   return res;
 }
@@ -160,8 +181,12 @@ std::string DirectoryLoader::getLatestFile(const std::string& path, std::vector<
 
 void DirectoryLoader::removeOldestFiles(const std::string& path, std::vector<std::string>& ext, const int remaining)
 {
-  while (getNumberOfFiles(path, ext) > remaining) {
-    LOGF(info, "removing oldest file in folder: %s : %s", path, getLatestFile(path, ext));
-    filesystem::remove(path + "/" + getLatestFile(path, ext));
+  try {
+    while (getNumberOfFiles(path, ext) > remaining) {
+      LOGF(info, "removing oldest file in folder: %s : %s", path, getLatestFile(path, ext));
+      filesystem::remove(path + "/" + getLatestFile(path, ext));
+    }
+  } catch (std::filesystem::filesystem_error const& ex) {
+    LOGF(error, "filesystem problem during DirectoryLoader::removeOldestFiles: %s", ex.what());
   }
 }

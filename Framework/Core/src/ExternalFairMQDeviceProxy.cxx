@@ -13,6 +13,8 @@
 #include "Framework/AlgorithmSpec.h"
 #include "Framework/DataProcessingHeader.h"
 #include "Framework/DataSpecUtils.h"
+#include "Framework/DataTakingContext.h"
+#include "Framework/DefaultsHelpers.h"
 #include "Framework/DeviceSpec.h"
 #include "Framework/ExternalFairMQDeviceProxy.h"
 #include "Framework/InitContext.h"
@@ -30,6 +32,7 @@
 #include "Framework/DeviceState.h"
 #include "Framework/Monitoring.h"
 #include "Framework/SendingPolicy.h"
+#include "Framework/DataProcessingHelpers.h"
 #include "Headers/DataHeader.h"
 #include "Headers/Stack.h"
 #include "DecongestionService.h"
@@ -534,7 +537,7 @@ InjectorFunction dplModelAdaptor(std::vector<OutputSpec> const& filterSpecs, DPL
       timingInfo.runNumber = dh->runNumber;
       timingInfo.tfCounter = dh->tfCounter;
       LOG(debug) << msgidx << ": " << DataSpecUtils::describe(OutputSpec{dh->dataOrigin, dh->dataDescription, dh->subSpecification}) << " part " << dh->splitPayloadIndex << " of " << dh->splitPayloadParts << "  payload " << parts.At(msgidx + 1)->GetSize();
-      if (dh->runNumber == 0 || (dh->tfCounter == 0 && dh->dataDescription.as<std::string>() != "EOS") || (fmqRunNumber > 0 && fmqRunNumber != dh->runNumber)) {
+      if (DefaultsHelpers::deploymentMode() != DeploymentMode::FST && (dh->runNumber == 0 || (dh->tfCounter == 0 && dh->dataDescription.as<std::string>() != "EOS") || (fmqRunNumber > 0 && fmqRunNumber != dh->runNumber))) {
         LOG(error) << "INVALID runNumber / tfCounter: runNumber " << dh->runNumber
                    << ", tfCounter " << dh->tfCounter << ", FMQ runNumber " << fmqRunNumber
                    << " for msgidx " << msgidx << ": " << DataSpecUtils::describe(OutputSpec{dh->dataOrigin, dh->dataDescription, dh->subSpecification}) << " part " << dh->splitPayloadIndex << " of " << dh->splitPayloadParts << "  payload " << parts.At(msgidx + 1)->GetSize();
@@ -862,6 +865,10 @@ DataProcessorSpec specifyExternalFairMQDeviceProxy(char const* name,
 
       bool didSendParts = false;
       for (size_t ci = 0; ci < channels.size(); ++ci) {
+        // check for state transition request every 10th input channel to avoid large delays of EoS timers
+        if (ci > 0 && ci % 10 == 0) {
+          ctx.services().get<DeviceState>().transitionHandling = DataProcessingHelpers::updateStateTransition(ctx.services(), ctx.services().get<DeviceContext>().processingPolicies);
+        }
         std::string const& channel = channels[ci];
         int waitTime = channels.size() == 1 ? -1 : 1;
         int maxRead = 1000;
@@ -1038,6 +1045,7 @@ DataProcessorSpec specifyFairMQDeviceOutputProxy(char const* name,
   spec.options = {
     ConfigParamSpec{"channel-config", VariantType::String, d, {"Out-of-band channel config"}},
   };
+  spec.labels.push_back(DataProcessorLabel{"output-proxy"});
 
   return spec;
 }
@@ -1083,7 +1091,18 @@ DataProcessorSpec specifyFairMQDeviceMultiOutputProxy(char const* name,
 
         channelNames->emplace_back(std::move(channel));
       }
-      proxy.bind(mutableDeviceSpec.outputs, mutableDeviceSpec.inputs, mutableDeviceSpec.forwards, *device);
+      std::function<fair::mq::Channel&(std::string const&)> bindByName = [device](std::string const& channelName) -> fair::mq::Channel& {
+        auto channel = device->GetChannels().find(channelName);
+        if (channel == device->GetChannels().end()) {
+          LOGP(fatal, "Expected channel {} not configured.", channelName);
+        }
+        return channel->second.at(0);
+      };
+
+      std::function<bool()> newStateCallback = [device]() -> bool {
+        return device->NewStatePending();
+      };
+      proxy.bind(mutableDeviceSpec.outputs, mutableDeviceSpec.inputs, mutableDeviceSpec.forwards, bindByName, newStateCallback);
     };
     // We need to clear the channels on stop, because we will check and add them
     auto channelConfigurationDisposer = [&deviceSpec]() {
@@ -1162,6 +1181,7 @@ DataProcessorSpec specifyFairMQDeviceMultiOutputProxy(char const* name,
   spec.options = {
     ConfigParamSpec{"channel-config", VariantType::String, d, {"Out-of-band channel config"}},
   };
+  spec.labels.push_back(DataProcessorLabel{"output-proxy"});
 
   return spec;
 }

@@ -15,7 +15,7 @@
 #ifndef O2_GPU_GPUWORKFLOWINTERNAL_H
 #define O2_GPU_GPUWORKFLOWINTERNAL_H
 
-#include "GPUDataTypes.h"
+#include "GPUDataTypesIO.h"
 #include <mutex>
 #include <thread>
 #include <condition_variable>
@@ -47,6 +47,7 @@ struct GPURecoWorkflow_QueueObject {
   bool jobSubmitted = false;
   bool jobFinished = false;
   int32_t jobReturnValue = 0;
+  volatile int32_t jobThreadIndex = -1;
   std::mutex jobFinishedMutex;
   std::condition_variable jobFinishedNotify;
   bool jobInputFinal = false;

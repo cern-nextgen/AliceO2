@@ -11,9 +11,8 @@
 #ifndef O2_HEADERS_STACK_H
 #define O2_HEADERS_STACK_H
 
+#include "MemoryResources/MemoryResources.h"
 #include "Headers/DataHeader.h"
-
-#include <memory_resource>
 
 namespace o2::header
 {
@@ -33,17 +32,18 @@ namespace o2::header
 ///   - returns a Stack ready to be shipped.
 struct Stack {
 
-  using memory_resource = std::pmr::memory_resource;
+  using memory_resource = o2::pmr::memory_resource;
 
  private:
   struct freeobj {
-    freeobj(memory_resource* mr) : resource(mr) {}
+    freeobj(memory_resource* mr, size_t s) : resource(mr), size(s) {}
     memory_resource* resource{nullptr};
-    void operator()(std::byte* ptr) { resource->deallocate(ptr, 0, alignof(std::max_align_t)); }
+    size_t           size{0};
+    void operator()(std::byte* ptr) { resource->deallocate(ptr, size, alignof(std::max_align_t)); }
   };
 
  public:
-  using allocator_type = std::pmr::polymorphic_allocator<std::byte>;
+  using allocator_type = fair::mq::pmr::polymorphic_allocator<std::byte>;
   using value_type = std::byte;
   using BufferType = std::unique_ptr<value_type[], freeobj>; // this gives us proper default move semantics for free
 
@@ -88,9 +88,9 @@ struct Stack {
   /// all headers must derive from BaseHeader, in addition also other stacks can be passed to ctor.
   template <typename FirstArgType, typename... Headers,
             typename std::enable_if_t<
-              !std::is_convertible<FirstArgType, std::pmr::polymorphic_allocator<std::byte>>::value, int> = 0>
+              !std::is_convertible<FirstArgType, fair::mq::pmr::polymorphic_allocator<std::byte>>::value, int> = 0>
   Stack(FirstArgType&& firstHeader, Headers&&... headers)
-    : Stack(std::pmr::new_delete_resource(), std::forward<FirstArgType>(firstHeader),
+    : Stack(fair::mq::pmr::new_delete_resource(), std::forward<FirstArgType>(firstHeader),
             std::forward<Headers>(headers)...)
   {
   }
@@ -100,7 +100,7 @@ struct Stack {
   Stack(const allocator_type allocatorArg, Headers&&... headers)
     : allocator{allocatorArg},
       bufferSize{calculateSize(std::forward<Headers>(headers)...)},
-      buffer{static_cast<std::byte*>(allocator.resource()->allocate(bufferSize, alignof(std::max_align_t))), freeobj{allocator.resource()}}
+      buffer{static_cast<std::byte*>(allocator.resource()->allocate(bufferSize, alignof(std::max_align_t))), freeobj{allocator.resource(), bufferSize}}
   {
     if constexpr (sizeof...(headers) > 1) {
       injectAll(buffer.get(), std::forward<Headers>(headers)...);
@@ -141,9 +141,9 @@ struct Stack {
   constexpr static size_t calculateSize() { return 0; }
 
  private:
-  allocator_type allocator{std::pmr::new_delete_resource()};
+  allocator_type allocator{fair::mq::pmr::new_delete_resource()};
   size_t bufferSize{0};
-  BufferType buffer{nullptr, freeobj{allocator.resource()}};
+  BufferType buffer{nullptr, freeobj{allocator.resource(), 0}};
 
   //______________________________________________________________________________________________
   template <typename T>

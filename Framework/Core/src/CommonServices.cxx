@@ -45,6 +45,7 @@
 #include "Framework/DefaultsHelpers.h"
 #include "Framework/Signpost.h"
 #include "Framework/DriverConfig.h"
+#include "Framework/CommonLabels.h"
 
 #include "TextDriverClient.h"
 #include "WSDriverClient.h"
@@ -413,11 +414,13 @@ o2::framework::ServiceSpec CommonServices::dataRelayer()
     .name = "datarelayer",
     .init = [](ServiceRegistryRef services, DeviceState&, fair::mq::ProgOptions& options) -> ServiceHandle {
       auto& spec = services.get<DeviceSpec const>();
+      int pipelineLength = DefaultsHelpers::pipelineLength(options);
       return ServiceHandle{TypeIdHelpers::uniqueId<DataRelayer>(),
                            new DataRelayer(spec.completionPolicy,
                                            spec.inputs,
                                            services.get<TimesliceIndex>(),
-                                           services)};
+                                           services,
+                                           pipelineLength)};
     },
     .configure = noConfiguration(),
     .kind = ServiceKind::Serial};
@@ -601,6 +604,12 @@ o2::framework::ServiceSpec
         if (input.matcher.lifetime == Lifetime::Timeframe || input.matcher.lifetime == Lifetime::QA || input.matcher.lifetime == Lifetime::Sporadic || input.matcher.lifetime == Lifetime::Optional) {
           LOGP(detail, "Found a real data input, we cannot update the oldest possible timeslice when sending messages");
           decongestion->isFirstInTopology = false;
+          break;
+        }
+      }
+      for (const auto& label : services.get<DeviceSpec const>().labels) {
+        if (label == suppressDomainInfoLabel) {
+          decongestion->suppressDomainInfo = true;
           break;
         }
       }
@@ -826,30 +835,34 @@ auto flushMetrics(ServiceRegistryRef registry, DataProcessingStats& stats) -> vo
   auto& relayer = registry.get<DataRelayer>();
 
   // Send all the relevant metrics for the relayer to update the GUI
-  stats.flushChangedMetrics([&monitoring](DataProcessingStats::MetricSpec const& spec, int64_t timestamp, int64_t value) mutable -> void {
+  stats.flushChangedMetrics([&monitoring, sid](DataProcessingStats::MetricSpec const& spec, int64_t timestamp, int64_t value) mutable -> void {
     // convert timestamp to a time_point
     auto tp = std::chrono::time_point<std::chrono::system_clock, std::chrono::milliseconds>(std::chrono::milliseconds(timestamp));
     auto metric = o2::monitoring::Metric{spec.name, Metric::DefaultVerbosity, tp};
     if (spec.kind == DataProcessingStats::Kind::UInt64) {
       if (value < 0) {
-        LOG(debug) << "Value for " << spec.name << " is negative, setting to 0";
+        O2_SIGNPOST_EVENT_EMIT(monitoring_service, sid, "flushChangedMetrics", "Value for %{public}s is negative, setting to 0",
+                               spec.name.c_str());
         value = 0;
       }
       metric.addValue((uint64_t)value, "value");
     } else {
       if (value > (int64_t)std::numeric_limits<int>::max()) {
-        LOG(warning) << "Value for " << spec.name << " is too large, setting to INT_MAX";
+        O2_SIGNPOST_EVENT_EMIT(monitoring_service, sid, "flushChangedMetrics", "Value for %{public}s is too large, setting to INT_MAX",
+                               spec.name.c_str());
         value = (int64_t)std::numeric_limits<int>::max();
       }
       if (value < (int64_t)std::numeric_limits<int>::min()) {
+        O2_SIGNPOST_EVENT_EMIT(monitoring_service, sid, "flushChangedMetrics", "Value for %{public}s is too small, setting to INT_MIN",
+                               spec.name.c_str());
         value = (int64_t)std::numeric_limits<int>::min();
-        LOG(warning) << "Value for " << spec.name << " is too small, setting to INT_MIN";
       }
       metric.addValue((int)value, "value");
     }
     if (spec.scope == DataProcessingStats::Scope::DPL) {
       metric.addTag(o2::monitoring::tags::Key::Subsystem, o2::monitoring::tags::Value::DPL);
     }
+    O2_SIGNPOST_EVENT_EMIT(monitoring_service, sid, "flushChangedMetrics", "Flushing metric %{public}s", spec.name.c_str());
     monitoring.send(std::move(metric));
   });
   relayer.sendContextState();
@@ -1076,6 +1089,38 @@ o2::framework::ServiceSpec CommonServices::dataProcessingStats()
                    .minPublishInterval = 0,
                    .maxRefreshLatency = 10000,
                    .sendInitialValue = true},
+        MetricSpec{.name = "timeslice-offer-number-consumed",
+                   .enabled = arrowAndResourceLimitingMetrics,
+                   .metricId = static_cast<short>(ProcessingStatsId::TIMESLICE_OFFER_NUMBER_CONSUMED),
+                   .kind = Kind::UInt64,
+                   .scope = Scope::DPL,
+                   .minPublishInterval = 0,
+                   .maxRefreshLatency = 10000,
+                   .sendInitialValue = true},
+        MetricSpec{.name = "timeslices-expired",
+                   .enabled = arrowAndResourceLimitingMetrics,
+                   .metricId = static_cast<short>(ProcessingStatsId::TIMESLICE_NUMBER_EXPIRED),
+                   .kind = Kind::UInt64,
+                   .scope = Scope::DPL,
+                   .minPublishInterval = 0,
+                   .maxRefreshLatency = 10000,
+                   .sendInitialValue = true},
+        MetricSpec{.name = "timeslices-started",
+                   .enabled = arrowAndResourceLimitingMetrics,
+                   .metricId = static_cast<short>(ProcessingStatsId::TIMESLICE_NUMBER_STARTED),
+                   .kind = Kind::UInt64,
+                   .scope = Scope::DPL,
+                   .minPublishInterval = 0,
+                   .maxRefreshLatency = 10000,
+                   .sendInitialValue = true},
+        MetricSpec{.name = "timeslices-done",
+                   .enabled = arrowAndResourceLimitingMetrics,
+                   .metricId = static_cast<short>(ProcessingStatsId::TIMESLICE_NUMBER_DONE),
+                   .kind = Kind::UInt64,
+                   .scope = Scope::DPL,
+                   .minPublishInterval = 0,
+                   .maxRefreshLatency = 10000,
+                   .sendInitialValue = true},
         MetricSpec{.name = "resources-missing",
                    .enabled = enableDebugMetrics,
                    .metricId = static_cast<short>(ProcessingStatsId::RESOURCES_MISSING),
@@ -1230,17 +1275,6 @@ o2::framework::ServiceSpec CommonServices::dataProcessorContextSpec()
     },
     .configure = noConfiguration(),
     .exit = [](ServiceRegistryRef, void* service) { auto* context = (DataProcessorContext*)service; delete context; },
-    .kind = ServiceKind::Serial};
-}
-
-o2::framework::ServiceSpec CommonServices::deviceContextSpec()
-{
-  return ServiceSpec{
-    .name = "device-context",
-    .init = [](ServiceRegistryRef, DeviceState&, fair::mq::ProgOptions&) -> ServiceHandle {
-      return ServiceHandle{TypeIdHelpers::uniqueId<DeviceContext>(), new DeviceContext()};
-    },
-    .configure = noConfiguration(),
     .kind = ServiceKind::Serial};
 }
 

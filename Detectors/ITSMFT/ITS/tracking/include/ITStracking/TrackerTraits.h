@@ -16,16 +16,15 @@
 #ifndef TRACKINGITSU_INCLUDE_TRACKERTRAITS_H_
 #define TRACKINGITSU_INCLUDE_TRACKERTRAITS_H_
 
-#include <cmath>
+#include <oneapi/tbb.h>
 
 #include "DetectorsBase/Propagator.h"
 #include "ITStracking/Configuration.h"
 #include "ITStracking/MathUtils.h"
+#include "ITStracking/IndexTableUtils.h"
 #include "ITStracking/TimeFrame.h"
+#include "ITStracking/Cell.h"
 #include "ITStracking/BoundedAllocator.h"
-
-#include <oneapi/tbb.h>
-#include <oneapi/tbb/partitioner.h>
 
 // #define OPTIMISATION_OUTPUT
 
@@ -43,6 +42,9 @@ template <int nLayers = 7>
 class TrackerTraits
 {
  public:
+  using IndexTableUtilsN = IndexTableUtils<nLayers>;
+  using CellSeedN = CellSeed<nLayers>;
+
   virtual ~TrackerTraits() = default;
   virtual void adoptTimeFrame(TimeFrame<nLayers>* tf) { mTimeFrame = tf; }
   virtual void initialiseTimeFrame(const int iteration) { mTimeFrame->initialise(iteration, mTrkParams[iteration], mTrkParams[iteration].NLayers); }
@@ -58,7 +60,7 @@ class TrackerTraits
   virtual void findShortPrimaries();
 
   virtual bool trackFollowing(TrackITSExt* track, int rof, bool outward, const int iteration);
-  virtual void processNeighbours(int iLayer, int iLevel, const bounded_vector<CellSeed>& currentCellSeed, const bounded_vector<int>& currentCellId, bounded_vector<CellSeed>& updatedCellSeed, bounded_vector<int>& updatedCellId);
+  virtual void processNeighbours(int iLayer, int iLevel, const bounded_vector<CellSeedN>& currentCellSeed, const bounded_vector<int>& currentCellId, bounded_vector<CellSeedN>& updatedCellSeed, bounded_vector<int>& updatedCellId);
 
   void updateTrackingParameters(const std::vector<TrackingParameters>& trkPars) { mTrkParams = trkPars; }
   TimeFrame<nLayers>* getTimeFrame() { return mTimeFrame; }
@@ -68,7 +70,7 @@ class TrackerTraits
   bool isMatLUT() const;
   virtual const char* getName() const noexcept { return "CPU"; }
   virtual bool isGPU() const noexcept { return false; }
-  void setMemoryPool(std::shared_ptr<BoundedMemoryResource>& pool) noexcept { mMemoryPool = pool; }
+  void setMemoryPool(std::shared_ptr<BoundedMemoryResource> pool) noexcept { mMemoryPool = pool; }
   auto getMemoryPool() const noexcept { return mMemoryPool; }
 
   // Others
@@ -90,8 +92,9 @@ class TrackerTraits
   virtual int getTFNumberOfCells() const { return mTimeFrame->getNumberOfCells(); }
 
  private:
-  track::TrackParCov buildTrackSeed(const Cluster& cluster1, const Cluster& cluster2, const TrackingFrameInfo& tf3);
-  bool fitTrack(TrackITSExt& track, int start, int end, int step, float chi2clcut = o2::constants::math::VeryBig, float chi2ndfcut = o2::constants::math::VeryBig, float maxQoverPt = o2::constants::math::VeryBig, int nCl = 0);
+  track::TrackParCov buildTrackSeed(const Cluster& cluster1, const Cluster& cluster2, const TrackingFrameInfo& tf3, bool reverse = false);
+  TrackITSExt seedTrackForRefit(const CellSeedN& seed);
+  bool fitTrack(TrackITSExt& track, int start, int end, int step, float chi2clcut = o2::constants::math::VeryBig, float chi2ndfcut = o2::constants::math::VeryBig, float maxQoverPt = o2::constants::math::VeryBig, int nCl = 0, o2::track::TrackPar* refLin = nullptr);
 
   bool mApplySmoothing = false;
   std::shared_ptr<BoundedMemoryResource> mMemoryPool;
@@ -119,7 +122,7 @@ inline const int4 TrackerTraits<nLayers>::getBinsRect(const int layerIndex, floa
     return getEmptyBinsRect();
   }
 
-  const IndexTableUtils& utils{mTimeFrame->mIndexTableUtils};
+  const IndexTableUtilsN& utils{mTimeFrame->mIndexTableUtils};
   return int4{o2::gpu::GPUCommonMath::Max(0, utils.getZBinIndex(layerIndex, zRangeMin)),
               utils.getPhiBinIndex(math_utils::getNormalizedPhi(phiRangeMin)),
               o2::gpu::GPUCommonMath::Min(mTrkParams[0].ZBins - 1, utils.getZBinIndex(layerIndex, zRangeMax)), // /!\ trkParams can potentially change across iterations

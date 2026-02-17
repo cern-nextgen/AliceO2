@@ -39,13 +39,13 @@ namespace o2
 namespace itsmft
 {
 
-class CTFCoder : public o2::ctf::CTFCoderBase
+class CTFCoder final : public o2::ctf::CTFCoderBase
 {
  public:
   using PMatrix = std::array<std::array<bool, ClusterPattern::MaxRowSpan + 2>, ClusterPattern::MaxColSpan + 2>;
   using RowColBuff = std::vector<PixelData>;
 
-  CTFCoder(o2::ctf::CTFCoderBase::OpType op, o2::detectors::DetID det) : o2::ctf::CTFCoderBase(op, CTF::getNBlocks(), det) {}
+  CTFCoder(o2::ctf::CTFCoderBase::OpType op, o2::detectors::DetID det, const std::string& ctfdictOpt = "none") : o2::ctf::CTFCoderBase(op, CTF::getNBlocks(), 1.f, det, ctfdictOpt) {}
   ~CTFCoder() final = default;
 
   /// entropy-encode clusters to buffer with CTF

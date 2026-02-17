@@ -16,7 +16,8 @@
 #define GPUCHAINTRACKING_H
 
 #include "GPUChain.h"
-#include "GPUDataTypes.h"
+#include "GPUDataTypesIO.h"
+#include "GPUDataTypesConfig.h"
 #include <atomic>
 #include <mutex>
 #include <functional>
@@ -58,6 +59,7 @@ class GPUDisplayInterface;
 class GPUQA;
 class GPUTPCClusterStatistics;
 class GPUTRDGeometry;
+class GPUTRDRecoParam;
 class TPCFastTransform;
 class GPUTrackingInputProvider;
 struct GPUChainTrackingFinalContext;
@@ -66,6 +68,8 @@ struct GPUNewCalibValues;
 struct GPUTriggerOutputs;
 struct CfFragment;
 class GPUTPCClusterFinder;
+struct GPUSettingsProcessing;
+struct GPUSettingsRec;
 
 class GPUChainTracking : public GPUChain
 {
@@ -86,6 +90,7 @@ class GPUChainTracking : public GPUChain
   void ClearErrorCodes(bool cpuOnly = false);
   int32_t DoQueuedUpdates(int32_t stream, bool updateSlave = true); // Forces doing queue calib updates, don't call when you are not sure you are allowed to do so!
   bool QARanForTF() const { return mFractionalQAEnabled; }
+  static void ApplySyncSettings(GPUSettingsProcessing& proc, GPUSettingsRec& rec, gpudatatypes::RecoStepField& steps, bool syncMode, int32_t dEdxMode = -2);
 
   // Structures for input and output data
   GPUTrackingInOutPointers& mIOPtrs;
@@ -114,7 +119,6 @@ class GPUChainTracking : public GPUChain
     std::unique_ptr<GPUTPCMCInfoCol[]> mcInfosTPCCol;
     std::unique_ptr<GPUTPCGMMergedTrack[]> mergedTracks;
     std::unique_ptr<GPUTPCGMMergedTrackHit[]> mergedTrackHits;
-    std::unique_ptr<GPUTPCGMMergedTrackHitXYZ[]> mergedTrackHitsXYZ;
     std::unique_ptr<GPUTRDTrackletWord[]> trdTracklets;
     std::unique_ptr<GPUTRDSpacePoint[]> trdSpacePoints;
     std::unique_ptr<float[]> trdTriggerTimes;
@@ -175,13 +179,16 @@ class GPUChainTracking : public GPUChain
   const o2::tpc::CalibdEdxContainer* GetdEdxCalibContainer() const;
   const o2::base::MatLayerCylSet* GetMatLUT() const;
   const GPUTRDGeometry* GetTRDGeometry() const;
+  const GPUTRDRecoParam* GetTRDRecoParam() const;
   const o2::base::Propagator* GetO2Propagator() const;
   const o2::base::Propagator* GetDeviceO2Propagator();
   void SetTPCFastTransform(std::unique_ptr<TPCFastTransform>&& tpcFastTransform, std::unique_ptr<CorrectionMapsHelper>&& tpcTransformHelper);
   void SetMatLUT(std::unique_ptr<o2::base::MatLayerCylSet>&& lut);
   void SetTRDGeometry(std::unique_ptr<o2::trd::GeometryFlat>&& geo);
+  void SetTRDRecoParam(std::unique_ptr<GPUTRDRecoParam>&& par);
   void SetMatLUT(const o2::base::MatLayerCylSet* lut);
   void SetTRDGeometry(const o2::trd::GeometryFlat* geo);
+  void SetTRDRecoParam(const GPUTRDRecoParam* par);
   void SetO2Propagator(const o2::base::Propagator* prop);
   void SetCalibObjects(const GPUCalibObjectsConst& obj);
   void SetCalibObjects(const GPUCalibObjects& obj);
@@ -264,9 +271,10 @@ class GPUChainTracking : public GPUChain
   std::unique_ptr<o2::tpc::CalibdEdxContainer> mdEdxCalibContainerU; // TPC dEdx calibration container
   std::unique_ptr<o2::base::MatLayerCylSet> mMatLUTU;                // Material Lookup Table
   std::unique_ptr<o2::trd::GeometryFlat> mTRDGeometryU;              // TRD Geometry
+  std::unique_ptr<GPUTRDRecoParam> mTRDRecoParamU;                   // TRD RecoParam
 
   // Ptrs to internal buffers
-  std::unique_ptr<o2::tpc::ClusterNativeAccess> mClusterNativeAccess;
+  std::unique_ptr<o2::tpc::ClusterNativeAccess> mClusterNativeAccess, mClusterNativeAccessReduced;
   std::array<GPUOutputControl*, GPUTrackingOutputs::count()> mSubOutputControls = {nullptr};
   std::unique_ptr<GPUTriggerOutputs> mTriggerBuffer;
 
@@ -292,7 +300,7 @@ class GPUChainTracking : public GPUChain
 
  private:
   int32_t RunChainFinalize();
-  void SanityCheck();
+  void OutputSanityCheck();
   int32_t RunTPCTrackingSectors_internal();
   int32_t RunTPCClusterizer_prepare(bool restorePointers);
 #ifdef GPUCA_TPC_GEOMETRY_O2
@@ -306,6 +314,8 @@ class GPUChainTracking : public GPUChain
   void RunTPCTrackingMerger_Resolve(int8_t useOrigTrackParam, int8_t mergeAll, GPUReconstruction::krnlDeviceType deviceType);
   void RunTPCClusterFilter(o2::tpc::ClusterNativeAccess* clusters, std::function<o2::tpc::ClusterNative*(size_t)> allocator, bool applyClusterCuts);
   bool NeedTPCClustersOnGPU();
+  void WriteReducedClusters();
+  void SortClusters(bool buildNativeGPU, bool propagateMCLabels, o2::tpc::ClusterNativeAccess* clusterAccess, o2::tpc::ClusterNative* clusters);
   template <int32_t I>
   int32_t RunTRDTrackingInternal();
   uint32_t StreamForSector(uint32_t sector) const;

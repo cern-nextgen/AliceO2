@@ -19,6 +19,7 @@
 #include "CommonConstants/LHCConstants.h"
 #include "CommonDataFormat/TimeStamp.h"
 #include "ReconstructionDataFormats/PrimaryVertex.h"
+#include "SimulationDataFormat/TrackReference.h"
 #include <array>
 #include <vector>
 
@@ -33,6 +34,7 @@ struct MCTrackInfo {
   int getLowestITSLayer() const;
   int getHighestITSLayer() const;
   std::vector<float> occTPCV{};
+  std::vector<o2::track::TrackPar> trackRefsTPC{};
   o2::track::TrackPar track{};
   o2::MCCompLabel label{};
   float occTPC = -1.f;
@@ -73,7 +75,7 @@ struct MCTrackInfo {
   float getTrackParTPCPar(int i, float b, float x = 90) const;
   float getTrackParTPCPhiSec(float b, float x = 90) const;
 
-  ClassDefNV(MCTrackInfo, 7);
+  ClassDefNV(MCTrackInfo, 8);
 };
 
 struct RecTrack {
@@ -286,6 +288,16 @@ struct ClResTPC {
   }
 
   ClassDefNV(ClResTPC, 2);
+};
+
+struct ITSHitInfo {
+  o2::BaseCluster<float> clus{};
+  o2::TrackReference tref{};
+  float trefXT = 0; // track ref tracking frame coordinates
+  float trefYT = 0;
+  float chipX = 0;
+  float chipAlpha = 0;
+  ClassDefNV(ITSHitInfo, 1);
 };
 
 struct RecPV {

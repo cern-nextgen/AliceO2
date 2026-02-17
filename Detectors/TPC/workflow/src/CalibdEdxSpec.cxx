@@ -26,10 +26,10 @@
 #include "Framework/DataProcessorSpec.h"
 #include "Framework/ConfigParamRegistry.h"
 #include "Framework/CCDBParamSpec.h"
-#include "GPUO2InterfaceConfigurableParam.h"
+#include "GPUO2ConfigurableParam.h"
 #include "TPCCalibration/CalibdEdx.h"
 #include "TPCWorkflow/ProcessingHelpers.h"
-#include "TPCBase/CDBTypes.h"
+#include "TPCBaseRecSim/CDBTypes.h"
 #include "TPCBase/Utils.h"
 #include "DetectorsBase/GRPGeomHelper.h"
 

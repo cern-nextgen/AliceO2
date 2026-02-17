@@ -56,11 +56,14 @@
 #include <IOTOFSimulation/Detector.h>
 #include <RICHSimulation/Detector.h>
 #include <ECalSimulation/Detector.h>
+#include <FD3Simulation/Detector.h>
 #include <MI3Simulation/Detector.h>
 #include <Alice3DetectorsPassive/Pipe.h>
 #include <Alice3DetectorsPassive/Absorber.h>
 #include <Alice3DetectorsPassive/Magnet.h>
 #endif
+
+#include <DetectorsPassive/ExternalModule.h>
 
 using Return = o2::base::Detector*;
 
@@ -181,6 +184,18 @@ void build_geometry(FairRunSim* run = nullptr)
   }
 #endif
 
+  if (isActivated("EXT")) {
+    // EXAMPLE!! how to pick geometry generated from external (CAD) module via `O2_CADtoTGeo.py`
+    o2::passive::ExternalModuleOptions options;
+    options.root_macro_file = "PATH_TO_EXTERNAL_GEOM_MODULE/geom.C";
+    options.anchor_volume = "barrel"; // hook this into barrel
+    auto rot = new TGeoCombiTrans();
+    rot->RotateX(90);
+    rot->SetDy(30); // we need to compensate for a shift of barrel with respect to zero
+    options.placement = rot;
+    run->AddModule(new o2::passive::ExternalModule("FOO", "BAR", options));
+  }
+
   // the absorber
   if (isActivated("ABSO")) {
     // the frame structure to support other detectors
@@ -262,6 +277,11 @@ void build_geometry(FairRunSim* run = nullptr)
   if (isActivated("ECL")) {
     // ALICE 3 ECAL
     addReadoutDetector(new o2::ecal::Detector(isReadout("ECL")));
+  }
+
+  if (isActivated("FD3")) {
+    // ALICE3 FD3
+    addReadoutDetector(new o2::fd3::Detector(isReadout("FD3")));
   }
 
   if (isActivated("MI3")) {

@@ -23,6 +23,12 @@ namespace o2
 namespace eventgen
 {
 
+GeneratorHybrid& GeneratorHybrid::Instance(const std::string& inputgens)
+{
+  static GeneratorHybrid instance(inputgens);
+  return instance;
+}
+
 GeneratorHybrid::GeneratorHybrid(const std::string& inputgens)
 {
   // This generator has trivial unit conversions
@@ -414,6 +420,7 @@ bool GeneratorHybrid::importParticles()
   mMCEventHeader.clearInfo();
   if (mCocktailMode) {
     // in cocktail mode we need to merge the particles from the different generators
+    bool baseGen = true; // first generator of the cocktail is used as reference to update the event header information
     for (auto subIndex : subGenIndex) {
       LOG(info) << "Importing particles for task " << subIndex;
       auto subParticles = gens[subIndex]->getParticles();
@@ -435,8 +442,10 @@ bool GeneratorHybrid::importParticles()
       }
 
       mParticles.insert(mParticles.end(), subParticles.begin(), subParticles.end());
-      // fetch the event Header information from the underlying generator
-      gens[subIndex]->updateHeader(&mMCEventHeader);
+      if (baseGen) {
+        gens[subIndex]->updateHeader(&mMCEventHeader);
+        baseGen = false;
+      }
       mInputTaskQueue.push(subIndex);
       mTasksStarted++;
     }
@@ -475,7 +484,9 @@ bool GeneratorHybrid::importParticles()
 void GeneratorHybrid::updateHeader(o2::dataformats::MCEventHeader* eventHeader)
 {
   if (eventHeader) {
-    // we forward the original header information if any
+    // Forward the base class fields from FairMCEventHeader
+    static_cast<FairMCEventHeader&>(*eventHeader) = static_cast<FairMCEventHeader&>(mMCEventHeader);
+    // Copy the key-value store info
     eventHeader->copyInfoFrom(mMCEventHeader);
 
     // put additional information about
@@ -609,17 +620,23 @@ Bool_t GeneratorHybrid::confSetter(const auto& gen)
 
 Bool_t GeneratorHybrid::parseJSON(const std::string& path)
 {
+  auto expandedPath = o2::utils::expandShellVarsInFileName(path);
+  // Check if configuration file exists
+  if (gSystem->AccessPathName(expandedPath.c_str())) {
+    LOG(fatal) << "Configuration file " << expandedPath << " for hybrid generator does not exist";
+    return false;
+  }
   // Parse JSON file to build map
-  std::ifstream fileStream(path, std::ios::in);
+  std::ifstream fileStream(expandedPath, std::ios::in);
   if (!fileStream.is_open()) {
-    LOG(error) << "Cannot open " << path;
+    LOG(error) << "Cannot open " << expandedPath;
     return false;
   }
   rapidjson::IStreamWrapper isw(fileStream);
   rapidjson::Document doc;
   doc.ParseStream(isw);
   if (doc.HasParseError()) {
-    LOG(error) << "Error parsing provided json file " << path;
+    LOG(error) << "Error parsing provided json file " << expandedPath;
     LOG(error) << "  - Error -> " << rapidjson::GetParseError_En(doc.GetParseError());
     return false;
   }

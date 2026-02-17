@@ -16,38 +16,30 @@
 #ifndef TRACKINGITSU_INCLUDE_CACLUSTER_H_
 #define TRACKINGITSU_INCLUDE_CACLUSTER_H_
 
+#include <array>
+#include "ITStracking/Constants.h"
 #include "GPUCommonRtypes.h"
-#include "GPUCommonArray.h"
 
 namespace o2::its
 {
 
+template <int>
 class IndexTableUtils;
 
 struct Cluster final {
   GPUhdDefault() Cluster() = default;
   GPUhd() Cluster(const float x, const float y, const float z, const int idx);
-  GPUhd() Cluster(const int, const IndexTableUtils& utils, const Cluster&);
-  GPUhd() Cluster(const int, const float3&, const IndexTableUtils& utils, const Cluster&);
+  template <int nLayers>
+  GPUhd() Cluster(const int, const IndexTableUtils<nLayers>& utils, const Cluster&);
+  template <int nLayers>
+  GPUhd() Cluster(const int, const float3&, const IndexTableUtils<nLayers>& utils, const Cluster&);
   GPUhdDefault() Cluster(const Cluster&) = default;
   GPUhdDefault() Cluster(Cluster&&) noexcept = default;
   GPUhdDefault() ~Cluster() = default;
 
   GPUhdDefault() Cluster& operator=(const Cluster&) = default;
   GPUhdDefault() Cluster& operator=(Cluster&&) noexcept = default;
-
-  // TODO
-  /*GPUhdDefault() bool operator==(const Cluster&) const = default;*/
-  GPUhd() bool operator==(const Cluster& other) const
-  {
-    return xCoordinate == other.xCoordinate &&
-           yCoordinate == other.yCoordinate &&
-           zCoordinate == other.zCoordinate &&
-           phi == other.phi &&
-           radius == other.radius &&
-           clusterId == other.clusterId &&
-           indexTableBinIndex == other.indexTableBinIndex;
-  }
+  GPUhdDefault() bool operator==(const Cluster&) const = default;
 
   GPUhd() void print() const;
 
@@ -56,8 +48,8 @@ struct Cluster final {
   float zCoordinate{-999.f};
   float phi{-999.f};
   float radius{-999.f};
-  int clusterId{-1};
-  int indexTableBinIndex{-1};
+  int clusterId{constants::UnusedIndex};
+  int indexTableBinIndex{constants::UnusedIndex};
 
   ClassDefNV(Cluster, 1);
 };
@@ -79,7 +71,7 @@ struct TrackingFrameInfo final {
   float zCoordinate{-999.f};
   float xTrackingFrame{-999.f};
   float alphaTrackingFrame{-999.f};
-  std::array<float, 2> positionTrackingFrame = {-1., -1.};
+  std::array<float, 2> positionTrackingFrame = {constants::UnusedIndex, constants::UnusedIndex};
   std::array<float, 3> covarianceTrackingFrame = {999., 999., 999.};
 
   ClassDefNV(TrackingFrameInfo, 1);

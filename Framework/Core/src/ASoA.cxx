@@ -14,6 +14,11 @@
 #include "Framework/RuntimeError.h"
 #include <arrow/util/key_value_metadata.h>
 #include <arrow/util/config.h>
+#include <TMemFile.h>
+#include <TClass.h>
+#include <TTree.h>
+#include <TH1.h>
+#include <TError.h>
 
 namespace o2::soa
 {
@@ -50,48 +55,78 @@ SelectionVector selectionToVector(gandiva::Selection const& sel)
   return rows;
 }
 
-SelectionVector sliceSelection(gsl::span<int64_t const> const& mSelectedRows, int64_t nrows, uint64_t offset)
+SelectionVector sliceSelection(std::span<int64_t const> const& mSelectedRows, int64_t nrows, uint64_t offset)
 {
   auto start = offset;
   auto end = start + nrows;
   auto start_iterator = std::lower_bound(mSelectedRows.begin(), mSelectedRows.end(), start);
   auto stop_iterator = std::lower_bound(start_iterator, mSelectedRows.end(), end);
   SelectionVector slicedSelection{start_iterator, stop_iterator};
-  std::transform(slicedSelection.begin(), slicedSelection.end(), slicedSelection.begin(),
-                 [&start](int64_t idx) {
-                   return idx - static_cast<int64_t>(start);
-                 });
+  std::ranges::transform(slicedSelection.begin(), slicedSelection.end(), slicedSelection.begin(),
+                         [&start](int64_t idx) {
+                           return idx - static_cast<int64_t>(start);
+                         });
   return slicedSelection;
 }
+
+std::shared_ptr<arrow::Table> ArrowHelpers::joinTables(std::vector<std::shared_ptr<arrow::Table>>&& tables)
+{
+  std::vector<std::shared_ptr<arrow::Field>> fields;
+  std::vector<std::shared_ptr<arrow::ChunkedArray>> columns;
+  bool notEmpty = (tables[0]->num_rows() != 0);
+  std::ranges::for_each(tables, [&fields, &columns, notEmpty](auto const& t) {
+    std::ranges::copy(t->fields(), std::back_inserter(fields));
+    if (notEmpty) {
+      std::ranges::copy(t->columns(), std::back_inserter(columns));
+    }
+  });
+  auto schema = std::make_shared<arrow::Schema>(fields);
+  return arrow::Table::Make(schema, columns);
+}
+
+namespace
+{
+template <typename T>
+  requires(std::same_as<T, std::string>)
+auto makeString(T const& str)
+{
+  return str.c_str();
+}
+template <typename T>
+  requires(std::same_as<T, const char*>)
+auto makeString(T const& str)
+{
+  return str;
+}
+
+template <typename T>
+void canNotJoin(std::vector<std::shared_ptr<arrow::Table>> const& tables, std::span<T> labels)
+{
+  for (auto i = 0U; i < tables.size() - 1; ++i) {
+    if (tables[i]->num_rows() != tables[i + 1]->num_rows()) {
+      throw o2::framework::runtime_error_f("Tables %s and %s have different sizes (%d vs %d) and cannot be joined!",
+                                           makeString(labels[i]), makeString(labels[i + 1]), tables[i]->num_rows(), tables[i + 1]->num_rows());
+    }
+  }
+}
+} // namespace
 
 std::shared_ptr<arrow::Table> ArrowHelpers::joinTables(std::vector<std::shared_ptr<arrow::Table>>&& tables, std::span<const char* const> labels)
 {
   if (tables.size() == 1) {
     return tables[0];
   }
-  for (auto i = 0U; i < tables.size() - 1; ++i) {
-    if (tables[i]->num_rows() != tables[i + 1]->num_rows()) {
-      throw o2::framework::runtime_error_f("Tables %s and %s have different sizes (%d vs %d) and cannot be joined!",
-                                           labels[i], labels[i + 1], tables[i]->num_rows(), tables[i + 1]->num_rows());
-    }
-  }
-  std::vector<std::shared_ptr<arrow::Field>> fields;
-  std::vector<std::shared_ptr<arrow::ChunkedArray>> columns;
+  canNotJoin(tables, labels);
+  return joinTables(std::forward<std::vector<std::shared_ptr<arrow::Table>>>(tables));
+}
 
-  for (auto& t : tables) {
-    auto tf = t->fields();
-    std::copy(tf.begin(), tf.end(), std::back_inserter(fields));
+std::shared_ptr<arrow::Table> ArrowHelpers::joinTables(std::vector<std::shared_ptr<arrow::Table>>&& tables, std::span<const std::string> labels)
+{
+  if (tables.size() == 1) {
+    return tables[0];
   }
-
-  auto schema = std::make_shared<arrow::Schema>(fields);
-
-  if (tables[0]->num_rows() != 0) {
-    for (auto& t : tables) {
-      auto tc = t->columns();
-      std::copy(tc.begin(), tc.end(), std::back_inserter(columns));
-    }
-  }
-  return arrow::Table::Make(schema, columns);
+  canNotJoin(tables, labels);
+  return joinTables(std::forward<std::vector<std::shared_ptr<arrow::Table>>>(tables));
 }
 
 std::shared_ptr<arrow::Table> ArrowHelpers::concatTables(std::vector<std::shared_ptr<arrow::Table>>&& tables)
@@ -100,7 +135,6 @@ std::shared_ptr<arrow::Table> ArrowHelpers::concatTables(std::vector<std::shared
     return tables[0];
   }
   std::vector<std::shared_ptr<arrow::ChunkedArray>> columns;
-  assert(tables.size() > 1);
   std::vector<std::shared_ptr<arrow::Field>> resultFields = tables[0]->schema()->fields();
   auto compareFields = [](std::shared_ptr<arrow::Field> const& f1, std::shared_ptr<arrow::Field> const& f2) {
     // Let's do this with stable sorting.
@@ -130,13 +164,12 @@ std::shared_ptr<arrow::Table> ArrowHelpers::concatTables(std::vector<std::shared
     columns.push_back(std::make_shared<arrow::ChunkedArray>(chunks));
   }
 
-  auto result = arrow::Table::Make(std::make_shared<arrow::Schema>(resultFields), columns);
-  return result;
+  return arrow::Table::Make(std::make_shared<arrow::Schema>(resultFields), columns);
 }
 
 arrow::ChunkedArray* getIndexFromLabel(arrow::Table* table, std::string_view label)
 {
-  auto field = std::find_if(table->schema()->fields().begin(), table->schema()->fields().end(), [&](std::shared_ptr<arrow::Field> const& f) {
+  auto field = std::ranges::find_if(table->schema()->fields(), [&](std::shared_ptr<arrow::Field> const& f) {
     auto caseInsensitiveCompare = [](const std::string_view& str1, const std::string& str2) {
       return std::ranges::equal(
         str1, str2,
@@ -149,7 +182,7 @@ arrow::ChunkedArray* getIndexFromLabel(arrow::Table* table, std::string_view lab
     return caseInsensitiveCompare(label, f->name());
   });
   if (field == table->schema()->fields().end()) {
-    o2::framework::throw_error(o2::framework::runtime_error_f("Unable to find column with label %s", label));
+    o2::framework::throw_error(o2::framework::runtime_error_f("Unable to find column with label %s.", label));
   }
   auto index = std::distance(table->schema()->fields().begin(), field);
   return table->column(index).get();
@@ -168,6 +201,62 @@ void notFoundColumn(const char* label, const char* key)
 void missingOptionalPreslice(const char* label, const char* key)
 {
   throw o2::framework::runtime_error_f(R"(Optional Preslice with missing binding used: table "%s" (or join based on it) does not have column "%s")", label, key);
+}
+
+void* extractCCDBPayload(char* payload, size_t size, TClass const* cl, const char* what)
+{
+  Int_t previousErrorLevel = gErrorIgnoreLevel;
+  gErrorIgnoreLevel = kFatal;
+  // does it have a flattened headers map attached in the end?
+  TMemFile file("name", (char*)payload, size, "READ");
+  gErrorIgnoreLevel = previousErrorLevel;
+  if (file.IsZombie()) {
+    return nullptr;
+  }
+
+  if (!cl) {
+    return nullptr;
+  }
+  auto object = file.GetObjectChecked(what, cl);
+  if (!object) {
+    // it could be that object was stored with previous convention
+    // where the classname was taken as key
+    std::string objectName(cl->GetName());
+    objectName.erase(std::find_if(objectName.rbegin(), objectName.rend(), [](unsigned char ch) {
+                       return !std::isspace(ch);
+                     }).base(),
+                     objectName.end());
+    objectName.erase(objectName.begin(), std::find_if(objectName.begin(), objectName.end(), [](unsigned char ch) {
+                       return !std::isspace(ch);
+                     }));
+
+    object = file.GetObjectChecked(objectName.c_str(), cl);
+    LOG(warn) << "Did not find object under expected name " << what;
+    if (!object) {
+      return nullptr;
+    }
+    LOG(warn) << "Found object under deprecated name " << cl->GetName();
+  }
+  auto result = object;
+  // We need to handle some specific cases as ROOT ties them deeply
+  // to the file they are contained in
+  if (cl->InheritsFrom("TObject")) {
+    // make a clone
+    // detach from the file
+    auto tree = dynamic_cast<TTree*>((TObject*)object);
+    if (tree) {
+      tree->LoadBaskets(0x1L << 32); // make tree memory based
+      tree->SetDirectory(nullptr);
+      result = tree;
+    } else {
+      auto h = dynamic_cast<TH1*>((TObject*)object);
+      if (h) {
+        h->SetDirectory(nullptr);
+        result = h;
+      }
+    }
+  }
+  return result;
 }
 
 } // namespace o2::soa
@@ -217,7 +306,7 @@ std::shared_ptr<arrow::Table> PreslicePolicySorted::getSliceFor(int value, std::
   return output;
 }
 
-gsl::span<const int64_t> PreslicePolicyGeneral::getSliceFor(int value) const
+std::span<const int64_t> PreslicePolicyGeneral::getSliceFor(int value) const
 {
   return this->sliceInfo.getSliceFor(value);
 }

@@ -26,7 +26,6 @@
 #include "Framework/WorkflowSpec.h"
 #include <Monitoring/Monitoring.h>
 #include <fairmq/TransportFactory.h>
-#include <fairmq/MemoryResources.h>
 #include <array>
 #include <vector>
 #include <uv.h>
@@ -84,7 +83,7 @@ TEST_CASE("DataRelayer")
     ref.registerService(ServiceRegistryHelpers::handleForService<TimesliceIndex>(&index));
 
     auto policy = CompletionPolicyHelpers::consumeWhenAny();
-    DataRelayer relayer(policy, inputs, index, {registry});
+    DataRelayer relayer(policy, inputs, index, {registry}, -1);
     relayer.setPipelineLength(4);
 
     // Let's create a dummy O2 Message with two headers in the stack:
@@ -134,7 +133,7 @@ TEST_CASE("DataRelayer")
     ref.registerService(ServiceRegistryHelpers::handleForService<TimesliceIndex>(&index));
 
     auto policy = CompletionPolicyHelpers::consumeWhenAny();
-    DataRelayer relayer(policy, inputs, index, {registry});
+    DataRelayer relayer(policy, inputs, index, {registry}, -1);
     relayer.setPipelineLength(4);
 
     // Let's create a dummy O2 Message with two headers in the stack:
@@ -196,7 +195,7 @@ TEST_CASE("DataRelayer")
     ref.registerService(ServiceRegistryHelpers::handleForService<TimesliceIndex>(&index));
 
     auto policy = CompletionPolicyHelpers::consumeWhenAll();
-    DataRelayer relayer(policy, inputs, index, {registry});
+    DataRelayer relayer(policy, inputs, index, {registry}, -1);
     relayer.setPipelineLength(4);
 
     auto transport = fair::mq::TransportFactory::CreateTransportFactory("zeromq");
@@ -277,7 +276,7 @@ TEST_CASE("DataRelayer")
     ref.registerService(ServiceRegistryHelpers::handleForService<TimesliceIndex>(&index));
 
     auto policy = CompletionPolicyHelpers::consumeWhenAll();
-    DataRelayer relayer(policy, inputs, index, {registry});
+    DataRelayer relayer(policy, inputs, index, {registry}, -1);
     relayer.setPipelineLength(3);
 
     auto transport = fair::mq::TransportFactory::CreateTransportFactory("zeromq");
@@ -360,7 +359,7 @@ TEST_CASE("DataRelayer")
     std::vector<InputChannelInfo> infos{1};
     TimesliceIndex index{1, infos};
     ref.registerService(ServiceRegistryHelpers::handleForService<TimesliceIndex>(&index));
-    DataRelayer relayer(policy, inputs, index, {registry});
+    DataRelayer relayer(policy, inputs, index, {registry}, -1);
     // Only two messages to fill the cache.
     relayer.setPipelineLength(2);
 
@@ -438,7 +437,7 @@ TEST_CASE("DataRelayer")
     ref.registerService(ServiceRegistryHelpers::handleForService<TimesliceIndex>(&index));
 
     auto policy = CompletionPolicyHelpers::processWhenAny();
-    DataRelayer relayer(policy, inputs, index, {registry});
+    DataRelayer relayer(policy, inputs, index, {registry}, -1);
     // Only two messages to fill the cache.
     relayer.setPipelineLength(2);
 
@@ -510,7 +509,7 @@ TEST_CASE("DataRelayer")
     ref.registerService(ServiceRegistryHelpers::handleForService<TimesliceIndex>(&index));
 
     auto policy = CompletionPolicyHelpers::processWhenAny();
-    DataRelayer relayer(policy, inputs, index, {registry});
+    DataRelayer relayer(policy, inputs, index, {registry}, -1);
     // Only two messages to fill the cache.
     relayer.setPipelineLength(3);
 
@@ -569,7 +568,7 @@ TEST_CASE("DataRelayer")
     ref.registerService(ServiceRegistryHelpers::handleForService<TimesliceIndex>(&index));
 
     auto policy = CompletionPolicyHelpers::processWhenAny();
-    DataRelayer relayer(policy, inputs, index, {registry});
+    DataRelayer relayer(policy, inputs, index, {registry}, -1);
     // Only two messages to fill the cache.
     relayer.setPipelineLength(1);
 
@@ -630,7 +629,7 @@ TEST_CASE("DataRelayer")
     ref.registerService(ServiceRegistryHelpers::handleForService<TimesliceIndex>(&index));
 
     auto policy = CompletionPolicyHelpers::processWhenAny();
-    DataRelayer relayer(policy, inputs, index, {registry});
+    DataRelayer relayer(policy, inputs, index, {registry}, -1);
     // Only two messages to fill the cache.
     relayer.setPipelineLength(1);
 
@@ -699,7 +698,7 @@ TEST_CASE("DataRelayer")
     ref.registerService(ServiceRegistryHelpers::handleForService<TimesliceIndex>(&index));
 
     auto policy = CompletionPolicyHelpers::consumeWhenAny();
-    DataRelayer relayer(policy, inputs, index, {registry});
+    DataRelayer relayer(policy, inputs, index, {registry}, -1);
     relayer.setPipelineLength(4);
 
     DataHeader dh{"CLUSTERS", "TPC", 0};
@@ -753,7 +752,7 @@ TEST_CASE("DataRelayer")
     ref.registerService(ServiceRegistryHelpers::handleForService<TimesliceIndex>(&index));
 
     auto policy = CompletionPolicyHelpers::consumeWhenAny();
-    DataRelayer relayer(policy, inputs, index, {registry});
+    DataRelayer relayer(policy, inputs, index, {registry}, -1);
     relayer.setPipelineLength(4);
 
     auto transport = fair::mq::TransportFactory::CreateTransportFactory("zeromq");

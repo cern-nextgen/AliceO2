@@ -31,6 +31,7 @@ namespace o2::its
 
 struct TrackingParameters {
   int CellMinimumLevel() const noexcept { return MinTrackLength - constants::ClustersPerCell + 1; }
+  int NeighboursPerRoad() const noexcept { return NLayers - 3; }
   int CellsPerRoad() const noexcept { return NLayers - 2; }
   int TrackletsPerRoad() const noexcept { return NLayers - 1; }
   std::string asString() const;
@@ -50,6 +51,7 @@ struct TrackingParameters {
   float Diamond[3] = {0.f, 0.f, 0.f};
 
   /// General parameters
+  bool AllowSharingFirstCluster = false;
   int ClusterSharing = 0;
   int MinTrackLength = 7;
   float NSigmaCut = 5;
@@ -64,8 +66,11 @@ struct TrackingParameters {
   o2::base::PropagatorImpl<float>::MatCorrType CorrType = o2::base::PropagatorImpl<float>::MatCorrType::USEMatCorrNONE;
   float MaxChi2ClusterAttachment = 60.f;
   float MaxChi2NDF = 30.f;
+  int ReseedIfShorter = 6; // reseed for the final fit track with the length shorter than this
   std::vector<float> MinPt = {0.f, 0.f, 0.f, 0.f};
-  unsigned char StartLayerMask = 0x7F;
+  uint16_t StartLayerMask = 0x7F;
+  bool RepeatRefitOut = false;   // repeat outward refit using inward refit as a seed
+  bool ShiftRefToCluster = true; // TrackFit: after update shift the linearization reference to cluster
   bool FindShortTracks = false;
   bool PerPrimaryVertexProcessing = false;
   bool SaveTimeBenchmarks = false;
@@ -78,6 +83,8 @@ struct TrackingParameters {
   bool UseTrackFollowerMix = false;
   float TrackFollowerNSigmaCutZ = 1.f;
   float TrackFollowerNSigmaCutPhi = 1.f;
+
+  bool createArtefactLabels{false};
 
   bool PrintMemory = false; // print allocator usage in epilog report
   size_t MaxMemory = std::numeric_limits<size_t>::max();

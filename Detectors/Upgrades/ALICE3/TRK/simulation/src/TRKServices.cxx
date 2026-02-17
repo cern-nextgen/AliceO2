@@ -173,7 +173,9 @@ void TRKServices::registerVacuum(TGeoVolume* motherVolume)
   TGeoVolume* vacuumVolume = new TGeoVolume("A3IP_VACUUM", vacuumComposite, kMedVac);
 
   // Add the vacuum to the barrel
-  vacuumVolume->SetLineColor(kGreen - 3);
+  vacuumVolume->SetLineColor(kAzure + 7);
+  vacuumVolume->SetTransparency(80);
+
   motherVolume->AddNode(vacuumVolume, 1, new TGeoTranslation(0, 0, 0));
 }
 
@@ -262,7 +264,7 @@ void TRKServices::createMiddleServices(TGeoVolume* motherVolume)
   // Carbon Fiber Cylinder support for the middle tracker
   float rMinMiddleCarbonSupport = 34.8f; // Arbitrary value
   float rMaxMiddleCarbonSupport = 35.f;  // 2 mm of carbon fiber
-  const float zLengthMiddleCarbon = 62.f;
+  const float zLengthMiddleCarbon = 64.2f;
   TGeoTube* middleBarrelCarbonSupport = new TGeoTube("TRK_MID_CARBONSUPPORTsh", rMinMiddleCarbonSupport, rMaxMiddleCarbonSupport, zLengthMiddleCarbon);
   TGeoVolume* middleBarrelCarbonSupportVolume = new TGeoVolume("TRK_MID_CARBONSUPPORT", middleBarrelCarbonSupport, medCFiber);
   middleBarrelCarbonSupportVolume->SetLineColor(kGray);
@@ -316,7 +318,7 @@ void TRKServices::createMiddleServices(TGeoVolume* motherVolume)
   // Middle barrel connection disks
   const float rMinMiddleBarrelDisk = 5.68f;
   const float rMaxMiddleBarrelDisk = 35.f;
-  const float zLengthMiddleBarrel = 62.f;
+  const float zLengthMiddleBarrel = 64.2f;
   for (auto& orientation : {Orientation::kASide, Orientation::kCSide}) {
     TGeoTube* middleBarrelConnDiskSIO2 = new TGeoTube(Form("TRK_MIDBARCONN_DISK_SIO2sh_%s", orientation == Orientation::kASide ? "bwd" : "fwd"), rMinMiddleBarrelDisk, rMaxMiddleBarrelDisk, siO2FiberThick);
     TGeoTube* middleBarrelConnDiskPE = new TGeoTube(Form("TRK_MIDBARCONN_DISK_PEsh_%s", orientation == Orientation::kASide ? "bwd" : "fwd"), rMinMiddleBarrelDisk, rMaxMiddleBarrelDisk, peFiberThick);

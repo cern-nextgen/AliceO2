@@ -26,7 +26,6 @@
 #include "CTPReconstruction/CTFHelper.h"
 #include "CTPReconstruction/RawDataDecoder.h"
 #include "DataFormatsCTP/Configuration.h"
-#include <vector>
 
 class TTree;
 
@@ -35,10 +34,10 @@ namespace o2
 namespace ctp
 {
 
-class CTFCoder : public o2::ctf::CTFCoderBase
+class CTFCoder final : public o2::ctf::CTFCoderBase
 {
  public:
-  CTFCoder(o2::ctf::CTFCoderBase::OpType op) : o2::ctf::CTFCoderBase(op, CTF::getNBlocks(), o2::detectors::DetID::CTP) {}
+  CTFCoder(o2::ctf::CTFCoderBase::OpType op, const std::string& ctfdictOpt = "none") : o2::ctf::CTFCoderBase(op, CTF::getNBlocks(), 1.f, o2::detectors::DetID::CTP, ctfdictOpt) {}
   ~CTFCoder() final = default;
 
   /// entropy-encode data to buffer with CTF
@@ -226,7 +225,7 @@ o2::ctf::CTFIOSize CTFCoder::decode(const CTF::base& ec, VTRG& data, LumiInfo& l
       trgclassmask = mCTPConfig.getTriggerClassMask();
     }
     // std::cout << "trgclassmask:" << std::hex << trgclassmask << std::dec << std::endl;
-    std::pmr::vector<CTPDigit> digits;
+    o2::pmr::vector<CTPDigit> digits;
     o2::ctp::RawDataDecoder::shiftInputs(digitsMap, digits, mFirstTFOrbit, trgclassmask);
     for (auto const& dig : digits) {
       data.emplace_back(dig);

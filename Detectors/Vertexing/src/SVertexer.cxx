@@ -216,7 +216,7 @@ void SVertexer::produceOutput(o2::framework::ProcessingContext& pc)
 
     auto& strTracksOut = pc.outputs().make<std::vector<o2::dataformats::StrangeTrack>>(o2f::Output{"GLO", "STRANGETRACKS", 0});
     auto& strClustOut = pc.outputs().make<std::vector<o2::strangeness_tracking::ClusAttachments>>(o2f::Output{"GLO", "CLUSUPDATES", 0});
-    std::pmr::vector<o2::MCCompLabel> mcLabsOut;
+    o2::pmr::vector<o2::MCCompLabel> mcLabsOut;
     strTracksOut.resize(mNStrangeTracks);
     strClustOut.resize(mNStrangeTracks);
     if (mStrTracker->getMCTruthOn()) {
@@ -269,6 +269,9 @@ void SVertexer::updateTimeDependentParams()
   if (!updatedOnce) {
     updatedOnce = true;
     mSVParams = &SVertexerParams::Instance();
+    if (mSVParams->mExcludeTPCtracks && !mRecoCont->isTrackSourceLoaded(GIndex::TPC)) {
+      LOGP(fatal, "TPC tracks requested but not provided");
+    }
     // precalculated selection cuts
     mMinR2ToMeanVertex = mSVParams->minRToMeanVertex * mSVParams->minRToMeanVertex;
     mMaxR2ToMeanVertexCascV0 = mSVParams->maxRToMeanVertexCascV0 * mSVParams->maxRToMeanVertexCascV0;
@@ -543,8 +546,7 @@ void SVertexer::buildT2V(const o2::globaltracking::RecoContainer& recoData) // a
         }
         continue;
       }
-
-      if (!hasTPC && nITSclu < mSVParams->mITSSAminNclu && (!shortOBITSOnlyTrack || mSVParams->mRejectITSonlyOBtrack)) {
+      if ((isTPCloaded && !hasTPC) && (isITSloaded && (nITSclu < mSVParams->mITSSAminNclu && (!shortOBITSOnlyTrack || mSVParams->mRejectITSonlyOBtrack)))) {
         continue; // reject short ITS-only
       }
 

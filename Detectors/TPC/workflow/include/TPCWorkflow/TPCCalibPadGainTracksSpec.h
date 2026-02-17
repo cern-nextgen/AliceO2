@@ -25,7 +25,7 @@
 #include "DataFormatsParameters/GRPObject.h"
 #include "TPCWorkflow/ProcessingHelpers.h"
 #include "Framework/CCDBParamSpec.h"
-#include "TPCBase/CDBInterface.h"
+#include "TPCBaseRecSim/CDBInterface.h"
 #include "TPCCalibration/VDriftHelper.h"
 #include "TPCCalibration/CorrectionMapsLoader.h"
 #include "DetectorsBase/GRPGeomHelper.h"
@@ -54,6 +54,7 @@ class TPCCalibPadGainTracksDevice : public o2::framework::Task
     }
     mTPCCorrMapsLoader.setLumiScaleType(sclOpts.lumiType);
     mTPCCorrMapsLoader.setLumiScaleMode(sclOpts.lumiMode);
+    mTPCCorrMapsLoader.setCheckCTPIDCConsistency(sclOpts.checkCTPIDCconsistency);
   }
 
   void init(o2::framework::InitContext& ic) final

@@ -99,7 +99,7 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
   irFrames.reserve(trackROFvec.size());
   int nBCPerTF = alpParams.roFrameLengthInBC;
 
-  LOGP(info, "ITSTracker pulled {} clusters, {} RO frames", compClusters.size(), trackROFvec.size());
+  LOGP(info, "ITSTracker pulled {} clusters, {} RO frames {}", compClusters.size(), trackROFvec.size(), compClusters.empty() ? " -> received no processable data will skip" : "");
   const dataformats::MCTruthContainer<MCCompLabel>* labels = nullptr;
   gsl::span<itsmft::MC2ROFRecord const> mc2rofs;
   if (mIsMC) {
@@ -139,11 +139,10 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
   mTracker->setBz(o2::base::Propagator::Instance()->getNominalBz());
 
   gsl::span<const unsigned char>::iterator pattIt = patterns.begin();
-
-  gsl::span<itsmft::ROFRecord> trackROFspan(trackROFvec);
+  gsl::span<const itsmft::ROFRecord> trackROFspan(trackROFvec);
   loadROF(trackROFspan, compClusters, pattIt, labels);
   pattIt = patterns.begin();
-  std::vector<int> savedROF;
+
   auto logger = [&](const std::string& s) { LOG(info) << s; };
   auto fatalLogger = [&](const std::string& s) { LOG(fatal) << s; };
   auto errorLogger = [&](const std::string& s) { LOG(error) << s; };
@@ -157,7 +156,9 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
   if (mRunVertexer) {
     vertROFvec.reserve(trackROFvec.size());
     // Run seeding vertexer
-    vertexerElapsedTime = mVertexer->clustersToVertices(logger);
+    if (!compClusters.empty()) {
+      vertexerElapsedTime = mVertexer->clustersToVertices(logger);
+    }
   } else { // cosmics
     mTimeFrame->resetRofPV();
   }
@@ -226,7 +227,7 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
       mTimeFrame->addPrimaryVertices(vtxVecLoc, 0);
     }
   }
-  if (mRunVertexer) {
+  if (mRunVertexer && !compClusters.empty()) {
     LOG(info) << fmt::format(" - Vertex seeding total elapsed time: {} ms for {} ({} + {}) vertices found in {}/{} ROFs",
                              vertexerElapsedTime,
                              mTimeFrame->getPrimaryVerticesNum(),
@@ -244,14 +245,15 @@ void ITSTrackingInterface::run(framework::ProcessingContext& pc)
   if (mCosmicsProcessing && compClusters.size() > 1500 * trackROFspan.size()) {
     LOG(error) << "Cosmics processing was requested with an average detector occupancy exceeding 1.e-7, skipping TF processing.";
   } else {
-
-    mTimeFrame->setMultiplicityCutMask(processingMask);
-    mTimeFrame->setROFMask(processUPCMask);
-    // Run CA tracker
-    if (mMode == o2::its::TrackingMode::Async && o2::its::TrackerParamConfig::Instance().fataliseUponFailure) {
-      mTracker->clustersToTracks(logger, fatalLogger);
-    } else {
-      mTracker->clustersToTracks(logger, errorLogger);
+    if (!compClusters.empty()) {
+      mTimeFrame->setMultiplicityCutMask(processingMask);
+      mTimeFrame->setROFMask(processUPCMask);
+      // Run CA tracker
+      if (mMode == o2::its::TrackingMode::Async && o2::its::TrackerParamConfig::Instance().fataliseUponFailure) {
+        mTracker->clustersToTracks(logger, fatalLogger);
+      } else {
+        mTracker->clustersToTracks(logger, errorLogger);
+      }
     }
     size_t totTracks{mTimeFrame->getNumberOfTracks()}, totClusIDs{mTimeFrame->getNumberOfUsedClusters()};
     if (totTracks) {
@@ -382,12 +384,12 @@ void ITSTrackingInterface::printSummary() const
   mTracker->printSummary();
 }
 
-void ITSTrackingInterface::setTraitsFromProvider(VertexerTraits* vertexerTraits,
-                                                 TrackerTraits7* trackerTraits,
-                                                 TimeFrame7* frame)
+void ITSTrackingInterface::setTraitsFromProvider(VertexerTraitsN* vertexerTraits,
+                                                 TrackerTraitsN* trackerTraits,
+                                                 TimeFrameN* frame)
 {
-  mVertexer = std::make_unique<Vertexer>(vertexerTraits);
-  mTracker = std::make_unique<Tracker>(trackerTraits);
+  mVertexer = std::make_unique<VertexerN>(vertexerTraits);
+  mTracker = std::make_unique<TrackerN>(trackerTraits);
   mTimeFrame = frame;
   mVertexer->adoptTimeFrame(*mTimeFrame);
   mTracker->adoptTimeFrame(*mTimeFrame);
@@ -403,7 +405,7 @@ void ITSTrackingInterface::setTraitsFromProvider(VertexerTraits* vertexerTraits,
   mVertexer->setMemoryPool(mMemoryPool);
 }
 
-void ITSTrackingInterface::loadROF(gsl::span<itsmft::ROFRecord>& trackROFspan,
+void ITSTrackingInterface::loadROF(gsl::span<const itsmft::ROFRecord>& trackROFspan,
                                    gsl::span<const itsmft::CompClusterExt> clusters,
                                    gsl::span<const unsigned char>::iterator& pattIt,
                                    const dataformats::MCTruthContainer<MCCompLabel>* mcLabels)

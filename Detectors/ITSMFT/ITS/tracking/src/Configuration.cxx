@@ -186,12 +186,17 @@ std::vector<TrackingParameters> TrackingMode::getTrackingParameters(TrackingMode
       int lslot = tc.MaxTrackLength - ilg;
       p.MinPt[lslot] *= bFactor;
     }
+    p.ReseedIfShorter = tc.reseedIfShorter;
+    p.RepeatRefitOut = tc.repeatRefitOut;
+    p.ShiftRefToCluster = tc.shiftRefToCluster;
+    p.createArtefactLabels = tc.createArtefactLabels;
 
     p.PrintMemory = tc.printMemory;
     p.MaxMemory = tc.maxMemory;
     p.DropTFUponFailure = tc.dropTFUponFailure;
     p.SaveTimeBenchmarks = tc.saveTimeBenchmarks;
     p.FataliseUponFailure = tc.fataliseUponFailure;
+    p.AllowSharingFirstCluster = tc.allowSharingFirstCluster;
 
     if (tc.useMatCorrTGeo) {
       p.CorrType = o2::base::PropagatorImpl<float>::MatCorrType::USEMatCorrTGeo;

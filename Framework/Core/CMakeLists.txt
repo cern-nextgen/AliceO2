@@ -10,13 +10,13 @@
 # or submit itself to any jurisdiction.
 
 o2_add_library(Framework
-               SOURCES src/AODReaderHelpers.cxx
-                       src/AnalysisHelpers.cxx
+               SOURCES src/AnalysisHelpers.cxx
                        src/AlgorithmSpec.cxx
                        src/ArrowSupport.cxx
                        src/ArrowTableSlicingCache.cxx
                        src/AnalysisDataModel.cxx
                        src/AnalysisSupportHelpers.cxx
+                       src/AnalysisTask.cxx
                        src/ASoA.cxx
                        src/ASoAHelpers.cxx
                        src/AsyncQueue.cxx
@@ -87,6 +87,7 @@ o2_add_library(Framework
                        src/FairMQDeviceProxy.cxx
                        src/FairMQResizableBuffer.cxx
                        src/FairOptionsRetriever.cxx
+                       src/FragmentToBatch.cxx
                        src/ConfigurationOptionsRetriever.cxx
                        src/FreePortFinder.cxx
                        src/GraphvizHelpers.cxx
@@ -108,6 +109,7 @@ o2_add_library(Framework
                        src/SimpleOptionsRetriever.cxx
                        src/O2ControlHelpers.cxx
                        src/O2ControlLabels.cxx
+                       src/CommonLabels.cxx
                        src/O2ControlParameters.cxx
                        src/O2DataModelHelpers.cxx
                        src/OutputSpec.cxx
@@ -131,7 +133,6 @@ o2_add_library(Framework
                        src/TMessageSerializer.cxx
                        src/TableBuilder.cxx
                        src/TableConsumer.cxx
-                       src/TableTreeHelpers.cxx
                        src/TopologyPolicy.cxx
                        src/TopologyPolicyHelpers.cxx
                        src/TextDriverClient.cxx
@@ -142,6 +143,8 @@ o2_add_library(Framework
                        src/Array2D.cxx
                        src/Variant.cxx
                        src/VariantJSONHelpers.cxx
+                       src/ExpressionJSONHelpers.cxx
+		       src/IndexJSONHelpers.cxx
                        src/VariantPropertyTreeHelpers.cxx
                        src/WorkflowCustomizationHelpers.cxx
                        src/WorkflowHelpers.cxx
@@ -223,6 +226,7 @@ add_executable(o2-test-framework-core
               test/test_FairMQOptionsRetriever.cxx
               test/test_FairMQResizableBuffer.cxx
               test/test_FairMQ.cxx
+              test/test_ForwardInputs.cxx
               test/test_FrameworkDataFlowToDDS.cxx
               test/test_FrameworkDataFlowToO2Control.cxx
               test/test_Graphviz.cxx
@@ -236,10 +240,12 @@ add_executable(o2-test-framework-core
               test/test_InputSpec.cxx
               test/test_LogParsingHelpers.cxx
               test/test_Mermaid.cxx
+              test/test_MessageSet.cxx
               test/test_OptionsHelpers.cxx
               test/test_OverrideLabels.cxx
               test/test_O2DataModelHelpers.cxx
               test/test_RootConfigParamHelpers.cxx
+              test/test_ResourcesMonitoringHelpers.cxx
               test/test_Services.cxx
               test/test_StringHelpers.cxx
               test/test_StaticFor.cxx
@@ -249,6 +255,7 @@ add_executable(o2-test-framework-core
               test/test_TimeParallelPipelining.cxx
               test/test_TimesliceIndex.cxx
               test/test_TypeTraits.cxx
+              test/test_TypeToTaskName.cxx
               test/test_TopologyPolicies.cxx
               test/test_Variants.cxx
               test/test_WorkflowHelpers.cxx
@@ -315,11 +322,14 @@ set_property(TARGET o2-test-framework-root PROPERTY RUNTIME_OUTPUT_DIRECTORY ${o
 add_test(NAME framework:root COMMAND o2-test-framework-root --skip-benchmarks)
 add_test(NAME framework:crash COMMAND  sh -e -c "PATH=${CMAKE_RUNTIME_OUTPUT_DIRECTORY}:$PATH ${CMAKE_CURRENT_LIST_DIR}/test/test_AllCrashTypes.sh")
 
-o2_add_test(InfoLogger NAME test_Framework_test_InfoLogger
-            SOURCES test/test_InfoLogger.cxx
-            COMPONENT_NAME Framework
-            LABELS framework
-            PUBLIC_LINK_LIBRARIES O2::Framework AliceO2::InfoLogger)
+add_executable(o2-test-framework-infologger
+               test/test_InfoLogger.cxx)
+target_link_libraries(o2-test-framework-infologger PRIVATE O2::Framework)
+target_link_libraries(o2-test-framework-infologger PRIVATE AliceO2::InfoLogger)
+target_link_libraries(o2-test-framework-infologger PRIVATE O2::Catch2)
+set_property(TARGET o2-test-framework-infologger
+             PROPERTY RUNTIME_OUTPUT_DIRECTORY ${outdir})
+add_test(NAME framework:infologger COMMAND o2-test-framework-infologger)
 
 o2_add_executable(dpl-null-sink
                   SOURCES src/o2NullSink.cxx
@@ -336,6 +346,7 @@ o2_add_executable(dpl-run
 foreach(b
         DataDescriptorMatcher
         DataRelayer
+        Stack
         DeviceMetricsInfo
         InputRecord
         TableBuilder
@@ -344,7 +355,6 @@ foreach(b
         ASoAHelpers
         EventMixing
         HistogramRegistry
-        TableToTree
         ExternalFairMQDeviceProxies
         )
   o2_add_executable(benchmark-${b}

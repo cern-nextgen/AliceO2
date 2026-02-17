@@ -12,6 +12,7 @@
 #ifndef ARROWTABLESLICINGCACHE_H
 #define ARROWTABLESLICINGCACHE_H
 
+#include "Framework/ConcreteDataMatcher.h"
 #include "Framework/ServiceHandle.h"
 #include <arrow/array.h>
 #include <gsl/span>
@@ -21,35 +22,43 @@ namespace o2::framework
 using ListVector = std::vector<std::vector<int64_t>>;
 
 struct SliceInfoPtr {
-  gsl::span<int const> values;
-  gsl::span<int64_t const> counts;
+  gsl::span<int64_t const> offsets;
+  gsl::span<int64_t const> sizes;
 
   std::pair<int64_t, int64_t> getSliceFor(int value) const;
 };
 
 struct SliceInfoUnsortedPtr {
-  gsl::span<int const> values;
+  std::span<int const> values;
   ListVector const* groups;
 
-  gsl::span<int64_t const> getSliceFor(int value) const;
+  std::span<int64_t const> getSliceFor(int value) const;
 };
 
 struct Entry {
   std::string binding;
+  ConcreteDataMatcher matcher;
   std::string key;
   bool enabled;
 
-  Entry(std::string b, std::string k, bool e = true)
+  Entry(std::string b, ConcreteDataMatcher m, std::string k, bool e = true)
     : binding{b},
+      matcher{m},
       key{k},
       enabled{e}
   {
+  }
+
+  friend bool operator==(Entry const& lhs, Entry const& rhs)
+  {
+    return (lhs.matcher == rhs.matcher) &&
+           (lhs.key == rhs.key);
   }
 };
 
 using Cache = std::vector<Entry>;
 
-void updatePairList(Cache& list, std::string const& binding, std::string const& key, bool enabled);
+void updatePairList(Cache& list, Entry& entry);
 
 struct ArrowTableSlicingCacheDef {
   constexpr static ServiceKind service_kind = ServiceKind::Global;
@@ -64,8 +73,8 @@ struct ArrowTableSlicingCache {
   constexpr static ServiceKind service_kind = ServiceKind::Stream;
 
   Cache bindingsKeys;
-  std::vector<std::shared_ptr<arrow::NumericArray<arrow::Int32Type>>> values;
-  std::vector<std::shared_ptr<arrow::NumericArray<arrow::Int64Type>>> counts;
+  std::vector<std::vector<int64_t>> offsets;
+  std::vector<std::vector<int64_t>> sizes;
 
   Cache bindingsKeysUnsorted;
   std::vector<std::vector<int>> valuesUnsorted;

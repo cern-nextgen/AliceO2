@@ -39,13 +39,18 @@
 #include "TPCReconstruction/TPCFastTransformHelperO2.h"
 #include "DetectorsBase/Propagator.h"
 #include "DataFormatsGlobalTracking/RecoContainer.h"
-#include "TRDBase/RecoParam.h"
+#include "GPUTRDRecoParam.h"
 #include "TRDBase/Geometry.h"
 
 class TTree;
 
 namespace o2
 {
+
+namespace gpu
+{
+class GPUParam;
+}
 
 namespace tpc
 {
@@ -67,31 +72,106 @@ struct TPCClusterResiduals {
 /// (this is the data type which will be sent from the EPNs to the aggregator)
 struct UnbinnedResid {
   UnbinnedResid() = default;
-  UnbinnedResid(float dyIn, float dzIn, float tgSlpIn, float yIn, float zIn, unsigned char rowIn, unsigned char secIn) : dy(static_cast<short>(dyIn * 0x7fff / param::MaxResid)),
-                                                                                                                         dz(static_cast<short>(dzIn * 0x7fff / param::MaxResid)),
-                                                                                                                         tgSlp(static_cast<short>(tgSlpIn * 0x7fff / param::MaxTgSlp)),
-                                                                                                                         y(static_cast<short>(yIn * 0x7fff / param::MaxY)),
-                                                                                                                         z(static_cast<short>(zIn * 0x7fff / param::MaxZ)),
-                                                                                                                         row(rowIn),
-                                                                                                                         sec(secIn) {}
-  short dy;          ///< residual in y
-  short dz;          ///< residual in z
-  short tgSlp;       ///< tan of the phi angle between padrow and track
-  short y;           ///< y position of the track, needed for binning
-  short z;           ///< z position of the track, needed for binning
-  unsigned char row; ///< TPC pad row
-  unsigned char sec; ///< TPC sector (0..35)
-  ClassDefNV(UnbinnedResid, 1);
+  UnbinnedResid(float dyIn, float dzIn, float tgSlpIn, float yIn, float zIn, unsigned char rowIn, unsigned char secIn, short chanIn = -1) : dy(static_cast<short>(dyIn * 0x7fff / param::MaxResid)),
+                                                                                                                                            dz(static_cast<short>(dzIn * 0x7fff / param::MaxResid)),
+                                                                                                                                            tgSlp(static_cast<short>(tgSlpIn * 0x7fff / param::MaxTgSlp)),
+                                                                                                                                            y(static_cast<short>(yIn * 0x7fff / param::MaxY)),
+                                                                                                                                            z(static_cast<short>(zIn * 0x7fff / param::MaxZ)),
+                                                                                                                                            row(rowIn),
+                                                                                                                                            sec(secIn),
+                                                                                                                                            channel(chanIn) {}
+  short dy{0};          ///< residual in y
+  short dz{0};          ///< residual in z
+  short tgSlp{0};       ///< tan of the phi angle between padrow and track
+  short y{0};           ///< y position of the track, needed for binning
+  short z{0};           ///< z position of the track, needed for binning
+  unsigned char row{0}; ///< TPC pad row
+  unsigned char sec{0}; ///< TPC sector (0..35)
+  short channel{-1};    ///< extra channel info (ITS chip ID, TRD chamber, TOF main pad within the sector)
+
+  bool isTPC() const { return row < constants::MAXGLOBALPADROW; }
+  bool isTRD() const { return row >= 160 && row < 166; }
+  bool isTOF() const { return row == 170; }
+  bool isITS() const { return row >= 180; }
+  int getDetID() const { return isTPC() ? 1 : (isITS() ? 0 : (isTRD() ? 2 : (isTOF() ? 3 : -1))); }
+  int getITSLayer() const { return row - 180; }
+  int getTRDLayer() const { return row - 170; }
+  float getAlpha() const;
+  float getX() const;
+
+  static void init(long timestamp = -1);
+  static void checkInitDone();
+  static bool gInitDone;
+
+  ClassDefNV(UnbinnedResid, 2);
+};
+
+struct DetInfoResid { // detector info associated with residual
+  uint32_t word = 0;  // container interpreted in a different way depending on the detector type
+  //
+  // TPC view: qTot and qMax of the cluster
+  uint16_t qTotTPC() const { return static_cast<uint16_t>(word & 0xFFFFu); }
+  uint16_t qMaxTPC() const { return static_cast<uint16_t>((word >> 16) & 0xFFFFu); }
+  void setTPC(uint16_t qTot, uint16_t qMax) { word = (static_cast<uint32_t>(qMax) << 16) | static_cast<uint32_t>(qTot); }
+  //
+  // TRD view: q0, q1, q2 + calibrated slope (truncated to in +-3.5 range)
+  static constexpr uint32_t TRDQ0NB = 7, TRDQ1NB = 7, TRDQ2NB = 6, TRDSlpNB = 12;
+  static constexpr uint32_t TRDQ0Msk = (1 << TRDQ0NB) - 1, TRDQ1Msk = (1 << TRDQ1NB) - 1, TRDQ2Msk = ((1 << TRDQ2NB) - 1), TRDSlpMsk = (1 << TRDSlpNB) - 1;
+  static constexpr float TRDMaxSlope = 3.5, TRDSlope2Int = ((1 << TRDSlpNB) - 1) / (2 * TRDMaxSlope), TRDInt2Slope = 1.f / TRDSlope2Int;
+  uint16_t q0TRD() const { return static_cast<uint16_t>(word & TRDQ0Msk); }
+  uint16_t q1TRD() const { return static_cast<uint16_t>((word >> TRDQ0NB) & TRDQ1Msk); }
+  uint16_t q2TRD() const { return static_cast<uint16_t>((word >> (TRDQ0NB + TRDQ1NB)) & TRDQ2Msk); }
+  float slopeTRD() const { return ((word >> (TRDQ0NB + TRDQ1NB + TRDQ2NB)) & TRDSlpMsk) * TRDInt2Slope - TRDMaxSlope; }
+  void setTRD(uint8_t q0, uint8_t q1, uint8_t q2, float slope)
+  {
+    float rslope = (slope + TRDMaxSlope) * TRDSlope2Int;
+    if (rslope < 0.f) {
+      rslope = 0;
+    } else if (rslope > TRDSlpMsk) {
+      rslope = TRDSlpMsk;
+    }
+    uint32_t slpI = std::round(rslope);
+    word = (static_cast<uint32_t>(slpI << (TRDQ0NB + TRDQ1NB + TRDQ2NB)) |
+            static_cast<uint32_t>((q2 & TRDQ2Msk) << (TRDQ0NB + TRDQ1NB)) |
+            static_cast<uint32_t>((q1 & TRDQ1Msk) << TRDQ0NB) |
+            static_cast<uint32_t>(q0 & TRDQ0Msk));
+  }
+  //
+  // TOF view (time difference in \mus wrt seeding ITS-TPC track)
+  float timeTOF() const { return std::bit_cast<float>(word); }
+  void setTOF(float t) { word = std::bit_cast<uint32_t>(t); }
+  //
+  // No info for ITS is stored
+  //
+  // PV view (time difference in \mus wrt contributing ITS-TPC track)
+  float timePV() const { return std::bit_cast<float>(word); }
+  void setPV(float t) { word = std::bit_cast<uint32_t>(t); }
+
+  ClassDefNV(DetInfoResid, 1);
 };
 
 /// Structure for the information required to associate each residual with a given track type (ITS-TPC-TRD-TOF, etc)
 struct TrackDataCompact {
   TrackDataCompact() = default;
-  TrackDataCompact(uint32_t idx, uint8_t nRes, uint8_t source) : idxFirstResidual(idx), nResiduals(nRes), sourceId(source) {}
+  TrackDataCompact(uint32_t idx, std::array<uint8_t, 4> mlt, uint8_t nRes, uint8_t source, uint8_t nextraRes = 0) : idxFirstResidual(idx), multStack{mlt}, nResiduals(nRes), sourceId(source), nExtDetResid(nextraRes) {}
   uint32_t idxFirstResidual; ///< the index of the first residual from this track
-  uint8_t nResiduals;        ///< total number of residuals associated to this track
+  std::array<uint8_t, 4> multStack{}; // multiplicity in the stack packed as asinh(x*0.05)/0.05
+  uint8_t nResiduals;        ///< total number of TPC residuals associated to this track
+  uint8_t nExtDetResid = 0;  ///< number of external detectors (wrt TPC) residuals stored, on top of clIdx.getEntries
   uint8_t sourceId;          ///< source ID obtained from the global track ID
-  ClassDefNV(TrackDataCompact, 1);
+
+  void setMultStack(float v, int stack)
+  {
+    uint32_t mltPacked = std::round(std::asinh(v * 0.05) / 0.05);
+    multStack[stack] = mltPacked < 0xff ? mltPacked : 0xff;
+  }
+  float getMultStack(int stack) const
+  {
+    return std::sinh(multStack[stack] * 0.05) / 0.05;
+  }
+  float getMultStackPacked(int stack) const { return multStack[stack]; }
+
+  ClassDefNV(TrackDataCompact, 3);
 };
 
 // TODO add to UnbinnedResid::sec flag if cluster was used or not
@@ -110,7 +190,8 @@ struct TrackDataExtended {
   std::vector<o2::trd::CalibratedTracklet> clsTRD{}; ///< the TRD space points (if available)
   o2::tof::Cluster clsTOF{};                         ///< the TOF cluster (if available)
   o2::dataformats::RangeReference<> clIdx{};         ///< index of first cluster residual and total number of cluster residuals of this track
-  ClassDefNV(TrackDataExtended, 2);
+  uint8_t nExtDetResid = 0;                          ///< number of external detectors (to TPC) residuals stored, on top of clIdx.getEntries
+  ClassDefNV(TrackDataExtended, 3);
 };
 
 /// Structure filled for each track with track quality information and a vector with TPCClusterResiduals
@@ -121,12 +202,31 @@ struct TrackData {
   float chi2TPC{};                           ///< chi2 of TPC track
   float chi2ITS{};                           ///< chi2 of ITS track
   float chi2TRD{};                           ///< chi2 of TRD track
+  float deltaTOF{};                          ///< TOFsignal - T0 - texp(PID), if T0 is available
+
   unsigned short nClsTPC{};                  ///< number of attached TPC clusters
   unsigned short nClsITS{};                  ///< number of attached ITS clusters
   unsigned short nTrkltsTRD{};               ///< number of attached TRD tracklets
-  unsigned short clAvailTOF{};               ///< whether or not track seed has a matched TOF cluster
-  o2::dataformats::RangeReference<> clIdx{}; ///< index of first cluster residual and total number of cluster residuals of this track
-  ClassDefNV(TrackData, 6);
+  unsigned short clAvailTOF{};               ///< whether or not track seed has a matched TOF cluster, if so, gives the resolution of the T0 in ps
+  short TRDTrkltSlope[6] = {};               ///< TRD tracklet slope 0x7fff / param::MaxTRDSlope
+  uint8_t nExtDetResid = 0;                  ///< number of external detectors (to TPC) residuals stored, on top of clIdx.getEntries
+  o2::dataformats::RangeReference<> clIdx{}; ///< index of first cluster residual and total number of TPC cluster residuals of this track
+  std::array<uint8_t, 4> multStack{};        // multiplicity in the stack packed as asinh(x*0.05)/0.05
+  float getT0Error() const { return float(clAvailTOF); }
+  bool isTOFAvail() const { return clAvailTOF != 0; }
+
+  void setMultStack(float v, int stack)
+  {
+    uint32_t mltPacked = std::round(std::asinh(v * 0.05) / 0.05);
+    multStack[stack] = mltPacked < 0xff ? mltPacked : 0xff;
+  }
+  float getMultStack(int stack) const
+  {
+    return std::sinh(multStack[stack] * 0.05) / 0.05;
+  }
+  float getMultStackPacked(int stack) const { return multStack[stack]; }
+
+  ClassDefNV(TrackData, 10);
 };
 
 /// \class TrackInterpolation
@@ -212,6 +312,8 @@ class TrackInterpolation
   /// Reset cache and output vectors
   void reset();
 
+  // refit ITS track taking PID (unless already refitted) from the seed and reassign to the seed
+  bool refITSTrack(o2::dataformats::GlobalTrackID, int iSeed);
   // -------------------------------------- outlier rejection --------------------------------------------------
 
   /// Validates the given input track and its residuals
@@ -239,6 +341,8 @@ class TrackInterpolation
   void diffToMA(const int np, const std::array<float, param::NPadRows>& y, std::array<float, param::NPadRows>& diffMA) const;
 
   // -------------------------------------- settings --------------------------------------------------
+  void setNHBPerTF(int n) { mNHBPerTF = n; }
+
   void setTPCVDrift(const o2::tpc::VDriftCorrFact& v);
 
   /// Sets the flag if material correction should be applied when extrapolating the tracks
@@ -265,8 +369,15 @@ class TrackInterpolation
   /// Set the centre of mass energy required for pT downsampling Tsalis function
   void setSqrtS(float s) { mSqrtS = s; }
 
+  void setExtDetResid(bool v) { mExtDetResid = v; }
+
+  int processTRDLayer(const o2::trd::TrackTRD& trkTRD, int iLayer, o2::track::TrackParCov& trkWork, std::array<float, 2>* trkltTRDYZ = nullptr,
+                      std::array<float, 3>* trkltTRDCov = nullptr, TrackData* trkData = nullptr,
+                      o2::trd::Tracklet64* trk64 = nullptr, o2::trd::CalibratedTracklet* trkCalib = nullptr);
+
   // --------------------------------- output ---------------------------------------------
   std::vector<UnbinnedResid>& getClusterResiduals() { return mClRes; }
+  std::vector<DetInfoResid>& getClusterResidualsDetInfo() { return mDetInfoRes; }
   std::vector<TrackDataCompact>& getTrackDataCompact() { return mTrackDataCompact; }
   std::vector<TrackDataExtended>& getTrackDataExtended() { return mTrackDataExtended; }
   std::vector<TrackData>& getReferenceTracks() { return mTrackData; }
@@ -275,8 +386,14 @@ class TrackInterpolation
 
  private:
   static constexpr float sFloatEps{1.e-7f}; ///< float epsilon for robust linear fitting
+  static constexpr int NSTACKS = 4;
+  static constexpr std::array<int, NSTACKS + 1> STACKROWS{0, 63, 97, 127, 152};
   // parameters + settings
   const SpacePointsCalibConfParam* mParams = nullptr;
+  std::shared_ptr<o2::gpu::GPUParam> mTPCParam = nullptr;
+  int mNHBPerTF = 32;
+  int mNTPCOccBinLength = 16;                                   ///< TPC occupancy bin length in TB
+  float mNTPCOccBinLengthInv = 1.f / 16;                        ///< its inverse
   float mTPCTimeBinMUS{.2f};                                    ///< TPC time bin duration in us
   float mTPCVDriftRef = -1.;                                    ///< TPC nominal drift speed in cm/microseconds
   float mTPCDriftTimeOffsetRef = 0.;                            ///< TPC nominal (e.g. at the start of run) drift time bias in cm/mus
@@ -285,6 +402,7 @@ class TrackInterpolation
   int mMaxTracksPerTF{-1};                                      ///< max number of tracks to be processed per TF (-1 means there is no limit)
   int mAddTracksForMapPerTF{0};                                 ///< in case residuals from different track types are used for vDrift calibration and map creation this defines the statistics for the latter
   bool mDumpTrackPoints{false};                                 ///< dump also track points in ITS, TRD and TOF
+  bool mExtDetResid{true};                                      ///< produce unbinned residuals for external detectors
   bool mProcessSeeds{false};                                    ///< in case for global tracks also their shorter parts are processed separately
   bool mProcessITSTPConly{false};                               ///< flag, whether or not to extrapolate ITS-only through TPC
   o2::dataformats::GlobalTrackID::mask_t mSourcesConfigured;    ///< the track sources taken into account for extra-/interpolation
@@ -296,7 +414,9 @@ class TrackInterpolation
   std::vector<o2::dataformats::GlobalTrackID> mGIDs{};                      ///< GIDs of input tracks
   std::vector<o2::globaltracking::RecoContainer::GlobalIDSet> mGIDtables{}; ///< GIDs of contributors from single detectors for each seed
   std::vector<float> mTrackTimes{};                                         ///< time estimates for all input tracks in micro seconds
+  std::vector<int> mTrackPVID{};                                            ///< track vertex index (if any)
   std::vector<o2::track::TrackParCov> mSeeds{};                             ///< seeding track parameters (ITS tracks)
+  std::vector<int> mParentID{};                                             ///< entry of more global parent track for skimmed seeds (-1: no parent)
   std::map<int, int> mTrackTypes;                                           ///< mapping of track source to array index in mTrackIndices
   std::array<std::vector<uint32_t>, 4> mTrackIndices;                       ///< keep GIDs of input tracks separately for each track type
   gsl::span<const TPCClRefElem> mTPCTracksClusIdx;                          ///< input TPC cluster indices from span
@@ -304,6 +424,7 @@ class TrackInterpolation
   // ITS specific input only needed for debugging
   gsl::span<const int> mITSTrackClusIdx;                    ///< input ITS track cluster indices span
   std::vector<o2::BaseCluster<float>> mITSClustersArray;    ///< ITS clusters created in run() method from compact clusters
+  std::vector<int> mITSRefitSeedID;                         ///< seed ID first using refitted ITS track
   const o2::itsmft::TopologyDictionary* mITSDict = nullptr; ///< cluster patterns dictionary
 
   // output
@@ -311,6 +432,7 @@ class TrackInterpolation
   std::vector<TrackDataCompact> mTrackDataCompact{};   ///< required to connect each residual to a global track
   std::vector<TrackDataExtended> mTrackDataExtended{}; ///< full tracking information for debugging
   std::vector<UnbinnedResid> mClRes{};                 ///< residuals for each available TPC cluster of all tracks
+  std::vector<DetInfoResid> mDetInfoRes{};             ///< packed detector info associated with each residual
   std::vector<TrackData> mTrackDataUnfiltered{};       ///< same as mTrackData, but for all tracks before outlier filtering
   std::vector<TPCClusterResiduals> mClResUnfiltered{}; ///< same as mClRes, but for all residuals before outlier filtering
 
@@ -319,7 +441,7 @@ class TrackInterpolation
   std::vector<o2::dataformats::GlobalTrackID> mGIDsSuccess;       ///< keep track of the GIDs which could be processed successfully
 
   // helpers
-  o2::trd::RecoParam mRecoParam;                      ///< parameters required for TRD refit
+  o2::gpu::GPUTRDRecoParam mRecoParam;                ///< parameters required for TRD refit
   o2::trd::Geometry* mGeoTRD;                         ///< TRD geometry instance (needed for tilted pad correction)
   std::unique_ptr<TPCFastTransform> mFastTransform{}; ///< TPC cluster transformation
   float mBz;                                          ///< required for helix approximation

@@ -128,8 +128,9 @@ class ResidualAggregatorDevice : public o2::framework::Task
     updateTimeDependentParams(pc);
     std::chrono::duration<double, std::milli> ccdbUpdateTime = std::chrono::high_resolution_clock::now() - runStartTime;
 
-    // we always require the unbinned residuals and the associated track references
+    // we always require the unbinned residuals and the associated detector info and track references
     auto residualsData = pc.inputs().get<gsl::span<o2::tpc::UnbinnedResid>>("unbinnedRes");
+    auto residualsDataDet = pc.inputs().get<gsl::span<o2::tpc::DetInfoResid>>("detinfoRes");
     auto trackRefs = pc.inputs().get<gsl::span<o2::tpc::TrackDataCompact>>("trackRefs");
 
     // track data input is optional
@@ -145,14 +146,13 @@ class ResidualAggregatorDevice : public o2::framework::Task
     using lumiDataType = std::decay_t<decltype(pc.inputs().get<o2::ctp::LumiInfo>(""))>;
     std::optional<lumiDataType> lumiInput;
     if (mCTPInput) {
-      recoCont.getCTPLumi();
       lumiInput = recoCont.getCTPLumi();
       lumi = &lumiInput.value();
     }
 
     o2::base::TFIDInfoHelper::fillTFIDInfo(pc, mAggregator->getCurrentTFInfo());
     LOG(detail) << "Processing TF " << mAggregator->getCurrentTFInfo().tfCounter << " with " << trkData->size() << " tracks and " << residualsData.size() << " unbinned residuals associated to them";
-    mAggregator->process(residualsData, trackRefs, trkDataPtr, lumi);
+    mAggregator->process(residualsData, residualsDataDet, trackRefs, trkDataPtr, lumi);
     std::chrono::duration<double, std::milli> runDuration = std::chrono::high_resolution_clock::now() - runStartTime;
     LOGP(debug, "Duration for run method: {} ms. From this taken for time dependent param update: {} ms",
          std::chrono::duration_cast<std::chrono::milliseconds>(runDuration).count(),
@@ -223,6 +223,7 @@ DataProcessorSpec getTPCResidualAggregatorSpec(bool trackInput, bool ctpInput, b
   auto& inputs = dataRequest->inputs;
   o2::tpc::VDriftHelper::requestCCDBInputs(inputs);
   inputs.emplace_back("unbinnedRes", "GLO", "UNBINNEDRES");
+  inputs.emplace_back("detinfoRes", "GLO", "DETINFORES");
   inputs.emplace_back("trackRefs", "GLO", "TRKREFS");
   if (trackInput) {
     inputs.emplace_back("trkData", "GLO", "TRKDATA");

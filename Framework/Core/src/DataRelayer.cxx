@@ -37,6 +37,7 @@
 #include "Framework/DataProcessingStates.h"
 #include "Framework/DataTakingContext.h"
 #include "Framework/DefaultsHelpers.h"
+#include "Framework/RawDeviceService.h"
 
 #include "Headers/DataHeaderHelpers.h"
 #include "Framework/Formatters.h"
@@ -47,12 +48,11 @@
 #include <fairlogger/Logger.h>
 #include <fairmq/Channel.h>
 #include <functional>
-#if __has_include(<fairmq/shmem/Message.h>)
 #include <fairmq/shmem/Message.h>
-#endif
+#include <fairmq/Device.h>
 #include <fmt/format.h>
 #include <fmt/ostream.h>
-#include <gsl/span>
+#include <span>
 #include <string>
 
 using namespace o2::framework::data_matcher;
@@ -72,7 +72,8 @@ constexpr int INVALID_INPUT = -1;
 DataRelayer::DataRelayer(const CompletionPolicy& policy,
                          std::vector<InputRoute> const& routes,
                          TimesliceIndex& index,
-                         ServiceRegistryRef services)
+                         ServiceRegistryRef services,
+                         int pipelineLength)
   : mContext{services},
     mTimesliceIndex{index},
     mCompletionPolicy{policy},
@@ -83,7 +84,17 @@ DataRelayer::DataRelayer(const CompletionPolicy& policy,
   std::scoped_lock<O2_LOCKABLE(std::recursive_mutex)> lock(mMutex);
 
   if (policy.configureRelayer == nullptr) {
-    static int pipelineLength = DefaultsHelpers::pipelineLength();
+    if (pipelineLength == -1) {
+      auto getPipelineLengthHelper = [&services]() {
+        try {
+          return DefaultsHelpers::pipelineLength(*services.get<RawDeviceService>().device()->fConfig);
+        } catch (...) {
+          return DefaultsHelpers::pipelineLength(0);
+        }
+      };
+      static int detectedPipelineLength = getPipelineLengthHelper();
+      pipelineLength = detectedPipelineLength;
+    }
     setPipelineLength(pipelineLength);
   } else {
     policy.configureRelayer(*this);
@@ -191,7 +202,7 @@ DataRelayer::ActivityStats DataRelayer::processDanglingInputs(std::vector<Expira
         continue;
       }
 
-      auto getPartialRecord = [&cache = mCache, numInputTypes = mDistinctRoutesIndex.size()](int li) -> gsl::span<MessageSet const> {
+      auto getPartialRecord = [&cache = mCache, numInputTypes = mDistinctRoutesIndex.size()](int li) -> std::span<MessageSet const> {
         auto offset = li * numInputTypes;
         assert(cache.size() >= offset + numInputTypes);
         auto const start = cache.data() + offset;
@@ -215,14 +226,10 @@ DataRelayer::ActivityStats DataRelayer::processDanglingInputs(std::vector<Expira
       auto nPartsGetter = [&partial](size_t idx) {
         return partial[idx].size();
       };
-#if __has_include(<fairmq/shmem/Message.h>)
       auto refCountGetter = [&partial](size_t idx) -> int {
         auto& header = static_cast<const fair::mq::shmem::Message&>(*partial[idx].header(0));
         return header.GetRefCount();
       };
-#else
-      std::function<int(size_t)> refCountGetter = nullptr;
-#endif
       InputSpan span{getter, nPartsGetter, refCountGetter, static_cast<size_t>(partial.size())};
       // Setup the input span
 
@@ -442,7 +449,8 @@ DataRelayer::RelayChoice
                      InputInfo const& info,
                      size_t nMessages,
                      size_t nPayloads,
-                     std::function<void(TimesliceSlot, std::vector<MessageSet>&, TimesliceIndex::OldestOutputInfo)> onDrop)
+                     OnInsertionCallback onInsertion,
+                     OnDropCallback onDrop)
 {
   std::scoped_lock<O2_LOCKABLE(std::recursive_mutex)> lock(mMutex);
   DataProcessingHeader const* dph = o2::header::get<DataProcessingHeader*>(rawHeader);
@@ -488,6 +496,7 @@ DataRelayer::RelayChoice
                      &messages,
                      &nMessages,
                      &nPayloads,
+                     &onInsertion,
                      &cache = mCache,
                      &services = mContext,
                      numInputTypes = mDistinctRoutesIndex.size()](TimesliceId timeslice, int input, TimesliceSlot slot, InputInfo const& info) -> size_t {
@@ -503,6 +512,12 @@ DataRelayer::RelayChoice
     // DataRelayer::relay
     assert(nPayloads > 0);
     size_t saved = 0;
+    // It's guaranteed we will see all these messages only once, so we can
+    // do the forwarding here.
+    auto allMessages = std::span<fair::mq::MessagePtr>(messages, messages + nMessages);
+    if (onInsertion) {
+      onInsertion(services, allMessages);
+    }
     for (size_t mi = 0; mi < nMessages; ++mi) {
       assert(mi + nPayloads < nMessages);
       // We are in calibration mode and the data does not have the calibration bit set.
@@ -518,7 +533,10 @@ DataRelayer::RelayChoice
         mi += nPayloads;
         continue;
       }
-      target.add([&messages, &mi](size_t i) -> fair::mq::MessagePtr& { return messages[mi + i]; }, nPayloads + 1);
+      auto span = std::span<fair::mq::MessagePtr>(messages + mi, messages + mi + nPayloads + 1);
+      // Notice this will split [(header, payload), (header, payload)] multiparts
+      // in N different subParts for the message spec.
+      target.add([&span](size_t i) -> fair::mq::MessagePtr& { return span[i]; }, nPayloads + 1);
       mi += nPayloads;
       saved += nPayloads;
     }
@@ -710,7 +728,7 @@ void DataRelayer::getReadyToProcess(std::vector<DataRelayer::RecordAction>& comp
   //
   // We use this to bail out early from the check as soon as we find something
   // which we know is not complete.
-  auto getPartialRecord = [&cache, &numInputTypes](int li) -> gsl::span<MessageSet const> {
+  auto getPartialRecord = [&cache, &numInputTypes](int li) -> std::span<MessageSet const> {
     auto offset = li * numInputTypes;
     assert(cache.size() >= offset + numInputTypes);
     auto const start = cache.data() + offset;
@@ -781,14 +799,10 @@ void DataRelayer::getReadyToProcess(std::vector<DataRelayer::RecordAction>& comp
     auto nPartsGetter = [&partial](size_t idx) {
       return partial[idx].size();
     };
-#if __has_include(<fairmq/shmem/Message.h>)
     auto refCountGetter = [&partial](size_t idx) -> int {
       auto& header = static_cast<const fair::mq::shmem::Message&>(*partial[idx].header(0));
       return header.GetRefCount();
     };
-#else
-    std::function<int(size_t)> refCountGetter = nullptr;
-#endif
     InputSpan span{getter, nPartsGetter, refCountGetter, static_cast<size_t>(partial.size())};
     CompletionPolicy::CompletionOp action = mCompletionPolicy.callbackFull(span, mInputs, mContext);
 
@@ -1065,7 +1079,7 @@ void DataRelayer::sendContextState()
   char* buffer = relayerSlotState + written;
   for (size_t ci = 0; ci < mTimesliceIndex.size(); ++ci) {
     for (size_t si = 0; si < mDistinctRoutesIndex.size(); ++si) {
-      int index = si * mTimesliceIndex.size() + ci;
+      int index = ci * mDistinctRoutesIndex.size() + si;
       int value = static_cast<int>(mCachedStateMetrics[index]);
       buffer[si] = value + '0';
       // Anything which is done is actually already empty,

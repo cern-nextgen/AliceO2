@@ -11,15 +11,14 @@
 #include "WorkflowHelpers.h"
 #include "Framework/AnalysisSupportHelpers.h"
 #include "Framework/AlgorithmSpec.h"
-#include "Framework/AODReaderHelpers.h"
 #include "Framework/ConfigParamSpec.h"
 #include "Framework/ConfigParamsHelper.h"
 #include "Framework/CommonDataProcessors.h"
 #include "Framework/ConfigContext.h"
 #include "Framework/DeviceSpec.h"
 #include "Framework/DataSpecUtils.h"
+#include "Framework/DataSpecViews.h"
 #include "Framework/DataAllocator.h"
-#include "Framework/ControlService.h"
 #include "Framework/RawDeviceService.h"
 #include "Framework/StringHelpers.h"
 #include "Framework/ChannelSpecHelpers.h"
@@ -37,6 +36,7 @@
 #include <utility>
 #include <vector>
 #include <climits>
+#include <numeric>
 
 O2_DECLARE_DYNAMIC_LOG(workflow_helpers);
 
@@ -100,7 +100,7 @@ std::vector<TopoIndexInfo>
     // which have the current node as incoming.
     // nextEdges will contain all the edges which are not related
     // to the current node.
-    for (auto& ei : remainingEdgesIndex) {
+    for (auto const& ei : remainingEdgesIndex) {
       if (*(edgeIn + ei * stride) == node.index) {
         nextVertex.insert({*(edgeOut + ei * stride), node.layer + 1});
       } else {
@@ -112,7 +112,7 @@ std::vector<TopoIndexInfo>
     // Of all the vertices which have node as incoming,
     // check if there is any other incoming node.
     std::set<TopoIndexInfo> hasPredecessors;
-    for (auto& ei : remainingEdgesIndex) {
+    for (auto const& ei : remainingEdgesIndex) {
       for (auto& m : nextVertex) {
         if (m.index == *(edgeOut + ei * stride)) {
           hasPredecessors.insert({m.index, m.layer});
@@ -156,18 +156,7 @@ int defaultConditionQueryRateMultiplier()
 
 void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext& ctx)
 {
-  auto fakeCallback = AlgorithmSpec{[](InitContext& ic) {
-    LOG(info) << "This is not a real device, merely a placeholder for external inputs";
-    LOG(info) << "To be hidden / removed at some point.";
-    // mark this dummy process as ready-to-quit
-    ic.services().get<ControlService>().readyToQuit(QuitRequest::Me);
-
-    return [](ProcessingContext& pc) {
-      // this callback is never called since there is no expiring input
-      pc.services().get<RawDeviceService>().waitFor(2000);
-    };
-  }};
-
+  int rateLimitingIPCID = std::stoi(ctx.options().get<std::string>("timeframes-rate-limit-ipcid"));
   DataProcessorSpec ccdbBackend{
     .name = "internal-dpl-ccdb-backend",
     .outputs = {},
@@ -176,7 +165,8 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
                 {"condition-not-after", VariantType::Int64, 3385078236000ll, {"do not fetch from CCDB objects created after the timestamp"}},
                 {"condition-remap", VariantType::String, "", {"remap condition path in CCDB based on the provided string."}},
                 {"condition-tf-per-query", VariantType::Int, defaultConditionQueryRate(), {"check condition validity per requested number of TFs, fetch only once if <=0"}},
-                {"condition-tf-per-query-multiplier", VariantType::Int, defaultConditionQueryRateMultiplier(), {"check conditions once per this amount of nominal checks"}},
+                {"condition-tf-per-query-multiplier", VariantType::Int, defaultConditionQueryRateMultiplier(), {"check conditions once per this amount of nominal checks (>0) or on module of TFcounter (<0)"}},
+                {"condition-use-slice-for-prescaling", VariantType::Int, 0, {"use TFslice instead of TFcounter to control validation frequency. If > query rate, do not allow TFCounter excursion exceeding it"}},
                 {"condition-time-tolerance", VariantType::Int64, 5000ll, {"prefer creation time if its difference to orbit-derived time exceeds threshold (ms), impose if <0"}},
                 {"orbit-offset-enumeration", VariantType::Int64, 0ll, {"initial value for the orbit"}},
                 {"orbit-multiplier-enumeration", VariantType::Int64, 0ll, {"multiplier to get the orbit from the counter"}},
@@ -184,6 +174,22 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
                 {"end-value-enumeration", VariantType::Int64, -1ll, {"final value for the enumeration"}},
                 {"step-value-enumeration", VariantType::Int64, 1ll, {"step between one value and the other"}}},
   };
+  DataProcessorSpec analysisCCDBBackend{
+    .name = "internal-dpl-aod-ccdb",
+    .inputs = {},
+    .outputs = {},
+    .algorithm = AlgorithmSpec::dummyAlgorithm(),
+    .options = {{"condition-backend", VariantType::String, defaultConditionBackend(), {"URL for CCDB"}},
+                {"condition-not-before", VariantType::Int64, 0ll, {"do not fetch from CCDB objects created before provide timestamp"}},
+                {"condition-not-after", VariantType::Int64, 3385078236000ll, {"do not fetch from CCDB objects created after the timestamp"}},
+                {"condition-remap", VariantType::String, "", {"remap condition path in CCDB based on the provided string."}},
+                {"condition-tf-per-query", VariantType::Int, defaultConditionQueryRate(), {"check condition validity per requested number of TFs, fetch only once if <=0"}},
+                {"condition-tf-per-query-multiplier", VariantType::Int, defaultConditionQueryRateMultiplier(), {"check conditions once per this amount of nominal checks (>0) or on module of TFcounter (<0)"}},
+                {"condition-use-slice-for-prescaling", VariantType::Int, 0, {"use TFslice instead of TFcounter to control validation frequency. If > query rate, do not allow TFCounter excursion exceeding it"}},
+                {"condition-time-tolerance", VariantType::Int64, 5000ll, {"prefer creation time if its difference to orbit-derived time exceeds threshold (ms), impose if <0"}},
+                {"start-value-enumeration", VariantType::Int64, 0ll, {"initial value for the enumeration"}},
+                {"end-value-enumeration", VariantType::Int64, -1ll, {"final value for the enumeration"}},
+                {"step-value-enumeration", VariantType::Int64, 1ll, {"step between one value and the other"}}}};
   DataProcessorSpec transientStore{"internal-dpl-transient-store",
                                    {},
                                    {},
@@ -225,25 +231,8 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
                 ConfigParamSpec{"step-value-enumeration", VariantType::Int64, 1ll, {"step between one value and the other"}}},
     .requiredServices = CommonServices::defaultServices("O2FrameworkAnalysisSupport:RunSummary")};
 
-  // AOD reader can be rate limited
-  int rateLimitingIPCID = std::stoi(ctx.options().get<std::string>("timeframes-rate-limit-ipcid"));
-  std::string rateLimitingChannelConfigInput;
-  std::string rateLimitingChannelConfigOutput;
-  bool internalRateLimiting = false;
-
-  // In case we have rate-limiting requested, any device without an input will get one on the special
-  // "DPL/RATE" message.
-  if (rateLimitingIPCID >= 0) {
-    rateLimitingChannelConfigInput = fmt::format("name=metric-feedback,type=pull,method=connect,address=ipc://{}metric-feedback-{},transport=shmem,rateLogging=0",
-                                                 ChannelSpecHelpers::defaultIPCFolder(), rateLimitingIPCID);
-    rateLimitingChannelConfigOutput = fmt::format("name=metric-feedback,type=push,method=bind,address=ipc://{}metric-feedback-{},transport=shmem,rateLogging=0",
-                                                  ChannelSpecHelpers::defaultIPCFolder(), rateLimitingIPCID);
-    internalRateLimiting = true;
-    aodReader.options.emplace_back(ConfigParamSpec{"channel-config", VariantType::String, rateLimitingChannelConfigInput, {"how many timeframes can be in flight at the same time"}});
-  }
-
-  ctx.services().registerService(ServiceRegistryHelpers::handleForService<AnalysisContext>(new AnalysisContext));
-  auto& ac = ctx.services().get<AnalysisContext>();
+  ctx.services().registerService(ServiceRegistryHelpers::handleForService<DanglingEdgesContext>(new DanglingEdgesContext));
+  auto& dec = ctx.services().get<DanglingEdgesContext>();
 
   std::vector<InputSpec> requestedCCDBs;
   std::vector<OutputSpec> providedCCDBs;
@@ -251,8 +240,8 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
   for (size_t wi = 0; wi < workflow.size(); ++wi) {
     auto& processor = workflow[wi];
     auto name = processor.name;
-    auto hash = runtime_hash(name.c_str());
-    ac.outTskMap.push_back({hash, name});
+    uint32_t hash = runtime_hash(name.c_str());
+    dec.outTskMap.push_back({hash, name});
 
     std::string prefix = "internal-dpl-";
     if (processor.inputs.empty() && processor.name.compare(0, prefix.size(), prefix) != 0) {
@@ -263,37 +252,24 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
       processor.options.push_back(ConfigParamSpec{"end-value-enumeration", VariantType::Int64, -1ll, {"final value for the enumeration"}});
       processor.options.push_back(ConfigParamSpec{"step-value-enumeration", VariantType::Int64, 1ll, {"step between one value and the other"}});
     }
-    bool hasTimeframeInputs = false;
-    for (auto& input : processor.inputs) {
-      if (input.lifetime == Lifetime::Timeframe) {
-        hasTimeframeInputs = true;
-        break;
-      }
-    }
-    bool hasTimeframeOutputs = false;
-    for (auto& output : processor.outputs) {
-      if (output.lifetime == Lifetime::Timeframe) {
-        hasTimeframeOutputs = true;
-        break;
-      }
-    }
+    bool hasTimeframeInputs = std::ranges::any_of(processor.inputs, [](auto const& input) { return input.lifetime == Lifetime::Timeframe; });
+    bool hasTimeframeOutputs = std::ranges::any_of(processor.outputs, [](auto const& output) { return output.lifetime == Lifetime::Timeframe; });
+
     // A timeframeSink consumes timeframes without creating new
     // timeframe data.
     bool timeframeSink = hasTimeframeInputs && !hasTimeframeOutputs;
-    if (std::stoi(ctx.options().get<std::string>("timeframes-rate-limit-ipcid")) != -1) {
+    if (rateLimitingIPCID != -1) {
       if (timeframeSink && processor.name.find("internal-dpl-injected-dummy-sink") == std::string::npos) {
         O2_SIGNPOST_ID_GENERATE(sid, workflow_helpers);
-        uint32_t hash = runtime_hash(processor.name.c_str());
         bool hasMatch = false;
         ConcreteDataMatcher summaryMatcher = ConcreteDataMatcher{"DPL", "SUMMARY", static_cast<DataAllocator::SubSpecificationType>(hash)};
-        for (auto& output : processor.outputs) {
-          if (DataSpecUtils::match(output, summaryMatcher)) {
-            O2_SIGNPOST_EVENT_EMIT(workflow_helpers, sid, "output enumeration", "%{public}s already there in %{public}s",
-                                   DataSpecUtils::describe(output).c_str(), processor.name.c_str());
-            hasMatch = true;
-            break;
-          }
+        auto summaryOutput = std::ranges::find_if(processor.outputs, [&summaryMatcher](auto const& output) { return DataSpecUtils::match(output, summaryMatcher); });
+        if (summaryOutput != processor.outputs.end()) {
+          O2_SIGNPOST_EVENT_EMIT(workflow_helpers, sid, "output enumeration", "%{public}s already there in %{public}s",
+                                 DataSpecUtils::describe(*summaryOutput).c_str(), processor.name.c_str());
+          hasMatch = true;
         }
+
         if (!hasMatch) {
           O2_SIGNPOST_EVENT_EMIT(workflow_helpers, sid, "output enumeration", "Adding DPL/SUMMARY/%d to %{public}s", hash, processor.name.c_str());
           processor.outputs.push_back(OutputSpec{{"dpl-summary"}, ConcreteDataMatcher{"DPL", "SUMMARY", static_cast<DataAllocator::SubSpecificationType>(hash)}});
@@ -306,7 +282,7 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
       switch (input.lifetime) {
         case Lifetime::Timer: {
           auto concrete = DataSpecUtils::asConcreteDataMatcher(input);
-          auto hasOption = std::any_of(processor.options.begin(), processor.options.end(), [&input](auto const& option) { return (option.name == "period-" + input.binding); });
+          auto hasOption = std::ranges::any_of(processor.options, [&input](auto const& option) { return (option.name == "period-" + input.binding); });
           if (hasOption == false) {
             processor.options.push_back(ConfigParamSpec{"period-" + input.binding, VariantType::Int, 1000, {"period of the timer in milliseconds"}});
           }
@@ -321,22 +297,16 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
           timer.outputs.emplace_back(OutputSpec{concrete.origin, concrete.description, concrete.subSpec, Lifetime::Enumeration});
         } break;
         case Lifetime::Condition: {
-          for (auto& option : processor.options) {
-            if (option.name == "condition-backend") {
-              hasConditionOption = true;
-              break;
-            }
-          }
-          if (hasConditionOption == false) {
+          requestedCCDBs.emplace_back(input);
+          if ((hasConditionOption == false) && std::ranges::none_of(processor.options, [](auto const& option) { return (option.name.compare("condition-backend") == 0); })) {
             processor.options.emplace_back(ConfigParamSpec{"condition-backend", VariantType::String, defaultConditionBackend(), {"URL for CCDB"}});
             processor.options.emplace_back(ConfigParamSpec{"condition-timestamp", VariantType::Int64, 0ll, {"Force timestamp for CCDB lookup"}});
             hasConditionOption = true;
           }
-          requestedCCDBs.emplace_back(input);
         } break;
         case Lifetime::OutOfBand: {
           auto concrete = DataSpecUtils::asConcreteDataMatcher(input);
-          auto hasOption = std::any_of(processor.options.begin(), processor.options.end(), [&input](auto const& option) { return (option.name == "out-of-band-channel-name-" + input.binding); });
+          auto hasOption = std::ranges::any_of(processor.options, [&input](auto const& option) { return (option.name == "out-of-band-channel-name-" + input.binding); });
           if (hasOption == false) {
             processor.options.push_back(ConfigParamSpec{"out-of-band-channel-name-" + input.binding, VariantType::String, "out-of-band", {"channel to listen for out of band data"}});
           }
@@ -349,28 +319,33 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
           break;
       }
       if (DataSpecUtils::partialMatch(input, AODOrigins)) {
-        DataSpecUtils::updateInputList(ac.requestedAODs, InputSpec{input});
+        DataSpecUtils::updateInputList(dec.requestedAODs, InputSpec{input});
       }
       if (DataSpecUtils::partialMatch(input, header::DataOrigin{"DYN"})) {
-        DataSpecUtils::updateInputList(ac.requestedDYNs, InputSpec{input});
+        DataSpecUtils::updateInputList(dec.requestedDYNs, InputSpec{input});
       }
       if (DataSpecUtils::partialMatch(input, header::DataOrigin{"IDX"})) {
-        DataSpecUtils::updateInputList(ac.requestedIDXs, InputSpec{input});
+        DataSpecUtils::updateInputList(dec.requestedIDXs, InputSpec{input});
+      }
+      if (DataSpecUtils::partialMatch(input, header::DataOrigin{"ATIM"})) {
+        DataSpecUtils::updateInputList(dec.requestedTIMs, InputSpec{input});
       }
     }
 
-    std::stable_sort(timer.outputs.begin(), timer.outputs.end(), [](OutputSpec const& a, OutputSpec const& b) { return *DataSpecUtils::getOptionalSubSpec(a) < *DataSpecUtils::getOptionalSubSpec(b); });
+    std::ranges::stable_sort(timer.outputs, [](OutputSpec const& a, OutputSpec const& b) { return *DataSpecUtils::getOptionalSubSpec(a) < *DataSpecUtils::getOptionalSubSpec(b); });
 
     for (auto& output : processor.outputs) {
       if (DataSpecUtils::partialMatch(output, AODOrigins)) {
-        ac.providedAODs.emplace_back(output);
+        dec.providedAODs.emplace_back(output);
       } else if (DataSpecUtils::partialMatch(output, header::DataOrigin{"DYN"})) {
-        ac.providedDYNs.emplace_back(output);
+        dec.providedDYNs.emplace_back(output);
+      } else if (DataSpecUtils::partialMatch(output, header::DataOrigin{"ATIM"})) {
+        dec.providedTIMs.emplace_back(output);
       } else if (DataSpecUtils::partialMatch(output, header::DataOrigin{"ATSK"})) {
-        ac.providedOutputObjHist.emplace_back(output);
-        auto it = std::find_if(ac.outObjHistMap.begin(), ac.outObjHistMap.end(), [&](auto&& x) { return x.id == hash; });
-        if (it == ac.outObjHistMap.end()) {
-          ac.outObjHistMap.push_back({hash, {output.binding.value}});
+        dec.providedOutputObjHist.emplace_back(output);
+        auto it = std::ranges::find_if(dec.outObjHistMap, [&](auto&& x) { return x.id == hash; });
+        if (it == dec.outObjHistMap.end()) {
+          dec.outObjHistMap.push_back({hash, {output.binding.value}});
         } else {
           it->bindings.push_back(output.binding.value);
         }
@@ -383,32 +358,38 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
 
   auto inputSpecLessThan = [](InputSpec const& lhs, InputSpec const& rhs) { return DataSpecUtils::describe(lhs) < DataSpecUtils::describe(rhs); };
   auto outputSpecLessThan = [](OutputSpec const& lhs, OutputSpec const& rhs) { return DataSpecUtils::describe(lhs) < DataSpecUtils::describe(rhs); };
-  std::sort(ac.requestedDYNs.begin(), ac.requestedDYNs.end(), inputSpecLessThan);
-  std::sort(ac.providedDYNs.begin(), ac.providedDYNs.end(), outputSpecLessThan);
+  std::ranges::sort(dec.requestedDYNs, inputSpecLessThan);
+  std::ranges::sort(dec.requestedTIMs, inputSpecLessThan);
+  std::ranges::sort(dec.providedDYNs, outputSpecLessThan);
+  std::ranges::sort(dec.providedTIMs, outputSpecLessThan);
 
   DataProcessorSpec indexBuilder{
     "internal-dpl-aod-index-builder",
     {},
     {},
-    readers::AODReaderHelpers::indexBuilderCallback(ac.requestedIDXs),
+    AlgorithmSpec::dummyAlgorithm(), // real algorithm will be set in adjustTopology
     {}};
-  AnalysisSupportHelpers::addMissingOutputsToBuilder(ac.requestedIDXs, ac.requestedAODs, ac.requestedDYNs, indexBuilder);
+  AnalysisSupportHelpers::addMissingOutputsToBuilder(dec.requestedIDXs, dec.requestedAODs, dec.requestedDYNs, indexBuilder);
 
-  for (auto& input : ac.requestedDYNs) {
-    if (std::none_of(ac.providedDYNs.begin(), ac.providedDYNs.end(), [&input](auto const& x) { return DataSpecUtils::match(input, x); })) {
-      ac.spawnerInputs.emplace_back(input);
-    }
+  dec.requestedTIMs | views::filter_not_matching(dec.providedTIMs) | sinks::append_to{dec.analysisCCDBInputs};
+  DeploymentMode deploymentMode = DefaultsHelpers::deploymentMode();
+  if (deploymentMode != DeploymentMode::OnlineDDS && deploymentMode != DeploymentMode::OnlineECS) {
+    AnalysisSupportHelpers::addMissingOutputsToBuilder(dec.analysisCCDBInputs, dec.requestedAODs, dec.requestedTIMs, analysisCCDBBackend);
   }
+
+  dec.requestedDYNs | views::filter_not_matching(dec.providedDYNs) | sinks::append_to{dec.spawnerInputs};
 
   DataProcessorSpec aodSpawner{
     "internal-dpl-aod-spawner",
     {},
     {},
-    readers::AODReaderHelpers::aodSpawnerCallback(ac.spawnerInputs),
+    AlgorithmSpec::dummyAlgorithm(), // real algorithm will be set in adjustTopology
     {}};
-  AnalysisSupportHelpers::addMissingOutputsToSpawner({}, ac.spawnerInputs, ac.requestedAODs, aodSpawner);
+  AnalysisSupportHelpers::addMissingOutputsToSpawner({}, dec.spawnerInputs, dec.requestedAODs, aodSpawner);
+  AnalysisSupportHelpers::addMissingOutputsToReader(dec.providedAODs, dec.requestedAODs, aodReader);
 
-  AnalysisSupportHelpers::addMissingOutputsToReader(ac.providedAODs, ac.requestedAODs, aodReader);
+  std::ranges::sort(requestedCCDBs, inputSpecLessThan);
+  std::ranges::sort(providedCCDBs, outputSpecLessThan);
   AnalysisSupportHelpers::addMissingOutputsToReader(providedCCDBs, requestedCCDBs, ccdbBackend);
 
   std::vector<DataProcessorSpec> extraSpecs;
@@ -430,25 +411,19 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
 
   // add the reader
   if (aodReader.outputs.empty() == false) {
-    auto mctracks2aod = std::find_if(workflow.begin(), workflow.end(), [](auto const& x) { return x.name == "mctracks-to-aod"; });
+    auto mctracks2aod = std::ranges::find_if(workflow, [](auto const& x) { return x.name == "mctracks-to-aod"; });
     if (mctracks2aod == workflow.end()) {
       // add normal reader
-      auto&& algo = PluginManager::loadAlgorithmFromPlugin("O2FrameworkAnalysisSupport", "ROOTFileReader", ctx);
-      if (internalRateLimiting) {
-        aodReader.algorithm = CommonDataProcessors::wrapWithRateLimiting(algo);
-      } else {
-        aodReader.algorithm = algo;
-      }
       aodReader.outputs.emplace_back(OutputSpec{"TFN", "TFNumber"});
       aodReader.outputs.emplace_back(OutputSpec{"TFF", "TFFilename"});
     } else {
-      // AODs are being injected on-the-fly, add dummy reader
+      // AODs are being injected on-the-fly, add error-handler reader
       aodReader.algorithm = AlgorithmSpec{
         adaptStateful(
-          [outputs = aodReader.outputs](DeviceSpec const&) {
+          [](DeviceSpec const& spec) {
             LOGP(warn, "Workflow with injected AODs has unsatisfied inputs:");
-            for (auto const& output : outputs) {
-              LOGP(warn, "  {}", DataSpecUtils::describe(output));
+            for (auto const& output : spec.outputs) {
+              LOGP(warn, "  {}", DataSpecUtils::describe(output.matcher));
             }
             LOGP(fatal, "Stopping.");
             // to ensure the output type for adaptStateful
@@ -460,112 +435,85 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
     extraSpecs.push_back(timePipeline(aodReader, ctx.options().get<int64_t>("readers")));
   }
 
-  ConcreteDataMatcher dstf{"FLP", "DISTSUBTIMEFRAME", 0xccdb};
-  if (ccdbBackend.outputs.empty() == false) {
-    ccdbBackend.outputs.push_back(OutputSpec{"CTP", "OrbitReset", 0});
-    InputSpec matcher{"dstf", "FLP", "DISTSUBTIMEFRAME", 0xccdb};
-    bool providesDISTSTF = false;
-    // Check if any of the provided outputs is a DISTSTF
-    // Check if any of the requested inputs is for a 0xccdb message
-    for (auto& dp : workflow) {
-      for (auto& output : dp.outputs) {
-        if (DataSpecUtils::match(matcher, output)) {
-          providesDISTSTF = true;
-          dstf = DataSpecUtils::asConcreteDataMatcher(output);
-          break;
-        }
-      }
-      if (providesDISTSTF) {
-        break;
-      }
+  InputSpec matcher{"dstf", "FLP", "DISTSUBTIMEFRAME", 0xccdb};
+  auto& dstf = std::get<ConcreteDataMatcher>(matcher.matcher);
+  // Check if any of the provided outputs is a DISTSTF
+  // Check if any of the requested inputs is for a 0xccdb message
+  bool providesDISTSTF = std::ranges::any_of(workflow,
+                                             [&matcher](auto const& dp) {
+                                               return std::any_of(dp.outputs.begin(), dp.outputs.end(), [&matcher](auto const& output) {
+                                                 return DataSpecUtils::match(matcher, output);
+                                               });
+                                             });
+
+  // If there is no CCDB requested, but we still ask for a FLP/DISTSUBTIMEFRAME/0xccdb
+  // we add to the first data processor which has no inputs (apart from
+  // enumerations / timers) the responsibility to provide the DISTSUBTIMEFRAME
+  bool requiresDISTSUBTIMEFRAME = std::ranges::any_of(workflow,
+                                                      [&dstf](auto const& dp) {
+                                                        return std::any_of(dp.inputs.begin(), dp.inputs.end(), [&dstf](auto const& input) {
+                                                          return DataSpecUtils::match(input, dstf);
+                                                        });
+                                                      });
+
+  // We find the first device which has either just enumerations or
+  // just timers, and we will add the DISTSUBTIMEFRAME to it.
+  // Notice how we do so in a stable manner by sorting the devices
+  // by name.
+  int enumCandidate = -1;
+  int timerCandidate = -1;
+  for (auto wi = 0U; wi < workflow.size(); ++wi) {
+    auto& dp = workflow[wi];
+    if (dp.inputs.size() != 1) {
+      continue;
     }
-    // * If there are AOD outputs we use TFNumber as the CCDB clock
-    // * If one device provides a DISTSTF we use that as the CCDB clock
-    // * If one of the devices provides a timer we use that as the CCDB clock
-    // * If none of the above apply add to the first data processor
-    //   which has no inputs apart from enumerations the responsibility
-    //   to provide the DISTSUBTIMEFRAME.
+    auto lifetime = dp.inputs[0].lifetime;
+    if (lifetime == Lifetime::Enumeration && (enumCandidate == -1 || workflow[enumCandidate].name > dp.name)) {
+      enumCandidate = wi;
+    }
+    if (lifetime == Lifetime::Timer && (timerCandidate == -1 || workflow[timerCandidate].name > dp.name)) {
+      timerCandidate = wi;
+    }
+  }
+
+  // * If there are AOD outputs we use TFNumber as the CCDB clock
+  // * If one device provides a DISTSTF we use that as the CCDB clock
+  // * If one of the devices provides a timer we use that as the CCDB clock
+  // * If none of the above apply, add to the first data processor
+  //   which has no inputs apart from enumerations the responsibility
+  //   to provide the DISTSUBTIMEFRAME.
+  if (ccdbBackend.outputs.empty() == false) {
     if (aodReader.outputs.empty() == false) {
+      // fetcher clock follows AOD source (TFNumber)
       ccdbBackend.inputs.push_back(InputSpec{"tfn", "TFN", "TFNumber"});
     } else if (providesDISTSTF) {
+      // fetcher clock follows DSTF/ccdb source (DISTSUBTIMEFRAME)
       ccdbBackend.inputs.push_back(InputSpec{"tfn", dstf, Lifetime::Timeframe});
     } else {
-      // We find the first device which has either just enumerations or
-      // just timers, and we add the DISTSUBTIMEFRAME to it.
-      // Notice how we do so in a stable manner by sorting the devices
-      // by name.
-      int enumCandidate = -1;
-      int timerCandidate = -1;
-      for (size_t wi = 0; wi < workflow.size(); wi++) {
-        auto& dp = workflow[wi];
-        if (dp.inputs.size() != 1) {
-          continue;
-        }
-        auto lifetime = dp.inputs[0].lifetime;
-        if (lifetime == Lifetime::Enumeration && (enumCandidate == -1 || workflow[enumCandidate].name > dp.name)) {
-          enumCandidate = wi;
-        }
-        if (lifetime == Lifetime::Timer && (timerCandidate == -1 || workflow[timerCandidate].name > dp.name)) {
-          timerCandidate = wi;
-        }
-      }
       if (enumCandidate != -1) {
-        auto& dp = workflow[enumCandidate];
-        DataSpecUtils::updateOutputList(dp.outputs, OutputSpec{{"ccdb-diststf"}, dstf, Lifetime::Timeframe});
+        // add DSTF/ccdb source to the enumeration-driven source explicitly
+        // fetcher clock is provided by enumeration-driven source (DISTSUBTIMEFRAME)
+        DataSpecUtils::updateOutputList(workflow[enumCandidate].outputs, OutputSpec{{"ccdb-diststf"}, dstf, Lifetime::Timeframe});
         ccdbBackend.inputs.push_back(InputSpec{"tfn", dstf, Lifetime::Timeframe});
       } else if (timerCandidate != -1) {
-        auto& dp = workflow[timerCandidate];
-        dstf = DataSpecUtils::asConcreteDataMatcher(dp.outputs[0]);
-        ccdbBackend.inputs.push_back(InputSpec{{"tfn"}, dstf, Lifetime::Timeframe});
+        // fetcher clock is proived by timer source
+        auto timer_dstf = DataSpecUtils::asConcreteDataMatcher(workflow[timerCandidate].outputs[0]);
+        ccdbBackend.inputs.push_back(InputSpec{"tfn", timer_dstf, Lifetime::Timeframe});
       }
     }
 
+    ccdbBackend.outputs.push_back(OutputSpec{"CTP", "OrbitReset", 0});
     // Load the CCDB backend from the plugin
     ccdbBackend.algorithm = PluginManager::loadAlgorithmFromPlugin("O2FrameworkCCDBSupport", "CCDBFetcherPlugin", ctx);
     extraSpecs.push_back(ccdbBackend);
-  } else {
-    // If there is no CCDB requested, but we still ask for a FLP/DISTSUBTIMEFRAME/0xccdb
-    // we add to the first data processor which has no inputs (apart from
-    // enumerations / timers) the responsibility to provide the DISTSUBTIMEFRAME
-    bool requiresDISTSUBTIMEFRAME = false;
-    for (auto& dp : workflow) {
-      for (auto& input : dp.inputs) {
-        if (DataSpecUtils::match(input, dstf)) {
-          requiresDISTSUBTIMEFRAME = true;
-          break;
-        }
-      }
-    }
-    if (requiresDISTSUBTIMEFRAME) {
-      // We find the first device which has either just enumerations or
-      // just timers, and we add the DISTSUBTIMEFRAME to it.
-      // Notice how we do so in a stable manner by sorting the devices
-      // by name.
-      int enumCandidate = -1;
-      int timerCandidate = -1;
-      for (size_t wi = 0; wi < workflow.size(); wi++) {
-        auto& dp = workflow[wi];
-        if (dp.inputs.size() != 1) {
-          continue;
-        }
-        auto lifetime = dp.inputs[0].lifetime;
-        if (lifetime == Lifetime::Enumeration && (enumCandidate == -1 || workflow[enumCandidate].name > dp.name)) {
-          enumCandidate = wi;
-        }
-        if (lifetime == Lifetime::Timer && (timerCandidate == -1 || workflow[timerCandidate].name > dp.name)) {
-          timerCandidate = wi;
-        }
-      }
-      if (enumCandidate != -1) {
-        auto& dp = workflow[enumCandidate];
-        DataSpecUtils::updateOutputList(dp.outputs, OutputSpec{{"ccdb-diststf"}, dstf, Lifetime::Timeframe});
-        ccdbBackend.inputs.push_back(InputSpec{"tfn", dstf, Lifetime::Timeframe});
-      } else if (timerCandidate != -1) {
-        auto& dp = workflow[timerCandidate];
-        dstf = DataSpecUtils::asConcreteDataMatcher(dp.outputs[0]);
-        ccdbBackend.inputs.push_back(InputSpec{{"tfn"}, dstf, Lifetime::Timeframe});
-      }
-    }
+  } else if (requiresDISTSUBTIMEFRAME && enumCandidate != -1) {
+    // add DSTF/ccdb source to the enumeration-driven source explicitly if it is required in the workflow
+    DataSpecUtils::updateOutputList(workflow[enumCandidate].outputs, OutputSpec{{"ccdb-diststf"}, dstf, Lifetime::Timeframe});
+  }
+
+  // add the Analysys CCDB backend which reads CCDB objects using a provided table
+  if (analysisCCDBBackend.outputs.empty() == false) {
+    extraSpecs.push_back(analysisCCDBBackend);
   }
 
   // add the timer
@@ -575,7 +523,7 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
 
   // This is to inject a file sink so that any dangling ATSK object is written
   // to a ROOT file.
-  if (ac.providedOutputObjHist.empty() == false) {
+  if (dec.providedOutputObjHist.empty() == false) {
     auto rootSink = AnalysisSupportHelpers::getOutputObjHistSink(ctx);
     extraSpecs.push_back(rootSink);
   }
@@ -583,60 +531,24 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
   workflow.insert(workflow.end(), extraSpecs.begin(), extraSpecs.end());
   extraSpecs.clear();
 
-  /// Analyze all ouputs
-  auto [outputsInputsTmp, isDanglingTmp] = analyzeOutputs(workflow);
-  ac.isDangling = isDanglingTmp;
-  ac.outputsInputs = outputsInputsTmp;
-
-  // create DataOutputDescriptor
-  std::shared_ptr<DataOutputDirector> dod = AnalysisSupportHelpers::getDataOutputDirector(ctx);
-
-  // select outputs of type AOD which need to be saved
-  // ATTENTION: if there are dangling outputs the getGlobalAODSink
-  // has to be created in any case!
-  for (auto ii = 0u; ii < ac.outputsInputs.size(); ii++) {
-    if (DataSpecUtils::partialMatch(ac.outputsInputs[ii], extendedAODOrigins)) {
-      auto ds = dod->getDataOutputDescriptors(ac.outputsInputs[ii]);
-      if (ds.size() > 0 || ac.isDangling[ii]) {
-        ac.outputsInputsAOD.emplace_back(ac.outputsInputs[ii]);
-      }
-    }
-  }
-
-  // file sink for any AOD output
-  if (ac.outputsInputsAOD.size() > 0) {
-    // add TFNumber and TFFilename as input to the writer
-    ac.outputsInputsAOD.emplace_back(InputSpec{"tfn", "TFN", "TFNumber"});
-    ac.outputsInputsAOD.emplace_back(InputSpec{"tff", "TFF", "TFFilename"});
-    auto fileSink = AnalysisSupportHelpers::getGlobalAODSink(ctx);
-    extraSpecs.push_back(fileSink);
-
-    auto it = std::find_if(ac.outputsInputs.begin(), ac.outputsInputs.end(), [](InputSpec& spec) -> bool {
-      return DataSpecUtils::partialMatch(spec, o2::header::DataOrigin("TFN"));
-    });
-    size_t ii = std::distance(ac.outputsInputs.begin(), it);
-    ac.isDangling[ii] = false;
-  }
-
-  workflow.insert(workflow.end(), extraSpecs.begin(), extraSpecs.end());
-  extraSpecs.clear();
+  injectAODWriter(workflow, ctx);
 
   // Select dangling outputs which are not of type AOD
   std::vector<InputSpec> redirectedOutputsInputs;
-  for (auto ii = 0u; ii < ac.outputsInputs.size(); ii++) {
+  for (auto ii = 0u; ii < dec.outputsInputs.size(); ii++) {
     if (ctx.options().get<std::string>("forwarding-policy") == "none") {
       continue;
     }
     // We forward to the output proxy all the inputs only if they are dangling
     // or if the forwarding policy is "proxy".
-    if (!ac.isDangling[ii] && (ctx.options().get<std::string>("forwarding-policy") != "all")) {
+    if (!dec.isDangling[ii] && (ctx.options().get<std::string>("forwarding-policy") != "all")) {
       continue;
     }
     // AODs are skipped in any case.
-    if (DataSpecUtils::partialMatch(ac.outputsInputs[ii], extendedAODOrigins)) {
+    if (DataSpecUtils::partialMatch(dec.outputsInputs[ii], extendedAODOrigins)) {
       continue;
     }
-    redirectedOutputsInputs.emplace_back(ac.outputsInputs[ii]);
+    redirectedOutputsInputs.emplace_back(dec.outputsInputs[ii]);
   }
 
   std::vector<InputSpec> unmatched;
@@ -659,7 +571,19 @@ void WorkflowHelpers::injectServiceDevices(WorkflowSpec& workflow, ConfigContext
       ignoredInput.lifetime = Lifetime::Sporadic;
     }
 
-    extraSpecs.push_back(CommonDataProcessors::getDummySink(ignored, rateLimitingChannelConfigOutput));
+    // Use the new dummy sink when the AOD reader is there
+    O2_SIGNPOST_ID_GENERATE(sid, workflow_helpers);
+    if (aodReader.outputs.empty() == false) {
+      O2_SIGNPOST_EVENT_EMIT(workflow_helpers, sid, "injectServiceDevices", "Injecting scheduled dummy sink");
+      extraSpecs.push_back(CommonDataProcessors::getScheduledDummySink(ignored));
+    } else {
+      O2_SIGNPOST_EVENT_EMIT(workflow_helpers, sid, "injectServiceDevices", "Injecting rate limited dummy sink");
+      std::string rateLimitingChannelConfigOutput;
+      if (rateLimitingIPCID != -1) {
+        rateLimitingChannelConfigOutput = fmt::format("name=metric-feedback,type=push,method=bind,address=ipc://{}metric-feedback-{},transport=shmem,rateLogging=0", ChannelSpecHelpers::defaultIPCFolder(), rateLimitingIPCID);
+      }
+      extraSpecs.push_back(CommonDataProcessors::getDummySink(ignored, rateLimitingChannelConfigOutput));
+    }
   }
 
   workflow.insert(workflow.end(), extraSpecs.begin(), extraSpecs.end());
@@ -733,21 +657,49 @@ void WorkflowHelpers::adjustTopology(WorkflowSpec& workflow, ConfigContext const
   }
 
   if (distSTFCount > 0) {
-    bool found = false;
     for (auto& spec : workflow) {
-      for (auto& output : spec.outputs) {
-        if (DataSpecUtils::match(output, ConcreteDataMatcher{"FLP", "DISTSUBTIMEFRAME", 0})) {
-          found = true;
-          break;
-        }
-      }
-      if (found) {
+      if (std::ranges::any_of(spec.outputs, [](auto const& output) { return DataSpecUtils::match(output, ConcreteDataMatcher{"FLP", "DISTSUBTIMEFRAME", 0}); })) {
         for (unsigned int i = 1; i < distSTFCount; ++i) {
           spec.outputs.emplace_back(OutputSpec{ConcreteDataMatcher{"FLP", "DISTSUBTIMEFRAME", i}, Lifetime::Timeframe});
         }
         break;
       }
     }
+  }
+}
+
+void WorkflowHelpers::injectAODWriter(WorkflowSpec& workflow, ConfigContext const& ctx)
+{
+  auto& dec = ctx.services().get<DanglingEdgesContext>();
+  /// Analyze all ouputs
+  std::tie(dec.outputsInputs, dec.isDangling) = analyzeOutputs(workflow);
+
+  // create DataOutputDescriptor
+  std::shared_ptr<DataOutputDirector> dod = AnalysisSupportHelpers::getDataOutputDirector(ctx);
+
+  // select outputs of type AOD which need to be saved
+  dec.outputsInputsAOD.clear();
+  for (auto ii = 0u; ii < dec.outputsInputs.size(); ii++) {
+    if (DataSpecUtils::partialMatch(dec.outputsInputs[ii], extendedAODOrigins)) {
+      auto ds = dod->getDataOutputDescriptors(dec.outputsInputs[ii]);
+      if (ds.size() > 0 || dec.isDangling[ii]) {
+        dec.outputsInputsAOD.emplace_back(dec.outputsInputs[ii]);
+      }
+    }
+  }
+
+  // file sink for any AOD output
+  if (dec.outputsInputsAOD.size() > 0) {
+    // add TFNumber and TFFilename as input to the writer
+    DataSpecUtils::updateInputList(dec.outputsInputsAOD, InputSpec{"tfn", "TFN", "TFNumber"});
+    DataSpecUtils::updateInputList(dec.outputsInputsAOD, InputSpec{"tff", "TFF", "TFFilename"});
+    auto fileSink = AnalysisSupportHelpers::getGlobalAODSink(ctx);
+    workflow.push_back(fileSink);
+
+    auto it = std::find_if(dec.outputsInputs.begin(), dec.outputsInputs.end(), [](InputSpec const& spec) -> bool {
+      return DataSpecUtils::partialMatch(spec, o2::header::DataOrigin("TFN"));
+    });
+    dec.isDangling[std::distance(dec.outputsInputs.begin(), it)] = false;
   }
 }
 
@@ -974,7 +926,8 @@ WorkflowParsingState WorkflowHelpers::verifyWorkflow(const o2::framework::Workfl
       if (DataSpecUtils::validate(input) == false) {
         ss << "In spec " << spec.name << " input specification "
            << ii << " requires binding, description and origin"
-                    " to be fully specified";
+                    " to be fully specified (found "
+           << input.binding << ":" << DataSpecUtils::describe(input) << ")";
         throw std::runtime_error(ss.str());
       }
     }
@@ -1043,7 +996,7 @@ std::tuple<std::vector<InputSpec>, std::vector<bool>> WorkflowHelpers::analyzeOu
     input.binding = (snprintf(buf, 63, "output_%zu_%zu", output.workflowId, output.id), buf);
 
     // make sure that entries are unique
-    if (std::find(results.begin(), results.end(), input) == results.end()) {
+    if (std::ranges::find(results, input) == results.end()) {
       results.emplace_back(input);
       isDangling.emplace_back(matched == false);
     }

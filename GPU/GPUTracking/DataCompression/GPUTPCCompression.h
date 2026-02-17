@@ -60,6 +60,7 @@ class GPUTPCCompression : public GPUProcessor
 #ifndef GPUCA_GPUCODE
   void DumpCompressedClusters(std::ostream& out);
 #endif
+  GPUd() bool rejectCluster(int32_t idx, const GPUParam& param, const GPUTrackingInOutPointers& ioPtrs) const;
 
  protected:
   struct memory {

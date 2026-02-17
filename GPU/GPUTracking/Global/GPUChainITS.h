@@ -34,7 +34,7 @@ class GPUChainITS final : public GPUChain
   friend class GPUReconstruction;
 
  public:
-  ~GPUChainITS() override;
+  ~GPUChainITS() final;
   int32_t Init() override;
   int32_t PrepareEvent() override;
   int32_t Finalize() override;
@@ -45,15 +45,15 @@ class GPUChainITS final : public GPUChain
   void MemorySize(size_t&, size_t&) final {};
 
   o2::its::TrackerTraits<7>* GetITSTrackerTraits();
-  o2::its::VertexerTraits* GetITSVertexerTraits();
+  o2::its::VertexerTraits<7>* GetITSVertexerTraits();
   o2::its::TimeFrame<7>* GetITSTimeframe();
 
  protected:
   GPUChainITS(GPUReconstruction* rec);
-  std::unique_ptr<o2::its::TrackerTraits<7>> mITSTrackerTraits;
-  std::unique_ptr<o2::its::VertexerTraits> mITSVertexerTraits;
-  std::unique_ptr<o2::its::TimeFrame<7>> mITSTimeFrame;
   std::unique_ptr<o2::its::GPUFrameworkExternalAllocator> mFrameworkAllocator;
+  std::unique_ptr<o2::its::TimeFrame<7>> mITSTimeFrame;
+  std::unique_ptr<o2::its::TrackerTraits<7>> mITSTrackerTraits;
+  std::unique_ptr<o2::its::VertexerTraits<7>> mITSVertexerTraits;
 };
 } // namespace o2::gpu
 

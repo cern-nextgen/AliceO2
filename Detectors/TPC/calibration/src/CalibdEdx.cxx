@@ -351,7 +351,7 @@ auto ProjectBoostHistoXFastAllSectors(const Hist& hist, std::vector<int>& bin_in
 
       // access the bin content specified by bin_indices
       const float counts = hist.at(bin_indices);
-      float dEdx = hist.axis(ax::dEdx).value(i);
+      float dEdx = hist.axis(ax::dEdx).bin(i).center();
 
       // scale the dedx to the mean
       if (stackMean != nullptr) {
@@ -532,7 +532,7 @@ void CalibdEdx::fitHistGaus(TLinearFitter& fitter, CalibdEdxCorrection& corr, co
   LOGP(info, "Calibration fits took: {}", time.count());
 }
 
-void CalibdEdx::finalize(const bool useGausFits)
+void CalibdEdx::finalize(const bool useGausFits, const bool averageSectors)
 {
   const float entries = minStackEntries();
   mCalib.clear();
@@ -565,10 +565,15 @@ void CalibdEdx::finalize(const bool useGausFits)
     // get mean of each GEM stack
     CalibdEdxCorrection meanCorr{};
     meanCorr.setDims(0);
-    TLinearFitter meanFitter(0);
-    meanFitter.SetFormula("1");
-    // get the mean dEdx for each stack
-    fitHist(mHist, meanCorr, meanFitter, mFitCut, mFitLowCutFactor, mFitPasses);
+    if (averageSectors) {
+      // set mean dEdx per stack to unity
+      meanCorr.setUnity();
+    } else {
+      // get the mean dEdx for each stack
+      TLinearFitter meanFitter(0);
+      meanFitter.SetFormula("1");
+      fitHist(mHist, meanCorr, meanFitter, mFitCut, mFitLowCutFactor, mFitPasses, nullptr, mDebugOutputStreamer.get());
+    }
     if (!useGausFits) {
       // get higher dimension corrections with projected sectors
       fitHist(mHist, mCalib, fitter, mFitCut, mFitLowCutFactor, mFitPasses, &meanCorr, mDebugOutputStreamer.get());
@@ -754,17 +759,28 @@ void CalibdEdx::dumpToFile(const char* outFile)
 
 CalibdEdx CalibdEdx::readFromFile(const char* inFile)
 {
-  TFile f(inFile, "READ");
-  auto* obj = (CalibdEdx*)f.Get("calib");
-  if (!obj) {
+  std::unique_ptr<TFile> f(TFile::Open(inFile));
+  if (!f || f->IsZombie()) {
+    LOGP(error, "Could not open file: {}", inFile);
     CalibdEdx calTmp;
     return calTmp;
   }
-  CalibdEdx cal(*obj);
-  THnF* hTmp = (THnF*)f.Get("histogram_data");
-  if (!hTmp) {
+
+  auto obj = f->Get<CalibdEdx>("calib");
+  if (!obj) {
+    LOGP(error, "Could not read CalibdEdx object from file: {}", inFile);
     CalibdEdx calTmp;
     return calTmp;
+  }
+
+  THnF* hTmp = f->Get<THnF>("histogram_data");
+
+  CalibdEdx cal(*obj);
+  delete obj;
+
+  if (!hTmp) {
+    LOGP(warning, "Could not read histogram from file: {}. Returning empty histogram", inFile);
+    return cal;
   }
   cal.setFromRootHist(hTmp);
   return cal;

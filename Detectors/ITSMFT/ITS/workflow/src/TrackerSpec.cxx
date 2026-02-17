@@ -15,6 +15,7 @@
 #include "Framework/ConfigParamRegistry.h"
 #include "Framework/CCDBParamSpec.h"
 #include "ITSWorkflow/TrackerSpec.h"
+#include "ITStracking/Definitions.h"
 #include "ITStracking/TrackingConfigParam.h"
 
 namespace o2
@@ -22,14 +23,12 @@ namespace o2
 using namespace framework;
 namespace its
 {
-using Vertex = o2::dataformats::Vertex<o2::dataformats::TimeStamp<int>>;
-
 TrackerDPL::TrackerDPL(std::shared_ptr<o2::base::GRPGeomRequest> gr,
                        bool isMC,
                        int trgType,
                        const TrackingMode::Type trMode,
                        const bool overrBeamEst,
-                       o2::gpu::GPUDataTypes::DeviceType dType) : mGGCCDBRequest(gr),
+                       o2::gpu::gpudatatypes::DeviceType dType) : mGGCCDBRequest(gr),
                                                                   mRecChain{o2::gpu::GPUReconstruction::CreateInstance(dType, true)},
                                                                   mITSTrackingInterface{isMC, trgType, overrBeamEst}
 {
@@ -79,7 +78,7 @@ void TrackerDPL::end()
   LOGF(info, "ITS CA-Tracker total timing: Cpu: %.3e Real: %.3e s in %d slots", mTimer.CpuTime(), mTimer.RealTime(), mTimer.Counter() - 1);
 }
 
-DataProcessorSpec getTrackerSpec(bool useMC, bool useGeom, int trgType, TrackingMode::Type trMode, const bool overrBeamEst, o2::gpu::GPUDataTypes::DeviceType dType)
+DataProcessorSpec getTrackerSpec(bool useMC, bool useGeom, int trgType, TrackingMode::Type trMode, const bool overrBeamEst, o2::gpu::gpudatatypes::DeviceType dType)
 {
   std::vector<InputSpec> inputs;
 

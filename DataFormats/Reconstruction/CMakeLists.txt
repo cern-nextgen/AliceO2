@@ -8,6 +8,7 @@
 # In applying this license CERN does not waive the privileges and immunities
 # granted to it by virtue of its status as an Intergovernmental Organization
 # or submit itself to any jurisdiction.
+# add_compile_options(-O0 -g -fPIC)
 
 o2_add_library(ReconstructionDataFormats
                SOURCES src/TrackParametrization.cxx
@@ -73,6 +74,7 @@ o2_target_root_dictionary(
           include/ReconstructionDataFormats/BCRange.h
           include/ReconstructionDataFormats/TrackHMP.h
           include/ReconstructionDataFormats/MatchInfoHMP.h
+          include/ReconstructionDataFormats/HelixHelper.h
   )
 
 o2_add_test(Vertex

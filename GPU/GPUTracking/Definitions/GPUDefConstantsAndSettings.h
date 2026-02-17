@@ -23,7 +23,7 @@
 #include "GPUCommonDef.h"
 
 #if !defined(GPUCA_STANDALONE) && !defined(GPUCA_O2_LIB) && !defined(GPUCA_O2_INTERFACE)
-  #error You are using the CA GPU tracking without defining the build type (O2/Standalone). If you are running an O2 ROOT macro, please include GPUO2Interface.h first!
+  #error You are using the CA GPU tracking without defining the build type (O2/Standalone). If you are running an O2 ROOT macro, please include GPUO2ExternalUser.h first!
 #endif
 
 #if (defined(GPUCA_O2_LIB) && defined(GPUCA_STANDALONE))
@@ -32,11 +32,9 @@
 
 #define GPUCA_TRACKLET_SELECTOR_MIN_HITS_B5(QPTB5) (CAMath::Abs(QPTB5) > 10 ? 10 : (CAMath::Abs(QPTB5) > 5 ? 15 : 29)) // Minimum hits should depend on Pt, low Pt tracks can have few hits. 29 Hits default, 15 for < 200 mev, 10 for < 100 mev
 
-#define GPUCA_MERGER_MAX_TRACK_CLUSTERS 1000          // Maximum number of clusters a track may have after merging
+#define GPUCA_MERGER_MAX_TRACK_CLUSTERS 1024          // Maximum number of clusters a track may have after merging
 
 #define GPUCA_MAXN 40                                 // Maximum number of neighbor hits to consider in one row in neightbors finder
-#define GPUCA_MIN_TRACK_PTB5_DEFAULT 0.010f           // Default setting for minimum track Pt at some places (at B=0.5T)
-#define GPUCA_MIN_TRACK_PTB5_REJECT_DEFAULT 0.050f    // Default setting for Pt (at B=0.5T) where tracks are rejected
 
 #define GPUCA_MAX_SIN_PHI_LOW 0.99f                   // Limits for maximum sin phi during fit
 #define GPUCA_MAX_SIN_PHI 0.999f                      // Must be preprocessor define because c++ pre 11 cannot use static constexpr for initializes

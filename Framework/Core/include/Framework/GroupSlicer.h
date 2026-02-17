@@ -55,7 +55,7 @@ struct GroupSlicer {
     {
       constexpr auto index = framework::has_type_at_v<std::decay_t<T>>(associated_pack_t{});
       auto binding = o2::soa::getLabelFromTypeForKey<std::decay_t<T>>(mIndexColumnName);
-      auto bk = Entry(binding, mIndexColumnName);
+      auto bk = Entry(binding, o2::soa::getMatcherFromTypeForKey<std::decay_t<T>>(mIndexColumnName), mIndexColumnName);
       if constexpr (!o2::soa::is_smallgroups<std::decay_t<T>>) {
         if (table.size() == 0) {
           return;
@@ -246,9 +246,7 @@ struct GroupSlicer {
         pos = position;
       }
       // optimized split
-      auto oc = sliceInfos[index].getSliceFor(pos);
-      uint64_t offset = oc.first;
-      auto count = oc.second;
+      auto [offset, count] = sliceInfos[index].getSliceFor(pos);
       auto groupedElementsTable = originalTable.rawSlice(offset, offset + count - 1);
       groupedElementsTable.bindInternalIndicesTo(&originalTable);
       return groupedElementsTable;
@@ -266,9 +264,9 @@ struct GroupSlicer {
     std::tuple<A...>* mAt;
     typename grouping_t::iterator mGroupingElement;
     uint64_t position = 0;
-    gsl::span<int64_t const> groupSelection;
-    std::array<gsl::span<int64_t const> const*, sizeof...(A)> selections;
-    std::array<gsl::span<int64_t const>::iterator, sizeof...(A)> starts;
+    std::span<int64_t const> groupSelection;
+    std::array<std::span<int64_t const> const*, sizeof...(A)> selections;
+    std::array<std::span<int64_t const>::iterator, sizeof...(A)> starts;
 
     std::array<SliceInfoPtr, sizeof...(A)> sliceInfos;
     std::array<SliceInfoUnsortedPtr, sizeof...(A)> sliceInfosUnsorted;

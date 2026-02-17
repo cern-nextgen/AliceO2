@@ -96,12 +96,17 @@ struct TrackerParamConfig : public o2::conf::ConfigurableParamHelper<TrackerPara
   int trackingMode = -1;                   // -1: unset, 0=sync, 1=async, 2=cosmics used by gpuwf only
   bool doUPCIteration = false;             // Perform an additional iteration for UPC events on tagged vertices. You want to combine this config with VertexerParamConfig.nIterations=2
   int nIterations = MaxIter;               // overwrite the number of iterations
+  int reseedIfShorter = 6;                 // for the final refit reseed the track with circle if they are shorter than this value
+  bool shiftRefToCluster{true};            // TrackFit: after update shift the linearization reference to cluster
+  bool repeatRefitOut{false};              // repeat outward refit using inward refit as a seed
+  bool createArtefactLabels{false}; // create on-the-fly labels for the artefacts
 
   int nThreads = 1;
   bool printMemory = false;
   size_t maxMemory = std::numeric_limits<size_t>::max();
   bool dropTFUponFailure = false;
   bool fataliseUponFailure = true; // granular management of the fatalisation in async mode
+  bool allowSharingFirstCluster = false; // allow first cluster sharing among tracks
 
   O2ParamDef(TrackerParamConfig, "ITSCATrackerParam");
 };
@@ -119,20 +124,26 @@ struct ITSGpuTrackingParamConfig : public o2::conf::ConfigurableParamHelper<ITSG
   void maybeOverride() const;
 
   /// Individual kernel launch parameter for each iteration
-  int nBlocksLayerTracklets[MaxIter] = {30, 30, 30, 30};
+  int nBlocksLayerTracklets[MaxIter] = {60, 60, 60, 60};
   int nThreadsLayerTracklets[MaxIter] = {256, 256, 256, 256};
 
-  int nBlocksLayerCells[MaxIter] = {30, 30, 30, 30};
+  int nBlocksLayerCells[MaxIter] = {60, 60, 60, 60};
   int nThreadsLayerCells[MaxIter] = {256, 256, 256, 256};
 
-  int nBlocksFindNeighbours[MaxIter] = {30, 30, 30, 30};
+  int nBlocksFindNeighbours[MaxIter] = {60, 60, 60, 60};
   int nThreadsFindNeighbours[MaxIter] = {256, 256, 256, 256};
 
-  int nBlocksProcessNeighbours[MaxIter] = {30, 30, 30, 30};
+  int nBlocksProcessNeighbours[MaxIter] = {60, 60, 60, 60};
   int nThreadsProcessNeighbours[MaxIter] = {256, 256, 256, 256};
 
-  int nBlocksTracksSeeds[MaxIter] = {30, 30, 30, 30};
+  int nBlocksTracksSeeds[MaxIter] = {60, 60, 60, 60};
   int nThreadsTracksSeeds[MaxIter] = {256, 256, 256, 256};
+
+  int nBlocksVtxComputeTracklets[2] = {60, 60};
+  int nThreadsVtxComputeTracklets[2] = {256, 256};
+
+  int nBlocksVtxComputeMatching[2] = {60, 60};
+  int nThreadsVtxComputeMatching[2] = {256, 256};
 
   O2ParamDef(ITSGpuTrackingParamConfig, "ITSGpuTrackingParam");
 };
