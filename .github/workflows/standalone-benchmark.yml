@@ -56,7 +56,7 @@ jobs:
         env:
           WORK_DIR: /cvmfs/alice.cern.ch
           ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
-          O2_REVISION: daily-20250805-0000-1
+          O2_REVISION: daily-20260217-0000-1
           STANDALONE_DIR: /root/standalone
           BUILD_DIR: /root/standalone/build
           ARTIFACT_FILE: /root/artifact.txt
