@@ -27,11 +27,11 @@ jobs:
           - name: amd-mi300x
             runner: cern-nextgen-mi300x
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx942
-            ca_args: --gpuType HIP
+            ca_args: --gpuType HIP #--RTCTECHloadLaunchBoundsFromFile genGPUArch/amd-mi300x.par
           - name: amd-w7900
             runner: cern-nextgen-w7900
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx1100
-            ca_args: --gpuType HIP --RTCTECHloadLaunchBoundsFromFile genGPUArch/amd-w7900.par
+            ca_args: --gpuType HIP #--RTCTECHloadLaunchBoundsFromFile genGPUArch/amd-w7900.par
 
     name: ${{ matrix.name }}
     steps:
@@ -41,7 +41,7 @@ jobs:
       - name: Build and Run
         run: |
           mkdir -p ${STANDALONE_DIR}
-          . ${WORK_DIR}/${ALIBUILD_ARCH_PREFIX}/ninja-fortran/fortran-v1.11.1.g9-3/etc/profile.d/init.sh
+          . ${WORK_DIR}/${ALIBUILD_ARCH_PREFIX}/ninja/fortran-v1.11.1.g9-15/etc/profile.d/init.sh
           . ${WORK_DIR}/${ALIBUILD_ARCH_PREFIX}/O2/${O2_REVISION}/etc/profile.d/init.sh
 
           cmake -B ${BUILD_DIR} ${{ matrix.cmake_args }} -DENABLE_OPENCL=0 -DGPUCA_BUILD_EVENT_DISPLAY=0 -DGPUCA_DETERMINISTIC_MODE=GPU -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
@@ -70,7 +70,7 @@ jobs:
         env:
           WORK_DIR: /cvmfs/alice.cern.ch
           ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
-          O2_REVISION: daily-20260217-0000-1
+          O2_REVISION: daily-20260223-0000-1
           STANDALONE_DIR: /root/standalone
           BUILD_DIR: /root/standalone/build
           ARTIFACT_FILE: /root/artifact.txt
