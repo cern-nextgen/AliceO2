@@ -43,11 +43,13 @@ struct GPUMemorySizeScalers {
   double tpcClustersPerPeak = 0.9;
   double tpcStartHitsPerHit = 0.08;
   double tpcTrackletsPerStartHit = 0.8;
+  double tpcTrackletsPerStartHitLowField = 0.85;
   double tpcTrackletHitsPerHit = 5;
+  double tpcTrackletHitsPerHitLowField = 7;
   double tpcSectorTracksPerHit = 0.02;
   double tpcSectorTrackHitsPerHit = 0.8;
   double tpcSectorTrackHitsPerHitWithRejection = 1.0;
-  double tpcMergedTrackPerSectorTrack = 0.9;
+  double tpcMergedTrackPerSectorTrack = 1.0;
   double tpcMergedTrackHitPerSectorHit = 1.1;
   size_t tpcCompressedUnattachedHitsBase1024[3] = {900, 900, 500}; // No ratio, but integer fraction of 1024 for exact computation
 
@@ -80,8 +82,8 @@ struct GPUMemorySizeScalers {
   inline size_t NTPCClusters(size_t tpcDigits, bool perSector = false) { return getValue(perSector ? tpcMaxSectorClusters : tpcMaxClusters, (conservative ? 1.0 : tpcClustersPerPeak) * NTPCPeaks(tpcDigits, perSector)); }
   inline size_t NTPCStartHits(size_t tpcHits) { return getValue(tpcMaxStartHits, tpcHits * tpcStartHitsPerHit); }
   inline size_t NTPCRowStartHits(size_t tpcHits) { return getValue(tpcMaxRowStartHits, std::max<size_t>(NTPCStartHits(tpcHits) * (tpcHits < 30000000 ? 20 : 12) / GPUCA_ROW_COUNT, tpcMinRowStartHits)); }
-  inline size_t NTPCTracklets(size_t tpcHits) { return getValue(tpcMaxTracklets, NTPCStartHits(tpcHits) * tpcTrackletsPerStartHit); }
-  inline size_t NTPCTrackletHits(size_t tpcHits) { return getValue(tpcMaxTrackletHits, hitOffset + tpcHits * tpcTrackletHitsPerHit); }
+  inline size_t NTPCTracklets(size_t tpcHits, bool lowField) { return getValue(tpcMaxTracklets, NTPCStartHits(tpcHits) * (lowField ? tpcTrackletsPerStartHitLowField : tpcTrackletsPerStartHit)); }
+  inline size_t NTPCTrackletHits(size_t tpcHits, bool lowField) { return getValue(tpcMaxTrackletHits, hitOffset + tpcHits * (lowField ? tpcTrackletHitsPerHitLowField : tpcTrackletHitsPerHit)); }
   inline size_t NTPCSectorTracks(size_t tpcHits) { return getValue(tpcMaxSectorTracks, tpcHits * tpcSectorTracksPerHit); }
   inline size_t NTPCSectorTrackHits(size_t tpcHits, uint8_t withRejection = 0) { return getValue(tpcMaxSectorTrackHits, tpcHits * (withRejection ? tpcSectorTrackHitsPerHitWithRejection : tpcSectorTrackHitsPerHit)); }
   inline size_t NTPCMergedTracks(size_t tpcSectorTracks) { return getValue(tpcMaxMergedTracks, tpcSectorTracks * (conservative ? 1.0 : tpcMergedTrackPerSectorTrack)); }

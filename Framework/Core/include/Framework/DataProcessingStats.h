@@ -57,14 +57,21 @@ enum struct ProcessingStatsId : short {
   CPU_USAGE_FRACTION,
   ARROW_BYTES_CREATED,
   ARROW_BYTES_DESTROYED,
+  ARROW_BYTES_EXPIRED,
   ARROW_MESSAGES_CREATED,
   ARROW_MESSAGES_DESTROYED,
-  ARROW_BYTES_EXPIRED,
+  TIMESLICE_OFFER_NUMBER_CONSUMED,
+  TIMESLICE_NUMBER_STARTED,
+  TIMESLICE_NUMBER_EXPIRED,
+  TIMESLICE_NUMBER_DONE,
   RESOURCE_OFFER_EXPIRED,
   SHM_OFFER_BYTES_CONSUMED,
   RESOURCES_MISSING,
   RESOURCES_INSUFFICIENT,
   RESOURCES_SATISFACTORY,
+  CCDB_CACHE_HIT,
+  CCDB_CACHE_MISS,
+  CCDB_CACHE_FAILURE,
   AVAILABLE_MANAGED_SHM_BASE = 512,
 };
 
@@ -170,9 +177,11 @@ struct DataProcessingStats {
   };
 
   void registerMetric(MetricSpec const& spec);
+
   // Update some stats as specified by the @cmd cmd
   void updateStats(CommandSpec cmd);
 
+  char const* findMetricNameById(ProcessingStatsId id) const;
   /// This will process the queue of commands required to update the stats.
   /// It is meant to be called periodically by a single thread.
   void processCommandQueue();

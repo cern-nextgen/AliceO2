@@ -17,6 +17,7 @@
 
 #include <oneapi/tbb/blocked_range.h>
 #include <oneapi/tbb/parallel_for.h>
+#include <oneapi/tbb/combinable.h>
 
 #include "ITStracking/VertexerTraits.h"
 #include "ITStracking/BoundedAllocator.h"
@@ -28,9 +29,10 @@
 #include "DetectorsRaw/HBFUtils.h"
 #include "CommonUtils/TreeStreamRedirector.h"
 
-using namespace o2::its;
+namespace o2::its
+{
 
-template <TrackletMode Mode, bool EvalRun>
+template <TrackletMode Mode, bool EvalRun, int nLayers>
 static void trackleterKernelHost(
   const gsl::span<const Cluster>& clustersNextLayer,    // 0 2
   const gsl::span<const Cluster>& clustersCurrentLayer, // 1 1
@@ -39,7 +41,7 @@ static void trackleterKernelHost(
   const float phiCut,
   bounded_vector<Tracklet>& tracklets,
   gsl::span<int> foundTracklets,
-  const IndexTableUtils& utils,
+  const IndexTableUtils<nLayers>& utils,
   const short pivotRof,
   const short targetRof,
   gsl::span<int> rofFoundTrackletsOffsets, // we want to change those, to keep track of the offset in deltaRof>0
@@ -51,7 +53,7 @@ static void trackleterKernelHost(
   for (int iCurrentLayerClusterIndex = 0; iCurrentLayerClusterIndex < clustersCurrentLayer.size(); ++iCurrentLayerClusterIndex) {
     int storedTracklets{0};
     const Cluster& currentCluster{clustersCurrentLayer[iCurrentLayerClusterIndex]};
-    const int4 selectedBinsRect{VertexerTraits::getBinsRect(currentCluster, (int)Mode, 0.f, 50.f, phiCut / 2, utils)};
+    const int4 selectedBinsRect{VertexerTraits<nLayers>::getBinsRect(currentCluster, (int)Mode, 0.f, 50.f, phiCut / 2, utils)};
     if (selectedBinsRect.x != 0 || selectedBinsRect.y != 0 || selectedBinsRect.z != 0 || selectedBinsRect.w != 0) {
       int phiBinsNum{selectedBinsRect.w - selectedBinsRect.y + 1};
       if (phiBinsNum < 0) {
@@ -151,7 +153,8 @@ static void trackletSelectionKernelHost(
   }
 }
 
-void VertexerTraits::updateVertexingParameters(const std::vector<VertexingParameters>& vrtPar, const TimeFrameGPUParameters& tfPar)
+template <int nLayers>
+void VertexerTraits<nLayers>::updateVertexingParameters(const std::vector<VertexingParameters>& vrtPar, const TimeFrameGPUParameters& tfPar)
 {
   mVrtParams = vrtPar;
   mIndexTableUtils.setTrackingParameters(vrtPar[0]);
@@ -162,48 +165,45 @@ void VertexerTraits::updateVertexingParameters(const std::vector<VertexingParame
 }
 
 // Main functions
-void VertexerTraits::computeTracklets(const int iteration)
+template <int nLayers>
+void VertexerTraits<nLayers>::computeTracklets(const int iteration)
 {
   mTaskArena->execute([&] {
-    tbb::parallel_for(
-      tbb::blocked_range<short>(0, (short)mTimeFrame->getNrof()),
-      [&](const tbb::blocked_range<short>& Rofs) {
-        for (short pivotRofId = Rofs.begin(); pivotRofId < Rofs.end(); ++pivotRofId) {
-          bool skipROF = iteration && (int)mTimeFrame->getPrimaryVertices(pivotRofId).size() > mVrtParams[iteration].vertPerRofThreshold;
-          short startROF{std::max((short)0, static_cast<short>(pivotRofId - mVrtParams[iteration].deltaRof))};
-          short endROF{std::min(static_cast<short>(mTimeFrame->getNrof()), static_cast<short>(pivotRofId + mVrtParams[iteration].deltaRof + 1))};
-          for (auto targetRofId = startROF; targetRofId < endROF; ++targetRofId) {
-            trackleterKernelHost<TrackletMode::Layer0Layer1, true>(
-              !skipROF ? mTimeFrame->getClustersOnLayer(targetRofId, 0) : gsl::span<Cluster>(), // Clusters to be matched with the next layer in target rof
-              !skipROF ? mTimeFrame->getClustersOnLayer(pivotRofId, 1) : gsl::span<Cluster>(),  // Clusters to be matched with the current layer in pivot rof
-              mTimeFrame->getUsedClustersROF(targetRofId, 0),                                   // Span of the used clusters in the target rof
-              mTimeFrame->getIndexTable(targetRofId, 0).data(),                                 // Index table to access the data on the next layer in target rof
-              mVrtParams[iteration].phiCut,
-              mTimeFrame->getTracklets()[0],                   // Flat tracklet buffer
-              mTimeFrame->getNTrackletsCluster(pivotRofId, 0), // Span of the number of tracklets per each cluster in pivot rof
-              mIndexTableUtils,
-              pivotRofId,
-              targetRofId,
-              gsl::span<int>(), // Offset in the tracklet buffer
-              mVrtParams[iteration].maxTrackletsPerCluster);
-            trackleterKernelHost<TrackletMode::Layer1Layer2, true>(
-              !skipROF ? mTimeFrame->getClustersOnLayer(targetRofId, 2) : gsl::span<Cluster>(),
-              !skipROF ? mTimeFrame->getClustersOnLayer(pivotRofId, 1) : gsl::span<Cluster>(),
-              mTimeFrame->getUsedClustersROF(targetRofId, 2),
-              mTimeFrame->getIndexTable(targetRofId, 2).data(),
-              mVrtParams[iteration].phiCut,
-              mTimeFrame->getTracklets()[1],
-              mTimeFrame->getNTrackletsCluster(pivotRofId, 1), // Span of the number of tracklets per each cluster in pivot rof
-              mIndexTableUtils,
-              pivotRofId,
-              targetRofId,
-              gsl::span<int>(), // Offset in the tracklet buffer
-              mVrtParams[iteration].maxTrackletsPerCluster);
-          }
-          mTimeFrame->getNTrackletsROF(pivotRofId, 0) = std::accumulate(mTimeFrame->getNTrackletsCluster(pivotRofId, 0).begin(), mTimeFrame->getNTrackletsCluster(pivotRofId, 0).end(), 0);
-          mTimeFrame->getNTrackletsROF(pivotRofId, 1) = std::accumulate(mTimeFrame->getNTrackletsCluster(pivotRofId, 1).begin(), mTimeFrame->getNTrackletsCluster(pivotRofId, 1).end(), 0);
-        }
-      });
+    tbb::parallel_for(0, mTimeFrame->getNrof(), [&](const short pivotRofId) {
+      bool skipROF = iteration && (int)mTimeFrame->getPrimaryVertices(pivotRofId).size() > mVrtParams[iteration].vertPerRofThreshold;
+      short startROF{std::max((short)0, static_cast<short>(pivotRofId - mVrtParams[iteration].deltaRof))};
+      short endROF{std::min(static_cast<short>(mTimeFrame->getNrof()), static_cast<short>(pivotRofId + mVrtParams[iteration].deltaRof + 1))};
+      for (auto targetRofId = startROF; targetRofId < endROF; ++targetRofId) {
+        trackleterKernelHost<TrackletMode::Layer0Layer1, true>(
+          !skipROF ? mTimeFrame->getClustersOnLayer(targetRofId, 0) : gsl::span<Cluster>(), // Clusters to be matched with the next layer in target rof
+          !skipROF ? mTimeFrame->getClustersOnLayer(pivotRofId, 1) : gsl::span<Cluster>(),  // Clusters to be matched with the current layer in pivot rof
+          mTimeFrame->getUsedClustersROF(targetRofId, 0),                                   // Span of the used clusters in the target rof
+          mTimeFrame->getIndexTable(targetRofId, 0).data(),                                 // Index table to access the data on the next layer in target rof
+          mVrtParams[iteration].phiCut,
+          mTimeFrame->getTracklets()[0],                   // Flat tracklet buffer
+          mTimeFrame->getNTrackletsCluster(pivotRofId, 0), // Span of the number of tracklets per each cluster in pivot rof
+          mIndexTableUtils,
+          pivotRofId,
+          targetRofId,
+          gsl::span<int>(), // Offset in the tracklet buffer
+          mVrtParams[iteration].maxTrackletsPerCluster);
+        trackleterKernelHost<TrackletMode::Layer1Layer2, true>(
+          !skipROF ? mTimeFrame->getClustersOnLayer(targetRofId, 2) : gsl::span<Cluster>(),
+          !skipROF ? mTimeFrame->getClustersOnLayer(pivotRofId, 1) : gsl::span<Cluster>(),
+          mTimeFrame->getUsedClustersROF(targetRofId, 2),
+          mTimeFrame->getIndexTable(targetRofId, 2).data(),
+          mVrtParams[iteration].phiCut,
+          mTimeFrame->getTracklets()[1],
+          mTimeFrame->getNTrackletsCluster(pivotRofId, 1), // Span of the number of tracklets per each cluster in pivot rof
+          mIndexTableUtils,
+          pivotRofId,
+          targetRofId,
+          gsl::span<int>(), // Offset in the tracklet buffer
+          mVrtParams[iteration].maxTrackletsPerCluster);
+      }
+      mTimeFrame->getNTrackletsROF(pivotRofId, 0) = std::accumulate(mTimeFrame->getNTrackletsCluster(pivotRofId, 0).begin(), mTimeFrame->getNTrackletsCluster(pivotRofId, 0).end(), 0);
+      mTimeFrame->getNTrackletsROF(pivotRofId, 1) = std::accumulate(mTimeFrame->getNTrackletsCluster(pivotRofId, 1).begin(), mTimeFrame->getNTrackletsCluster(pivotRofId, 1).end(), 0);
+    });
 
     mTimeFrame->computeTrackletsPerROFScans();
     if (auto tot0 = mTimeFrame->getTotalTrackletsTF(0), tot1 = mTimeFrame->getTotalTrackletsTF(1);
@@ -214,45 +214,41 @@ void VertexerTraits::computeTracklets(const int iteration)
       mTimeFrame->getTracklets()[1].resize(tot1);
     }
 
-    tbb::parallel_for(
-      tbb::blocked_range<short>(0, (short)mTimeFrame->getNrof()),
-      [&](const tbb::blocked_range<short>& Rofs) {
-        for (short pivotRofId = Rofs.begin(); pivotRofId < Rofs.end(); ++pivotRofId) {
-          bool skipROF = iteration && (int)mTimeFrame->getPrimaryVertices(pivotRofId).size() > mVrtParams[iteration].vertPerRofThreshold;
-          short startROF{std::max((short)0, static_cast<short>(pivotRofId - mVrtParams[iteration].deltaRof))};
-          short endROF{std::min(static_cast<short>(mTimeFrame->getNrof()), static_cast<short>(pivotRofId + mVrtParams[iteration].deltaRof + 1))};
-          auto mobileOffset0 = mTimeFrame->getNTrackletsROF(pivotRofId, 0);
-          auto mobileOffset1 = mTimeFrame->getNTrackletsROF(pivotRofId, 1);
-          for (auto targetRofId = startROF; targetRofId < endROF; ++targetRofId) {
-            trackleterKernelHost<TrackletMode::Layer0Layer1, false>(
-              !skipROF ? mTimeFrame->getClustersOnLayer(targetRofId, 0) : gsl::span<Cluster>(),
-              !skipROF ? mTimeFrame->getClustersOnLayer(pivotRofId, 1) : gsl::span<Cluster>(),
-              mTimeFrame->getUsedClustersROF(targetRofId, 0),
-              mTimeFrame->getIndexTable(targetRofId, 0).data(),
-              mVrtParams[iteration].phiCut,
-              mTimeFrame->getTracklets()[0],
-              mTimeFrame->getNTrackletsCluster(pivotRofId, 0),
-              mIndexTableUtils,
-              pivotRofId,
-              targetRofId,
-              mTimeFrame->getExclusiveNTrackletsCluster(pivotRofId, 0),
-              mVrtParams[iteration].maxTrackletsPerCluster);
-            trackleterKernelHost<TrackletMode::Layer1Layer2, false>(
-              !skipROF ? mTimeFrame->getClustersOnLayer(targetRofId, 2) : gsl::span<Cluster>(),
-              !skipROF ? mTimeFrame->getClustersOnLayer(pivotRofId, 1) : gsl::span<Cluster>(),
-              mTimeFrame->getUsedClustersROF(targetRofId, 2),
-              mTimeFrame->getIndexTable(targetRofId, 2).data(),
-              mVrtParams[iteration].phiCut,
-              mTimeFrame->getTracklets()[1],
-              mTimeFrame->getNTrackletsCluster(pivotRofId, 1),
-              mIndexTableUtils,
-              pivotRofId,
-              targetRofId,
-              mTimeFrame->getExclusiveNTrackletsCluster(pivotRofId, 1),
-              mVrtParams[iteration].maxTrackletsPerCluster);
-          }
-        }
-      });
+    tbb::parallel_for(0, mTimeFrame->getNrof(), [&](const short pivotRofId) {
+      bool skipROF = iteration && (int)mTimeFrame->getPrimaryVertices(pivotRofId).size() > mVrtParams[iteration].vertPerRofThreshold;
+      short startROF{std::max((short)0, static_cast<short>(pivotRofId - mVrtParams[iteration].deltaRof))};
+      short endROF{std::min(static_cast<short>(mTimeFrame->getNrof()), static_cast<short>(pivotRofId + mVrtParams[iteration].deltaRof + 1))};
+      auto mobileOffset0 = mTimeFrame->getNTrackletsROF(pivotRofId, 0);
+      auto mobileOffset1 = mTimeFrame->getNTrackletsROF(pivotRofId, 1);
+      for (auto targetRofId = startROF; targetRofId < endROF; ++targetRofId) {
+        trackleterKernelHost<TrackletMode::Layer0Layer1, false>(
+          !skipROF ? mTimeFrame->getClustersOnLayer(targetRofId, 0) : gsl::span<Cluster>(),
+          !skipROF ? mTimeFrame->getClustersOnLayer(pivotRofId, 1) : gsl::span<Cluster>(),
+          mTimeFrame->getUsedClustersROF(targetRofId, 0),
+          mTimeFrame->getIndexTable(targetRofId, 0).data(),
+          mVrtParams[iteration].phiCut,
+          mTimeFrame->getTracklets()[0],
+          mTimeFrame->getNTrackletsCluster(pivotRofId, 0),
+          mIndexTableUtils,
+          pivotRofId,
+          targetRofId,
+          mTimeFrame->getExclusiveNTrackletsCluster(pivotRofId, 0),
+          mVrtParams[iteration].maxTrackletsPerCluster);
+        trackleterKernelHost<TrackletMode::Layer1Layer2, false>(
+          !skipROF ? mTimeFrame->getClustersOnLayer(targetRofId, 2) : gsl::span<Cluster>(),
+          !skipROF ? mTimeFrame->getClustersOnLayer(pivotRofId, 1) : gsl::span<Cluster>(),
+          mTimeFrame->getUsedClustersROF(targetRofId, 2),
+          mTimeFrame->getIndexTable(targetRofId, 2).data(),
+          mVrtParams[iteration].phiCut,
+          mTimeFrame->getTracklets()[1],
+          mTimeFrame->getNTrackletsCluster(pivotRofId, 1),
+          mIndexTableUtils,
+          pivotRofId,
+          targetRofId,
+          mTimeFrame->getExclusiveNTrackletsCluster(pivotRofId, 1),
+          mVrtParams[iteration].maxTrackletsPerCluster);
+      }
+    });
   });
 
   /// Create tracklets labels for L0-L1, information is as flat as in tracklets vector (no rofId)
@@ -283,9 +279,11 @@ void VertexerTraits::computeTracklets(const int iteration)
 #endif
 }
 
-void VertexerTraits::computeTrackletMatching(const int iteration)
+template <int nLayers>
+void VertexerTraits<nLayers>::computeTrackletMatching(const int iteration)
 {
   mTaskArena->execute([&] {
+    tbb::combinable<int> totalLines{0};
     tbb::parallel_for(
       tbb::blocked_range<short>(0, (short)mTimeFrame->getNrof()),
       [&](const tbb::blocked_range<short>& Rofs) {
@@ -329,8 +327,10 @@ void VertexerTraits::computeTrackletMatching(const int iteration)
                 mVrtParams[iteration].phiCut);
             }
           }
+          totalLines.local() += mTimeFrame->getLines(pivotRofId).size();
         }
       });
+    mTimeFrame->setNLinesTotal(totalLines.combine(std::plus<int>()));
   });
 
 #ifdef VTX_DEBUG
@@ -341,7 +341,8 @@ void VertexerTraits::computeTrackletMatching(const int iteration)
   deepVectorClear(mTimeFrame->getTracklets()[1]);
 }
 
-void VertexerTraits::computeVertices(const int iteration)
+template <int nLayers>
+void VertexerTraits<nLayers>::computeVertices(const int iteration)
 {
   auto nsigmaCut{std::min(mVrtParams[iteration].vertNsigmaCut * mVrtParams[iteration].vertNsigmaCut * (mVrtParams[iteration].vertRadiusSigma * mVrtParams[iteration].vertRadiusSigma + mVrtParams[iteration].trackletSigma * mVrtParams[iteration].trackletSigma), 1.98f)};
   bounded_vector<Vertex> vertices(mMemoryPool.get());
@@ -497,7 +498,8 @@ void VertexerTraits::computeVertices(const int iteration)
 #endif
 }
 
-void VertexerTraits::addTruthSeedingVertices()
+template <int nLayers>
+void VertexerTraits<nLayers>::addTruthSeedingVertices()
 {
   LOGP(info, "Using truth seeds as vertices; will skip computations");
   mTimeFrame->resetRofPV();
@@ -512,34 +514,35 @@ void VertexerTraits::addTruthSeedingVertices()
     bounded_vector<int> events;
   };
   std::map<int, VertInfo> vertices;
-  for (int iSrc{0}; iSrc < mcReader.getNSources(); ++iSrc) {
-    auto eveId2colId = dc->getCollisionIndicesForSource(iSrc);
-    for (int iEve{0}; iEve < mcReader.getNEvents(iSrc); ++iEve) {
-      const auto& ir = irs[eveId2colId[iEve]];
-      if (!ir.isDummy()) { // do we need this, is this for diffractive events?
-        const auto& eve = mcReader.getMCEventHeader(iSrc, iEve);
-        int rofId = ((ir - raw::HBFUtils::Instance().getFirstSampledTFIR()).toLong() - roFrameBiasInBC) / roFrameLengthInBC;
-        if (!vertices.contains(rofId)) {
-          vertices[rofId] = {
-            .vertices = bounded_vector<Vertex>(mMemoryPool.get()),
-            .srcs = bounded_vector<int>(mMemoryPool.get()),
-            .events = bounded_vector<int>(mMemoryPool.get()),
-          };
-        }
-        Vertex vert;
-        vert.setTimeStamp(rofId);
-        vert.setNContributors(std::ranges::count_if(mcReader.getTracks(iSrc, iEve), [](const auto& trk) {
-          return trk.isPrimary() && trk.GetPt() > 0.2 && std::abs(trk.GetEta()) < 1.3;
-        }));
-        vert.setXYZ((float)eve.GetX(), (float)eve.GetY(), (float)eve.GetZ());
-        vert.setChi2(1);
-        constexpr float cov = 50e-9;
-        vert.setCov(cov, cov, cov, cov, cov, cov);
-        vertices[rofId].vertices.push_back(vert);
-        vertices[rofId].srcs.push_back(iSrc);
-        vertices[rofId].events.push_back(iEve);
+  const int iSrc = 0; // take only events from collision generator
+  auto eveId2colId = dc->getCollisionIndicesForSource(iSrc);
+  for (int iEve{0}; iEve < mcReader.getNEvents(iSrc); ++iEve) {
+    const auto& ir = irs[eveId2colId[iEve]];
+    if (!ir.isDummy()) { // do we need this, is this for diffractive events?
+      const auto& eve = mcReader.getMCEventHeader(iSrc, iEve);
+      int rofId = ((ir - raw::HBFUtils::Instance().getFirstSampledTFIR()).toLong() - roFrameBiasInBC) / roFrameLengthInBC;
+      if (!vertices.contains(rofId)) {
+        vertices[rofId] = {
+          .vertices = bounded_vector<Vertex>(mMemoryPool.get()),
+          .srcs = bounded_vector<int>(mMemoryPool.get()),
+          .events = bounded_vector<int>(mMemoryPool.get()),
+        };
       }
+      Vertex vert;
+      vert.setTimeStamp(rofId);
+      // set minimum to 1 sometimes for diffractive events there is nothing acceptance
+      vert.setNContributors(std::max(1L, std::ranges::count_if(mcReader.getTracks(iSrc, iEve), [](const auto& trk) {
+                                       return trk.isPrimary() && trk.GetPt() > 0.05 && std::abs(trk.GetEta()) < 1.1;
+                                     })));
+      vert.setXYZ((float)eve.GetX(), (float)eve.GetY(), (float)eve.GetZ());
+      vert.setChi2(1); // not used as constraint
+      constexpr float cov = 50e-9;
+      vert.setCov(cov, cov, cov, cov, cov, cov);
+      vertices[rofId].vertices.push_back(vert);
+      vertices[rofId].srcs.push_back(iSrc);
+      vertices[rofId].events.push_back(iEve);
     }
+    mcReader.releaseTracksForSourceAndEvent(iSrc, iEve);
   }
   size_t nVerts{0};
   for (int iROF{0}; iROF < mTimeFrame->getNrof(); ++iROF) {
@@ -562,7 +565,8 @@ void VertexerTraits::addTruthSeedingVertices()
   LOGP(info, "Found {}/{} ROFs with {} vertices -> <NV>={:.2f}", vertices.size(), mTimeFrame->getNrof(), nVerts, (float)nVerts / (float)vertices.size());
 }
 
-void VertexerTraits::setNThreads(int n, std::shared_ptr<tbb::task_arena>& arena)
+template <int nLayers>
+void VertexerTraits<nLayers>::setNThreads(int n, std::shared_ptr<tbb::task_arena>& arena)
 {
 #if defined(VTX_DEBUG)
   LOGP(info, "Vertexer with debug output forcing single thread");
@@ -578,7 +582,8 @@ void VertexerTraits::setNThreads(int n, std::shared_ptr<tbb::task_arena>& arena)
 #endif
 }
 
-void VertexerTraits::debugComputeTracklets(int iteration)
+template <int nLayers>
+void VertexerTraits<nLayers>::debugComputeTracklets(int iteration)
 {
   auto stream = new utils::TreeStreamRedirector("artefacts_tf.root", "recreate");
   LOGP(info, "writing debug output for computeTracklets");
@@ -597,7 +602,8 @@ void VertexerTraits::debugComputeTracklets(int iteration)
   delete stream;
 }
 
-void VertexerTraits::debugComputeTrackletMatching(int iteration)
+template <int nLayers>
+void VertexerTraits<nLayers>::debugComputeTrackletMatching(int iteration)
 {
   auto stream = new utils::TreeStreamRedirector("artefacts_tf.root", "update");
   LOGP(info, "writing debug output for computeTrackletMatching");
@@ -718,7 +724,8 @@ void VertexerTraits::debugComputeTrackletMatching(int iteration)
   delete stream;
 }
 
-void VertexerTraits::debugComputeVertices(int iteration)
+template <int nLayers>
+void VertexerTraits<nLayers>::debugComputeVertices(int iteration)
 {
   auto stream = new utils::TreeStreamRedirector("artefacts_tf.root", "update");
   LOGP(info, "writing debug output for computeVertices");
@@ -831,3 +838,6 @@ void VertexerTraits::debugComputeVertices(int iteration)
   stream->Close();
   delete stream;
 }
+
+template class VertexerTraits<7>;
+} // namespace o2::its

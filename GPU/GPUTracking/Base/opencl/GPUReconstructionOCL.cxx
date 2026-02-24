@@ -266,9 +266,9 @@ int32_t GPUReconstructionOCL::InitDevice_Runtime()
 
     mDeviceName = device_name.c_str();
     mDeviceName += " (OpenCL)";
-    mBlockCount = device_shaders;
+    mMultiprocessorCount = device_shaders;
     mWarpSize = 32;
-    mMaxBackendThreads = std::max<int32_t>(mMaxBackendThreads, deviceMaxWorkGroup * mBlockCount);
+    mMaxBackendThreads = std::max<int32_t>(mMaxBackendThreads, deviceMaxWorkGroup * mMultiprocessorCount);
 
     mInternals->context = clCreateContext(nullptr, 1, &mInternals->device, nullptr, nullptr, &ocl_error);
     if (GPUChkErrI(ocl_error)) {
@@ -378,7 +378,7 @@ int32_t GPUReconstructionOCL::InitDevice_Runtime()
     GPUInfo("OPENCL Initialisation successfull (%d: %s %s (Frequency %d, Shaders %d), %ld / %ld bytes host / global memory, Stack frame %d, Constant memory %ld)", bestDevice, device_vendor, device_name, (int32_t)device_freq, (int32_t)device_shaders, (int64_t)mDeviceMemorySize, (int64_t)mHostMemorySize, -1, (int64_t)gGPUConstantMemBufferSize);
   } else {
     GPUReconstructionOCL* master = dynamic_cast<GPUReconstructionOCL*>(mMaster);
-    mBlockCount = master->mBlockCount;
+    mMultiprocessorCount = master->mMultiprocessorCount;
     mWarpSize = master->mWarpSize;
     mMaxBackendThreads = master->mMaxBackendThreads;
     mDeviceName = master->mDeviceName;
@@ -469,27 +469,6 @@ size_t GPUReconstructionOCL::WriteToConstantMemory(size_t offset, const void* sr
 void GPUReconstructionOCL::ReleaseEvent(deviceEvent ev) { GPUChkErr(clReleaseEvent(ev.get<cl_event>())); }
 
 void GPUReconstructionOCL::RecordMarker(deviceEvent* ev, int32_t stream) { GPUChkErr(clEnqueueMarkerWithWaitList(mInternals->command_queue[stream], 0, nullptr, ev->getEventList<cl_event>())); }
-
-int32_t GPUReconstructionOCL::DoStuckProtection(int32_t stream, deviceEvent event)
-{
-  if (GetProcessingSettings().stuckProtection) {
-    cl_int tmp = 0;
-    for (int32_t i = 0; i <= GetProcessingSettings().stuckProtection / 50; i++) {
-      usleep(50);
-      clGetEventInfo(event.get<cl_event>(), CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof(tmp), &tmp, nullptr);
-      if (tmp == CL_COMPLETE) {
-        break;
-      }
-    }
-    if (tmp != CL_COMPLETE) {
-      mGPUStuck = 1;
-      GPUErrorReturn("GPU Stuck, future processing in this component is disabled, skipping event (GPU Event State %d)", (int32_t)tmp);
-    }
-  } else {
-    clFinish(mInternals->command_queue[stream]);
-  }
-  return 0;
-}
 
 void GPUReconstructionOCL::SynchronizeGPU()
 {

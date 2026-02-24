@@ -54,17 +54,18 @@
 #include "GPUO2Interface.h"
 #include "GPUO2InterfaceUtils.h"
 #include "CalibdEdxContainer.h"
+#include "ORTRootSerializer.h"
 #include "GPUNewCalibValues.h"
 #include "TPCPadGainCalib.h"
 #include "TPCZSLinkMapping.h"
 #include "display/GPUDisplayInterface.h"
 #include "TPCBase/Sector.h"
 #include "TPCBase/Utils.h"
-#include "TPCBase/CDBInterface.h"
+#include "TPCBaseRecSim/CDBInterface.h"
 #include "TPCCalibration/VDriftHelper.h"
 #include "CorrectionMapsHelper.h"
 #include "TPCCalibration/CorrectionMapsLoader.h"
-#include "TPCBase/DeadChannelMapCreator.h"
+#include "TPCBaseRecSim/DeadChannelMapCreator.h"
 #include "SimulationDataFormat/ConstMCTruthContainer.h"
 #include "SimulationDataFormat/MCCompLabel.h"
 #include "Algorithm/Parser.h"
@@ -72,13 +73,14 @@
 #include "DataFormatsTRD/RecoInputContainer.h"
 #include "TRDBase/Geometry.h"
 #include "TRDBase/GeometryFlat.h"
+#include "GPUTRDRecoParam.h"
 #include "ITSBase/GeometryTGeo.h"
 #include "CommonUtils/DebugStreamer.h"
 #include "GPUReconstructionConvert.h"
 #include "DetectorsRaw/RDHUtils.h"
 #include "ITStracking/TrackingInterface.h"
 #include "GPUWorkflowInternal.h"
-#include "TPCCalibration/NeuralNetworkClusterizer.h"
+#include "GPUDataTypesQA.h"
 // #include "Framework/ThreadPool.h"
 
 #include <TStopwatch.h>
@@ -112,8 +114,8 @@ namespace o2::gpu
 
 GPURecoWorkflowSpec::GPURecoWorkflowSpec(GPURecoWorkflowSpec::CompletionPolicyData* policyData, Config const& specconfig, std::vector<int32_t> const& tpcsectors, uint64_t tpcSectorMask, std::shared_ptr<o2::base::GRPGeomRequest>& ggr, std::function<bool(o2::framework::DataProcessingHeader::StartTime)>** gPolicyOrder) : o2::framework::Task(), mPolicyData(policyData), mTPCSectorMask(tpcSectorMask), mTPCSectors(tpcsectors), mSpecConfig(specconfig), mGGR(ggr)
 {
-  if (mSpecConfig.outputCAClusters && !mSpecConfig.caClusterer && !mSpecConfig.decompressTPC) {
-    throw std::runtime_error("inconsistent configuration: cluster output is only possible if CA clusterer is activated");
+  if (mSpecConfig.outputCAClusters && !mSpecConfig.caClusterer && !mSpecConfig.decompressTPC && !mSpecConfig.useFilteredOutputSpecs) {
+    throw std::runtime_error("inconsistent configuration: cluster output is only possible if CA clusterer or CompCluster decompression is activated");
   }
 
   mConfig.reset(new GPUO2InterfaceConfiguration);
@@ -133,50 +135,6 @@ void GPURecoWorkflowSpec::init(InitContext& ic)
 {
   GRPGeomHelper::instance().setRequest(mGGR);
   GPUO2InterfaceConfiguration& config = *mConfig.get();
-  GPUSettingsProcessingNNclusterizer& mNNClusterizerSettings = mConfig->configProcessing.nn;
-
-  if (mNNClusterizerSettings.nnLoadFromCCDB) {
-    LOG(info) << "Loading neural networks from CCDB";
-    o2::tpc::NeuralNetworkClusterizer nnClusterizerFetcher;
-    nnClusterizerFetcher.initCcdbApi(mNNClusterizerSettings.nnCCDBURL);
-    std::map<std::string, std::string> ccdbSettings = {
-      {"nnCCDBURL", mNNClusterizerSettings.nnCCDBURL},
-      {"nnCCDBPath", mNNClusterizerSettings.nnCCDBPath},
-      {"inputDType", mNNClusterizerSettings.nnInferenceInputDType},
-      {"outputDType", mNNClusterizerSettings.nnInferenceOutputDType},
-      {"outputFolder", mNNClusterizerSettings.nnLocalFolder},
-      {"nnCCDBPath", mNNClusterizerSettings.nnCCDBPath},
-      {"nnCCDBWithMomentum", std::to_string(mNNClusterizerSettings.nnCCDBWithMomentum)},
-      {"nnCCDBBeamType", mNNClusterizerSettings.nnCCDBBeamType},
-      {"nnCCDBInteractionRate", std::to_string(mNNClusterizerSettings.nnCCDBInteractionRate)}};
-
-    std::string nnFetchFolder = mNNClusterizerSettings.nnLocalFolder;
-    std::vector<std::string> evalMode = o2::utils::Str::tokenize(mNNClusterizerSettings.nnEvalMode, ':');
-
-    if (evalMode[0] == "c1") {
-      ccdbSettings["nnCCDBLayerType"] = mNNClusterizerSettings.nnCCDBClassificationLayerType;
-      ccdbSettings["nnCCDBEvalType"] = "classification_c1";
-      ccdbSettings["outputFile"] = "net_classification_c1.onnx";
-      nnClusterizerFetcher.loadIndividualFromCCDB(ccdbSettings);
-    } else if (evalMode[0] == "c2") {
-      ccdbSettings["nnCCDBLayerType"] = mNNClusterizerSettings.nnCCDBClassificationLayerType;
-      ccdbSettings["nnCCDBEvalType"] = "classification_c2";
-      ccdbSettings["outputFile"] = "net_classification_c2.onnx";
-      nnClusterizerFetcher.loadIndividualFromCCDB(ccdbSettings);
-    }
-
-    ccdbSettings["nnCCDBLayerType"] = mNNClusterizerSettings.nnCCDBRegressionLayerType;
-    ccdbSettings["nnCCDBEvalType"] = "regression_c1";
-    ccdbSettings["outputFile"] = "net_regression_c1.onnx";
-    nnClusterizerFetcher.loadIndividualFromCCDB(ccdbSettings);
-    if (evalMode[1] == "r2") {
-      ccdbSettings["nnCCDBLayerType"] = mNNClusterizerSettings.nnCCDBRegressionLayerType;
-      ccdbSettings["nnCCDBEvalType"] = "regression_c2";
-      ccdbSettings["outputFile"] = "net_regression_c2.onnx";
-      nnClusterizerFetcher.loadIndividualFromCCDB(ccdbSettings);
-    }
-    LOG(info) << "Neural network loading done!";
-  }
 
   // Create configuration object and fill settings
   mConfig->configGRP.solenoidBzNominalGPU = 0;
@@ -185,6 +143,7 @@ void GPURecoWorkflowSpec::init(InitContext& ic)
   mTFSettings->simStartOrbit = hbfu.getFirstIRofTF(o2::InteractionRecord(0, hbfu.orbitFirstSampled)).orbit;
 
   *mConfParam = mConfig->ReadConfigurableParam();
+
   if (mConfParam->display) {
     mDisplayFrontend.reset(GPUDisplayFrontendInterface::getFrontend(mConfig->configDisplay.displayFrontend.c_str()));
     mConfig->configProcessing.eventDisplay = mDisplayFrontend.get();
@@ -223,55 +182,50 @@ void GPURecoWorkflowSpec::init(InitContext& ic)
     mConfig->configQA.shipToQC = true;
     if (!mConfig->configProcessing.runQA) {
       mConfig->configQA.enableLocalOutput = false;
-      mQATaskMask = (mSpecConfig.processMC ? 15 : 0) | (mConfig->configQA.clusterRejectionHistograms ? 32 : 0);
+      mQATaskMask = (mSpecConfig.processMC ? gpudatatypes::gpuqa::tasksAllMC : gpudatatypes::gpuqa::tasksNone) | (mConfig->configQA.clusterRejectionHistograms ? gpudatatypes::gpuqa::taskClusterCounts : gpudatatypes::gpuqa::tasksNone);
       mConfig->configProcessing.runQA = -mQATaskMask;
     }
   }
-  mConfig->configReconstruction.tpc.nWaysOuter = true;
   mConfig->configInterface.outputToExternalBuffers = true;
-  if (mConfParam->synchronousProcessing) {
-    mConfig->configReconstruction.useMatLUT = false;
-  }
-  if (mConfig->configProcessing.rtc.optSpecialCode == -1) {
-    mConfig->configProcessing.rtc.optSpecialCode = mConfParam->synchronousProcessing;
-  }
+  const bool runTracking = mSpecConfig.outputTracks || mSpecConfig.outputCompClustersRoot || mSpecConfig.outputCompClustersFlat;
 
   // Configure the "GPU workflow" i.e. which steps we run on the GPU (or CPU)
-  if (mSpecConfig.outputTracks || mSpecConfig.outputCompClusters || mSpecConfig.outputCompClustersFlat) {
-    mConfig->configWorkflow.steps.set(GPUDataTypes::RecoStep::TPCConversion,
-                                      GPUDataTypes::RecoStep::TPCSectorTracking,
-                                      GPUDataTypes::RecoStep::TPCMerging);
-    mConfig->configWorkflow.outputs.set(GPUDataTypes::InOutType::TPCMergedTracks);
-    mConfig->configWorkflow.steps.setBits(GPUDataTypes::RecoStep::TPCdEdx, mConfParam->rundEdx == -1 ? !mConfParam->synchronousProcessing : mConfParam->rundEdx);
+  if (runTracking) {
+    mConfig->configWorkflow.steps.set(gpudatatypes::RecoStep::TPCConversion,
+                                      gpudatatypes::RecoStep::TPCSectorTracking,
+                                      gpudatatypes::RecoStep::TPCMerging);
+    mConfig->configWorkflow.outputs.set(gpudatatypes::InOutType::TPCMergedTracks);
   }
-  if (mSpecConfig.outputCompClusters || mSpecConfig.outputCompClustersFlat) {
-    mConfig->configWorkflow.steps.setBits(GPUDataTypes::RecoStep::TPCCompression, true);
-    mConfig->configWorkflow.outputs.setBits(GPUDataTypes::InOutType::TPCCompressedClusters, true);
+  GPUO2Interface::ApplySyncSettings(mConfig->configProcessing, mConfig->configReconstruction, mConfig->configWorkflow.steps, mConfParam->synchronousProcessing, runTracking ? mConfParam->rundEdx : -2);
+
+  if (mSpecConfig.outputCompClustersRoot || mSpecConfig.outputCompClustersFlat) {
+    mConfig->configWorkflow.steps.setBits(gpudatatypes::RecoStep::TPCCompression, true);
+    mConfig->configWorkflow.outputs.setBits(gpudatatypes::InOutType::TPCCompressedClusters, true);
   }
-  mConfig->configWorkflow.inputs.set(GPUDataTypes::InOutType::TPCClusters);
+  mConfig->configWorkflow.inputs.set(gpudatatypes::InOutType::TPCClusters);
   if (mSpecConfig.caClusterer) { // Override some settings if we have raw data as input
-    mConfig->configWorkflow.inputs.set(GPUDataTypes::InOutType::TPCRaw);
-    mConfig->configWorkflow.steps.setBits(GPUDataTypes::RecoStep::TPCClusterFinding, true);
-    mConfig->configWorkflow.outputs.setBits(GPUDataTypes::InOutType::TPCClusters, true);
+    mConfig->configWorkflow.inputs.set(gpudatatypes::InOutType::TPCRaw);
+    mConfig->configWorkflow.steps.setBits(gpudatatypes::RecoStep::TPCClusterFinding, true);
+    mConfig->configWorkflow.outputs.setBits(gpudatatypes::InOutType::TPCClusters, true);
   }
   if (mSpecConfig.decompressTPC) {
-    mConfig->configWorkflow.steps.setBits(GPUDataTypes::RecoStep::TPCCompression, false);
-    mConfig->configWorkflow.steps.setBits(GPUDataTypes::RecoStep::TPCDecompression, true);
-    mConfig->configWorkflow.inputs.set(GPUDataTypes::InOutType::TPCCompressedClusters);
-    mConfig->configWorkflow.outputs.setBits(GPUDataTypes::InOutType::TPCClusters, true);
-    mConfig->configWorkflow.outputs.setBits(GPUDataTypes::InOutType::TPCCompressedClusters, false);
+    mConfig->configWorkflow.steps.setBits(gpudatatypes::RecoStep::TPCCompression, false);
+    mConfig->configWorkflow.steps.setBits(gpudatatypes::RecoStep::TPCDecompression, true);
+    mConfig->configWorkflow.inputs.set(gpudatatypes::InOutType::TPCCompressedClusters);
+    mConfig->configWorkflow.outputs.setBits(gpudatatypes::InOutType::TPCClusters, true);
+    mConfig->configWorkflow.outputs.setBits(gpudatatypes::InOutType::TPCCompressedClusters, false);
     if (mTPCSectorMask != 0xFFFFFFFFF) {
       throw std::invalid_argument("Cannot run TPC decompression with a sector mask");
     }
   }
   if (mSpecConfig.runTRDTracking) {
-    mConfig->configWorkflow.inputs.setBits(GPUDataTypes::InOutType::TRDTracklets, true);
-    mConfig->configWorkflow.steps.setBits(GPUDataTypes::RecoStep::TRDTracking, true);
+    mConfig->configWorkflow.inputs.setBits(gpudatatypes::InOutType::TRDTracklets, true);
+    mConfig->configWorkflow.steps.setBits(gpudatatypes::RecoStep::TRDTracking, true);
   }
   if (mSpecConfig.runITSTracking) {
-    mConfig->configWorkflow.inputs.setBits(GPUDataTypes::InOutType::ITSClusters, true);
-    mConfig->configWorkflow.outputs.setBits(GPUDataTypes::InOutType::ITSTracks, true);
-    mConfig->configWorkflow.steps.setBits(GPUDataTypes::RecoStep::ITSTracking, true);
+    mConfig->configWorkflow.inputs.setBits(gpudatatypes::InOutType::ITSClusters, true);
+    mConfig->configWorkflow.outputs.setBits(gpudatatypes::InOutType::ITSTracks, true);
+    mConfig->configWorkflow.steps.setBits(gpudatatypes::RecoStep::ITSTracking, true);
   }
   if (mSpecConfig.outputSharedClusterMap) {
     mConfig->configProcessing.outputSharedClusterMap = true;
@@ -320,6 +274,9 @@ void GPURecoWorkflowSpec::init(InitContext& ic)
     if (mSpecConfig.readTRDtracklets) {
       mTRDGeometry = std::make_unique<o2::trd::GeometryFlat>();
       mConfig->configCalib.trdGeometry = mTRDGeometry.get();
+
+      mTRDRecoParam = std::make_unique<GPUTRDRecoParam>();
+      mConfig->configCalib.trdRecoParam = mTRDRecoParam.get();
     }
 
     mConfig->configProcessing.willProvideO2PropagatorLate = true;
@@ -613,11 +570,13 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
   auto lockDecodeInput = std::make_unique<std::lock_guard<std::mutex>>(mPipeline->mutexDecodeInput);
 
   GRPGeomHelper::instance().checkUpdates(pc);
-  if (pc.inputs().getPos("itsTGeo") >= 0) {
-    pc.inputs().get<o2::its::GeometryTGeo*>("itsTGeo");
-  }
-  if (GRPGeomHelper::instance().getGRPECS()->isDetReadOut(o2::detectors::DetID::TPC) && mConfParam->tpcTriggeredMode ^ !GRPGeomHelper::instance().getGRPECS()->isDetContinuousReadOut(o2::detectors::DetID::TPC)) {
-    LOG(fatal) << "configKeyValue tpcTriggeredMode does not match GRP isDetContinuousReadOut(TPC) setting";
+  if (mSpecConfig.enableDoublePipeline != 2) {
+    if (mSpecConfig.runITSTracking && pc.inputs().getPos("itsTGeo") >= 0) {
+      pc.inputs().get<o2::its::GeometryTGeo*>("itsTGeo");
+    }
+    if (GRPGeomHelper::instance().getGRPECS()->isDetReadOut(o2::detectors::DetID::TPC) && mConfParam->tpcTriggeredMode ^ !GRPGeomHelper::instance().getGRPECS()->isDetContinuousReadOut(o2::detectors::DetID::TPC)) {
+      LOG(fatal) << "configKeyValue tpcTriggeredMode does not match GRP isDetContinuousReadOut(TPC) setting";
+    }
   }
 
   GPUTrackingInOutPointers ptrs;
@@ -630,23 +589,25 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
   mTFSettings->hasNHBFPerTF = 1;
   mTFSettings->nHBFPerTF = mConfParam->overrideNHbfPerTF ? mConfParam->overrideNHbfPerTF : GRPGeomHelper::instance().getGRPECS()->getNHBFPerTF();
   mTFSettings->hasRunStartOrbit = 0;
-  if (mVerbosity) {
-    LOG(info) << "TF firstTForbit " << mTFSettings->tfStartOrbit << " nHBF " << mTFSettings->nHBFPerTF << " runStartOrbit " << mTFSettings->runStartOrbit << " simStartOrbit " << mTFSettings->simStartOrbit;
-  }
   ptrs.settingsTF = mTFSettings.get();
 
-  if (mConfParam->checkFirstTfOrbit) {
-    static uint32_t lastFirstTFOrbit = -1;
-    static uint32_t lastTFCounter = -1;
-    if (lastFirstTFOrbit != -1 && lastTFCounter != -1) {
-      int32_t diffOrbit = tinfo.firstTForbit - lastFirstTFOrbit;
-      int32_t diffCounter = tinfo.tfCounter - lastTFCounter;
-      if (diffOrbit != diffCounter * mTFSettings->nHBFPerTF) {
-        LOG(error) << "Time frame has mismatching firstTfOrbit - Last orbit/counter: " << lastFirstTFOrbit << " " << lastTFCounter << " - Current: " << tinfo.firstTForbit << " " << tinfo.tfCounter;
-      }
+  if (mSpecConfig.enableDoublePipeline != 2) {
+    if (mVerbosity) {
+      LOG(info) << "TF firstTForbit " << mTFSettings->tfStartOrbit << " nHBF " << mTFSettings->nHBFPerTF << " runStartOrbit " << mTFSettings->runStartOrbit << " simStartOrbit " << mTFSettings->simStartOrbit;
     }
-    lastFirstTFOrbit = tinfo.firstTForbit;
-    lastTFCounter = tinfo.tfCounter;
+    if (mConfParam->checkFirstTfOrbit) {
+      static uint32_t lastFirstTFOrbit = -1;
+      static uint32_t lastTFCounter = -1;
+      if (lastFirstTFOrbit != -1 && lastTFCounter != -1) {
+        int32_t diffOrbit = tinfo.firstTForbit - lastFirstTFOrbit;
+        int32_t diffCounter = tinfo.tfCounter - lastTFCounter;
+        if (diffOrbit != diffCounter * mTFSettings->nHBFPerTF) {
+          LOG(error) << "Time frame has mismatching firstTfOrbit - Last orbit/counter: " << lastFirstTFOrbit << " " << lastTFCounter << " - Current: " << tinfo.firstTForbit << " " << tinfo.tfCounter;
+        }
+      }
+      lastFirstTFOrbit = tinfo.firstTForbit;
+      lastTFCounter = tinfo.tfCounter;
+    }
   }
 
   o2::globaltracking::RecoContainer inputTracksTRD;
@@ -797,15 +758,15 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
   };
 
   setOutputAllocator("COMPCLUSTERSFLAT", mSpecConfig.outputCompClustersFlat, outputRegions.compressedClusters, std::make_tuple(gDataOriginTPC, (DataDescription) "COMPCLUSTERSFLAT", 0));
-  setOutputAllocator("CLUSTERNATIVE", mClusterOutputIds.size() > 0, outputRegions.clustersNative, std::make_tuple(gDataOriginTPC, mSpecConfig.sendClustersPerSector ? (DataDescription) "CLUSTERNATIVETMP" : (DataDescription) "CLUSTERNATIVE", NSectors, clusterOutputSectorHeader), sizeof(o2::tpc::ClusterCountIndex));
+  setOutputAllocator("CLUSTERNATIVE", mClusterOutputIds.size() > 0, outputRegions.clustersNative, std::make_tuple(gDataOriginTPC, mSpecConfig.sendClustersPerSector ? (DataDescription) "CLUSTERNATIVETMP" : (mSpecConfig.useFilteredOutputSpecs ? (DataDescription) "CLUSTERNATIVEF" : (DataDescription) "CLUSTERNATIVE"), NSectors, clusterOutputSectorHeader), sizeof(o2::tpc::ClusterCountIndex));
   setOutputAllocator("CLSHAREDMAP", mSpecConfig.outputSharedClusterMap, outputRegions.sharedClusterMap, std::make_tuple(gDataOriginTPC, (DataDescription) "CLSHAREDMAP", 0));
   setOutputAllocator("TPCOCCUPANCYMAP", mSpecConfig.outputSharedClusterMap, outputRegions.tpcOccupancyMap, std::make_tuple(gDataOriginTPC, (DataDescription) "TPCOCCUPANCYMAP", 0));
-  setOutputAllocator("TRACKS", mSpecConfig.outputTracks, outputRegions.tpcTracksO2, std::make_tuple(gDataOriginTPC, (DataDescription) "TRACKS", 0));
-  setOutputAllocator("CLUSREFS", mSpecConfig.outputTracks, outputRegions.tpcTracksO2ClusRefs, std::make_tuple(gDataOriginTPC, (DataDescription) "CLUSREFS", 0));
-  setOutputAllocator("TRACKSMCLBL", mSpecConfig.outputTracks && mSpecConfig.processMC, outputRegions.tpcTracksO2Labels, std::make_tuple(gDataOriginTPC, (DataDescription) "TRACKSMCLBL", 0));
+  setOutputAllocator("TRACKS", mSpecConfig.outputTracks, outputRegions.tpcTracksO2, std::make_tuple(gDataOriginTPC, mSpecConfig.useFilteredOutputSpecs ? (DataDescription) "TRACKSF" : (DataDescription) "TRACKS", 0));
+  setOutputAllocator("CLUSREFS", mSpecConfig.outputTracks, outputRegions.tpcTracksO2ClusRefs, std::make_tuple(gDataOriginTPC, mSpecConfig.useFilteredOutputSpecs ? (DataDescription) "CLUSREFSF" : (DataDescription) "CLUSREFS", 0));
+  setOutputAllocator("TRACKSMCLBL", mSpecConfig.outputTracks && mSpecConfig.processMC, outputRegions.tpcTracksO2Labels, std::make_tuple(gDataOriginTPC, mSpecConfig.useFilteredOutputSpecs ? (DataDescription) "TRACKSMCLBLF" : (DataDescription) "TRACKSMCLBL", 0));
   setOutputAllocator("TRIGGERWORDS", mSpecConfig.caClusterer && mConfig->configProcessing.param.tpcTriggerHandling, outputRegions.tpcTriggerWords, std::make_tuple(gDataOriginTPC, (DataDescription) "TRIGGERWORDS", 0));
   o2::tpc::ClusterNativeHelper::ConstMCLabelContainerViewWithBuffer clustersMCBuffer;
-  if (mSpecConfig.processMC && mSpecConfig.caClusterer) {
+  if (mSpecConfig.processMC && (mSpecConfig.caClusterer || mSpecConfig.useFilteredOutputSpecs)) {
     outputRegions.clusterLabels.allocator = [&clustersMCBuffer](size_t size) -> void* { return &clustersMCBuffer; };
   }
 
@@ -822,11 +783,31 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
 
   lockDecodeInput.reset();
 
+  uint32_t threadIndex;
   if (mConfParam->dump) {
-    if (mNTFs == 1) {
-      mGPUReco->DumpSettings();
+    if (mSpecConfig.enableDoublePipeline && pipelineContext->jobSubmitted) {
+      while (pipelineContext->jobThreadIndex == -1) {
+      }
+      threadIndex = pipelineContext->jobThreadIndex;
+    } else {
+      threadIndex = 0; // TODO: Not sure if this is safe, but it is not yet known which threadIndex will pick up the enqueued job
     }
-    mGPUReco->DumpEvent(mNTFs - 1, &ptrs);
+
+    std::string dir = "";
+    if (mConfParam->dumpFolder != "") {
+      dir = std::regex_replace(mConfParam->dumpFolder, std::regex("\\[P\\]"), std::to_string(getpid()));
+      if (mNTFs == 1) {
+        mkdir(dir.c_str(), S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+      }
+      dir += "/";
+    }
+    if (mNTFs == 1) { // Must dump with first TF, since will enforce enqueued calib updates
+      mGPUReco->DumpSettings(threadIndex, dir.c_str());
+    }
+    if (tinfo.tfCounter >= mConfParam->dumpFirst && (mConfParam->dumpLast == -1 || tinfo.tfCounter <= mConfParam->dumpLast)) {
+      mGPUReco->DumpEvent(mNTFDumps, &ptrs, threadIndex, dir.c_str());
+      mNTFDumps++;
+    }
   }
   std::unique_ptr<GPUTrackingInOutPointers> ptrsDump;
   if (mConfParam->dumpBadTFMode == 2) {
@@ -844,9 +825,10 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
     std::unique_lock lk(pipelineContext->jobFinishedMutex);
     pipelineContext->jobFinishedNotify.wait(lk, [context = pipelineContext.get()]() { return context->jobFinished; });
     retVal = pipelineContext->jobReturnValue;
+    threadIndex = pipelineContext->jobThreadIndex;
   } else {
     // uint32_t threadIndex = pc.services().get<ThreadPool>().threadIndex;
-    uint32_t threadIndex = mNextThreadIndex;
+    threadIndex = mNextThreadIndex;
     if (mConfig->configProcessing.doublePipeline) {
       mNextThreadIndex = (mNextThreadIndex + 1) % 2;
     }
@@ -876,7 +858,7 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
       }
       fclose(fp);
     } else if (mConfParam->dumpBadTFMode == 2) {
-      mGPUReco->DumpEvent(mNDebugDumps - 1, ptrsDump.get());
+      mGPUReco->DumpEvent(mNDebugDumps - 1, ptrsDump.get(), threadIndex);
     }
   }
 
@@ -886,6 +868,9 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
 
   // ------------------------------ Varios postprocessing steps ------------------------------
 
+  if (mConfig->configProcessing.tpcWriteClustersAfterRejection) {
+    ptrs.clustersNative = ptrs.clustersNativeReduced;
+  }
   bool createEmptyOutput = false;
   if (retVal != 0) {
     if (retVal == 3 && mConfig->configProcessing.ignoreNonFatalGPUErrors) {
@@ -896,7 +881,7 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
       }
       createEmptyOutput = !mConfParam->partialOutputForNonFatalErrors;
     } else {
-      throw std::runtime_error("GPU Reconstruction error: error code " + std::to_string(retVal));
+      LOG(fatal) << "GPU Reconstruction aborted with error code " << retVal << " - errors are not ignored - terminating";
     }
   }
 
@@ -956,11 +941,11 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
     }
   }
 
-  if (mConfig->configWorkflow.outputs.isSet(GPUDataTypes::InOutType::TPCMergedTracks)) {
+  if (mConfig->configWorkflow.outputs.isSet(gpudatatypes::InOutType::TPCMergedTracks)) {
     LOG(info) << "found " << ptrs.nOutputTracksTPCO2 << " track(s)";
   }
 
-  if (mSpecConfig.outputCompClusters) {
+  if (mSpecConfig.outputCompClustersRoot) {
     o2::tpc::CompressedClustersROOT compressedClusters = *ptrs.tpcCompressedClusters;
     pc.outputs().snapshot(Output{gDataOriginTPC, "COMPCLUSTERS", 0}, ROOTSerialized<o2::tpc::CompressedClustersROOT const>(compressedClusters));
   }
@@ -973,7 +958,7 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
         if (mTPCSectorMask & (1ul << i)) {
           DataHeader::SubSpecificationType subspec = i;
           clusterOutputSectorHeader.sectorBits = (1ul << i);
-          char* buffer = pc.outputs().make<char>({gDataOriginTPC, "CLUSTERNATIVE", subspec, {clusterOutputSectorHeader}}, accessIndex.nClustersSector[i] * sizeof(*accessIndex.clustersLinear) + sizeof(o2::tpc::ClusterCountIndex)).data();
+          char* buffer = pc.outputs().make<char>({gDataOriginTPC, mSpecConfig.useFilteredOutputSpecs ? (DataDescription) "CLUSTERNATIVEF" : (DataDescription) "CLUSTERNATIVE", subspec, {clusterOutputSectorHeader}}, accessIndex.nClustersSector[i] * sizeof(*accessIndex.clustersLinear) + sizeof(o2::tpc::ClusterCountIndex)).data();
           o2::tpc::ClusterCountIndex* outIndex = reinterpret_cast<o2::tpc::ClusterCountIndex*>(buffer);
           memset(outIndex, 0, sizeof(*outIndex));
           for (int32_t j = 0; j < o2::tpc::constants::MAXGLOBALPADROW; j++) {
@@ -990,7 +975,7 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
             }
             ConstMCLabelContainer contflat;
             cont.flatten_to(contflat);
-            pc.outputs().snapshot({gDataOriginTPC, "CLNATIVEMCLBL", subspec, {clusterOutputSectorHeader}}, contflat);
+            pc.outputs().snapshot({gDataOriginTPC, mSpecConfig.useFilteredOutputSpecs ? DataDescription("CLNATIVEMCLBLF") : DataDescription("CLNATIVEMCLBL"), subspec, {clusterOutputSectorHeader}}, contflat);
           }
         }
       }
@@ -1000,8 +985,8 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
       o2::tpc::ClusterCountIndex* outIndex = reinterpret_cast<o2::tpc::ClusterCountIndex*>(outputBuffers[outputRegions.getIndex(outputRegions.clustersNative)].second);
       static_assert(sizeof(o2::tpc::ClusterCountIndex) == sizeof(accessIndex.nClusters));
       memcpy(outIndex, &accessIndex.nClusters[0][0], sizeof(o2::tpc::ClusterCountIndex));
-      if (mSpecConfig.processMC && mSpecConfig.caClusterer && accessIndex.clustersMCTruth) {
-        pc.outputs().snapshot({gDataOriginTPC, "CLNATIVEMCLBL", subspec, {clusterOutputSectorHeader}}, clustersMCBuffer.first);
+      if (mSpecConfig.processMC && (mSpecConfig.caClusterer || mSpecConfig.useFilteredOutputSpecs) && accessIndex.clustersMCTruth) {
+        pc.outputs().snapshot({gDataOriginTPC, mSpecConfig.useFilteredOutputSpecs ? DataDescription("CLNATIVEMCLBLF") : DataDescription("CLNATIVEMCLBL"), subspec, {clusterOutputSectorHeader}}, clustersMCBuffer.first);
       }
     }
   }
@@ -1045,7 +1030,7 @@ void GPURecoWorkflowSpec::doCalibUpdates(o2::framework::ProcessingContext& pc, c
     mGRPGeomUpdated = false;
     needCalibUpdate = true;
 
-    if (!mITSGeometryCreated) {
+    if (mSpecConfig.runITSTracking && !mITSGeometryCreated) {
       o2::its::GeometryTGeo* geom = o2::its::GeometryTGeo::Instance();
       geom->fillMatrixCache(o2::math_utils::bit2Mask(o2::math_utils::TransformType::T2L, o2::math_utils::TransformType::T2GRot, o2::math_utils::TransformType::T2G));
       mITSGeometryCreated = true;
@@ -1078,16 +1063,21 @@ void GPURecoWorkflowSpec::doCalibUpdates(o2::framework::ProcessingContext& pc, c
       }
       mMatLUTCreated = true;
     }
-    if (!mTRDGeometryCreated) {
-      if (mSpecConfig.readTRDtracklets) {
+    if (mSpecConfig.readTRDtracklets) {
+      if (!mTRDGeometryCreated) {
         auto gm = o2::trd::Geometry::instance();
         gm->createPadPlaneArray();
         gm->createClusterMatrixArray();
         mTRDGeometry = std::make_unique<o2::trd::GeometryFlat>(*gm);
         newCalibObjects.trdGeometry = mConfig->configCalib.trdGeometry = mTRDGeometry.get();
         LOG(info) << "Loaded TRD geometry";
+        mTRDGeometryCreated = true;
       }
-      mTRDGeometryCreated = true;
+      if (!mTRDRecoParamCreated) {
+        mTRDRecoParam = std::make_unique<GPUTRDRecoParam>();
+        newCalibObjects.trdRecoParam = mConfig->configCalib.trdRecoParam = mTRDRecoParam.get();
+        mTRDRecoParamCreated = true;
+      }
     }
   }
   needCalibUpdate = fetchCalibsCCDBTPC(pc, newCalibObjects, oldCalibObjects) || needCalibUpdate;
@@ -1098,6 +1088,27 @@ void GPURecoWorkflowSpec::doCalibUpdates(o2::framework::ProcessingContext& pc, c
     newCalibValues.newTPCTimeBinCut = true;
     newCalibValues.tpcTimeBinCut = mConfig->configGRP.tpcCutTimeBin = mTPCCutAtTimeBin;
     needCalibUpdate = true;
+  }
+  if (mSpecConfig.nnLoadFromCCDB) {
+    auto dumpToFile = [](const char* buffer, std::size_t validSize, const std::string& path) {
+      std::ofstream out(path, std::ios::binary | std::ios::trunc);
+      if (!out.is_open()) {
+        throw std::runtime_error("Failed to open output file: " + path);
+      }
+
+      out.write(buffer, static_cast<std::streamsize>(validSize));
+      if (!out) {
+        throw std::runtime_error("Failed while writing data to: " + path);
+      }
+    };
+    for (int i = 0; i < 3; i++) {
+      newCalibObjects.nnClusterizerNetworks[i] = mConfig->configCalib.nnClusterizerNetworks[i];
+      if (mSpecConfig.nnDumpToFile && newCalibObjects.nnClusterizerNetworks[i]) {
+        std::string path = "tpc_nn_clusterizer_" + std::to_string(i) + ".onnx";
+        dumpToFile(newCalibObjects.nnClusterizerNetworks[i]->getONNXModel(), newCalibObjects.nnClusterizerNetworks[i]->getONNXModelSize(), path);
+        LOG(info) << "Dumped TPC clusterizer NN " << i << " to file " << path;
+      }
+    }
   }
   if (needCalibUpdate) {
     LOG(info) << "Updating GPUReconstruction calibration objects";
@@ -1144,12 +1155,12 @@ Inputs GPURecoWorkflowSpec::inputs()
   } else if (mSpecConfig.enableDoublePipeline == 1) {
     inputs.emplace_back("pipelineprepare", gDataOriginGPU, "PIPELINEPREPARE", 0, Lifetime::Timeframe);
   }
-  if (mSpecConfig.outputTracks || mSpecConfig.caClusterer) {
+  if (mSpecConfig.enableDoublePipeline != 2 && (mSpecConfig.outputTracks || mSpecConfig.caClusterer)) {
     // calibration objects for TPC clusterization
     inputs.emplace_back("tpcgain", gDataOriginTPC, "PADGAINFULL", 0, Lifetime::Condition, ccdbParamSpec(o2::tpc::CDBTypeMap.at(o2::tpc::CDBType::CalPadGainFull)));
     inputs.emplace_back("tpcaltrosync", gDataOriginTPC, "ALTROSYNCSIGNAL", 0, Lifetime::Condition, ccdbParamSpec(o2::tpc::CDBTypeMap.at(o2::tpc::CDBType::AltroSyncSignal)));
   }
-  if (mSpecConfig.outputTracks) {
+  if (mSpecConfig.enableDoublePipeline != 2 && mSpecConfig.outputTracks) {
     // calibration objects for TPC tracking
     const auto mapSources = mSpecConfig.tpcDeadMapSources;
     if (mapSources != 0) {
@@ -1219,19 +1230,82 @@ Inputs GPURecoWorkflowSpec::inputs()
     } else if (mSpecConfig.itsTriggerType == 2) {
       inputs.emplace_back("phystrig", "TRD", "TRKTRGRD", 0, Lifetime::Timeframe);
     }
-    if (mSpecConfig.isITS3) {
-      inputs.emplace_back("cldict", "IT3", "CLUSDICT", 0, Lifetime::Condition, ccdbParamSpec("IT3/Calib/ClusterDictionary"));
-      inputs.emplace_back("alppar", "ITS", "ALPIDEPARAM", 0, Lifetime::Condition, ccdbParamSpec("ITS/Config/AlpideParam"));
-    } else {
-      inputs.emplace_back("itscldict", "ITS", "CLUSDICT", 0, Lifetime::Condition, ccdbParamSpec("ITS/Calib/ClusterDictionary"));
-      inputs.emplace_back("itsalppar", "ITS", "ALPIDEPARAM", 0, Lifetime::Condition, ccdbParamSpec("ITS/Config/AlpideParam"));
-    }
-    if (mSpecConfig.itsOverrBeamEst) {
-      inputs.emplace_back("meanvtx", "GLO", "MEANVERTEX", 0, Lifetime::Condition, ccdbParamSpec("GLO/Calib/MeanVertex", {}, 1));
+    if (mSpecConfig.enableDoublePipeline != 2) {
+      if (mSpecConfig.isITS3) {
+        inputs.emplace_back("cldict", "IT3", "CLUSDICT", 0, Lifetime::Condition, ccdbParamSpec("IT3/Calib/ClusterDictionary"));
+        inputs.emplace_back("alppar", "ITS", "ALPIDEPARAM", 0, Lifetime::Condition, ccdbParamSpec("ITS/Config/AlpideParam"));
+      } else {
+        inputs.emplace_back("itscldict", "ITS", "CLUSDICT", 0, Lifetime::Condition, ccdbParamSpec("ITS/Calib/ClusterDictionary"));
+        inputs.emplace_back("itsalppar", "ITS", "ALPIDEPARAM", 0, Lifetime::Condition, ccdbParamSpec("ITS/Config/AlpideParam"));
+      }
+      if (mSpecConfig.itsOverrBeamEst) {
+        inputs.emplace_back("meanvtx", "GLO", "MEANVERTEX", 0, Lifetime::Condition, ccdbParamSpec("GLO/Calib/MeanVertex", {}, 1));
+      }
     }
     if (mSpecConfig.processMC) {
       inputs.emplace_back("itsmclabels", "ITS", "CLUSTERSMCTR", 0, Lifetime::Timeframe);
       inputs.emplace_back("ITSMC2ROframes", "ITS", "CLUSTERSMC2ROF", 0, Lifetime::Timeframe);
+    }
+  }
+
+  // NN clusterizer
+  *mConfParam = mConfig->ReadConfigurableParam();
+  if (mConfig->configProcessing.nn.nnLoadFromCCDB) {
+
+    LOG(info) << "(NN CLUS) Enabling fetching of TPC NN clusterizer from CCDB";
+    mSpecConfig.nnLoadFromCCDB = true;
+    mSpecConfig.nnDumpToFile = mConfig->configProcessing.nn.nnCCDBDumpToFile;
+    GPUSettingsProcessingNNclusterizer& nnClusterizerSettings = mConfig->configProcessing.nn;
+
+    std::map<std::string, std::string> metadata;
+    metadata["inputDType"] = nnClusterizerSettings.nnInferenceInputDType;              // FP16 or FP32
+    metadata["outputDType"] = nnClusterizerSettings.nnInferenceOutputDType;            // FP16 or FP32
+    metadata["nnCCDBWithMomentum"] = nnClusterizerSettings.nnCCDBWithMomentum;         // 0, 1 -> Only for regression model
+    metadata["nnCCDBLayerType"] = nnClusterizerSettings.nnCCDBClassificationLayerType; // FC, CNN
+    metadata["nnCCDBInteractionRate"] = nnClusterizerSettings.nnCCDBInteractionRate;   // in kHz
+    metadata["nnCCDBBeamType"] = nnClusterizerSettings.nnCCDBBeamType;                 // pp, pPb, PbPb
+
+    auto convert_map_to_metadata = [](const std::map<std::string, std::string>& inputMap, std::vector<o2::framework::CCDBMetadata>& outputMetadata) {
+      for (const auto& [key, value] : inputMap) {
+        if (value != "") {
+          outputMetadata.push_back({key, value});
+        }
+      }
+    };
+
+    mSpecConfig.nnEvalMode = o2::utils::Str::tokenize(nnClusterizerSettings.nnEvalMode, ':');
+    std::vector<o2::framework::CCDBMetadata> ccdb_metadata;
+
+    if (mConfParam->printSettings) {
+      auto printSettings = [](const std::map<std::string, std::string>& settings) {
+        LOG(info) << "(NN CLUS) NN Clusterizer CCDB settings:";
+        for (const auto& [key, value] : settings) {
+          LOG(info) << "  " << key << " : " << value;
+        }
+      };
+      printSettings(metadata);
+    }
+
+    if (mSpecConfig.nnEvalMode[0] == "c1") {
+      metadata["nnCCDBEvalType"] = "classification_c1";
+      convert_map_to_metadata(metadata, ccdb_metadata);
+      inputs.emplace_back("nn_classification_c1", gDataOriginTPC, "NNCLUSTERIZER_C1", 0, Lifetime::Condition, ccdbParamSpec(nnClusterizerSettings.nnCCDBPath + "/" + metadata["nnCCDBEvalType"], ccdb_metadata, 0));
+    } else if (mSpecConfig.nnEvalMode[0] == "c2") {
+      metadata["nnCCDBLayerType"] = nnClusterizerSettings.nnCCDBRegressionLayerType;
+      metadata["nnCCDBEvalType"] = "classification_c2";
+      convert_map_to_metadata(metadata, ccdb_metadata);
+      inputs.emplace_back("nn_classification_c2", gDataOriginTPC, "NNCLUSTERIZER_C2", 0, Lifetime::Condition, ccdbParamSpec(nnClusterizerSettings.nnCCDBPath + "/" + metadata["nnCCDBEvalType"], ccdb_metadata, 0));
+    }
+
+    metadata["nnCCDBEvalType"] = "regression_c1";
+    metadata["nnCCDBLayerType"] = nnClusterizerSettings.nnCCDBRegressionLayerType;
+    convert_map_to_metadata(metadata, ccdb_metadata);
+    inputs.emplace_back("nn_regression_c1", gDataOriginTPC, "NNCLUSTERIZER_R1", 0, Lifetime::Condition, ccdbParamSpec(nnClusterizerSettings.nnCCDBPath + "/" + metadata["nnCCDBEvalType"], ccdb_metadata, 0));
+
+    if (mSpecConfig.nnEvalMode[1] == "r2") {
+      metadata["nnCCDBEvalType"] = "regression_c2";
+      convert_map_to_metadata(metadata, ccdb_metadata);
+      inputs.emplace_back("nn_regression_c2", gDataOriginTPC, "NNCLUSTERIZER_R2", 0, Lifetime::Condition, ccdbParamSpec(nnClusterizerSettings.nnCCDBPath + "/" + metadata["nnCCDBEvalType"], ccdb_metadata, 0));
     }
   }
 
@@ -1247,13 +1321,13 @@ Outputs GPURecoWorkflowSpec::outputs()
     return outputSpecs;
   }
   if (mSpecConfig.outputTracks) {
-    outputSpecs.emplace_back(gDataOriginTPC, "TRACKS", 0, Lifetime::Timeframe);
-    outputSpecs.emplace_back(gDataOriginTPC, "CLUSREFS", 0, Lifetime::Timeframe);
+    outputSpecs.emplace_back(gDataOriginTPC, mSpecConfig.useFilteredOutputSpecs ? (DataDescription) "TRACKSF" : (DataDescription) "TRACKS", 0, Lifetime::Timeframe);
+    outputSpecs.emplace_back(gDataOriginTPC, mSpecConfig.useFilteredOutputSpecs ? (DataDescription) "CLUSREFSF" : (DataDescription) "CLUSREFS", 0, Lifetime::Timeframe);
   }
   if (mSpecConfig.processMC && mSpecConfig.outputTracks) {
-    outputSpecs.emplace_back(gDataOriginTPC, "TRACKSMCLBL", 0, Lifetime::Timeframe);
+    outputSpecs.emplace_back(gDataOriginTPC, mSpecConfig.useFilteredOutputSpecs ? (DataDescription) "TRACKSMCLBLF" : (DataDescription) "TRACKSMCLBL", 0, Lifetime::Timeframe);
   }
-  if (mSpecConfig.outputCompClusters) {
+  if (mSpecConfig.outputCompClustersRoot) {
     outputSpecs.emplace_back(gDataOriginTPC, "COMPCLUSTERS", 0, Lifetime::Timeframe);
   }
   if (mSpecConfig.outputCompClustersFlat) {
@@ -1266,18 +1340,18 @@ Outputs GPURecoWorkflowSpec::outputs()
     if (mSpecConfig.sendClustersPerSector) {
       outputSpecs.emplace_back(gDataOriginTPC, "CLUSTERNATIVETMP", NSectors, Lifetime::Timeframe); // Dummy buffer the TPC tracker writes the inital linear clusters to
       for (const auto sector : mTPCSectors) {
-        outputSpecs.emplace_back(gDataOriginTPC, "CLUSTERNATIVE", sector, Lifetime::Timeframe);
+        outputSpecs.emplace_back(gDataOriginTPC, mSpecConfig.useFilteredOutputSpecs ? (DataDescription) "CLUSTERNATIVEF" : (DataDescription) "CLUSTERNATIVE", sector, Lifetime::Timeframe);
       }
     } else {
-      outputSpecs.emplace_back(gDataOriginTPC, "CLUSTERNATIVE", NSectors, Lifetime::Timeframe);
+      outputSpecs.emplace_back(gDataOriginTPC, mSpecConfig.useFilteredOutputSpecs ? (DataDescription) "CLUSTERNATIVEF" : (DataDescription) "CLUSTERNATIVE", NSectors, Lifetime::Timeframe);
     }
     if (mSpecConfig.processMC) {
       if (mSpecConfig.sendClustersPerSector) {
         for (const auto sector : mTPCSectors) {
-          outputSpecs.emplace_back(gDataOriginTPC, "CLNATIVEMCLBL", sector, Lifetime::Timeframe);
+          outputSpecs.emplace_back(gDataOriginTPC, mSpecConfig.useFilteredOutputSpecs ? DataDescription("CLNATIVEMCLBLF") : DataDescription("CLNATIVEMCLBL"), sector, Lifetime::Timeframe);
         }
       } else {
-        outputSpecs.emplace_back(gDataOriginTPC, "CLNATIVEMCLBL", NSectors, Lifetime::Timeframe);
+        outputSpecs.emplace_back(gDataOriginTPC, mSpecConfig.useFilteredOutputSpecs ? DataDescription("CLNATIVEMCLBLF") : DataDescription("CLNATIVEMCLBL"), NSectors, Lifetime::Timeframe);
       }
     }
   }

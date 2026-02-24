@@ -34,6 +34,7 @@
 #include <TChain.h>
 #include <TStopwatch.h>
 
+#include <memory>
 #include <string>
 
 using namespace o2::framework;
@@ -68,6 +69,7 @@ class TRKDPLDigitizerTask : BaseDPLDigitizer
   void initDigitizerTask(framework::InitContext& ic) override
   {
     mDisableQED = ic.options().get<bool>("disable-qed");
+    mLocalRespFile = ic.options().get<std::string>("local-response-file");
   }
 
   void run(framework::ProcessingContext& pc)
@@ -93,7 +95,7 @@ class TRKDPLDigitizerTask : BaseDPLDigitizer
     timer.Start();
     LOG(info) << " CALLING TRK DIGITIZATION ";
 
-    // mDigitizer.setDigits(&mDigits);
+    mDigitizer.setDigits(&mDigits);
     mDigitizer.setROFRecords(&mROFRecords);
     mDigitizer.setMCLabels(&mLabels);
 
@@ -104,8 +106,10 @@ class TRKDPLDigitizerTask : BaseDPLDigitizer
       // accumulate result of single event processing, called after processing every event supplied
       // AND after the final flushing via digitizer::fillOutputContainer
       if (mDigits.empty()) {
+        LOG(debug) << "No digits to accumulate";
         return; // no digits were flushed, nothing to accumulate
       }
+      LOG(debug) << "Accumulating " << mDigits.size() << " digits ";
       auto ndigAcc = digitsAccum.size();
       std::copy(mDigits.begin(), mDigits.end(), std::back_inserter(digitsAccum));
 
@@ -139,7 +143,7 @@ class TRKDPLDigitizerTask : BaseDPLDigitizer
       mLabels.clear();
       mDigits.clear();
       mROFRecords.clear();
-    }; // and accumulate lambda
+    }; // end accumulate lambda
 
     auto& eventParts = context->getEventParts(withQED);
     // loop over all composite collisions given from context (aka loop over all the interaction records)
@@ -172,6 +176,7 @@ class TRKDPLDigitizerTask : BaseDPLDigitizer
       accumulate();
     }
     mDigitizer.fillOutputContainer();
+    LOG(debug) << "mDigits size after fill: " << mDigits.size();
     accumulate();
 
     // here we have all digits and labels and we can send them to consumer (aka snapshot it onto output)
@@ -195,6 +200,15 @@ class TRKDPLDigitizerTask : BaseDPLDigitizer
     pc.services().get<ControlService>().readyToQuit(QuitRequest::Me);
 
     mFinished = true;
+  }
+
+  void setLocalResponseFunction()
+  {
+    std::unique_ptr<TFile> file(TFile::Open(mLocalRespFile.data(), "READ"));
+    if (!file) {
+      LOG(fatal) << "Cannot open response file " << mLocalRespFile;
+    }
+    mDigitizer.getParams().setAlpSimResponse((const o2::itsmft::AlpideSimResponse*)file->Get("response1"));
   }
 
   void updateTimeDependentParams(ProcessingContext& pc)
@@ -241,6 +255,7 @@ class TRKDPLDigitizerTask : BaseDPLDigitizer
       // if (oTRKParams::Instance().useDeadChannelMap) {
       //   pc.inputs().get<o2::itsmft::NoiseMap*>("TRK_dead"); // trigger final ccdb update
       // }
+      pc.inputs().get<o2::itsmft::AlpideSimResponse*>("TRK_aptsresp");
 
       // init digitizer
       mDigitizer.init();
@@ -261,20 +276,33 @@ class TRKDPLDigitizerTask : BaseDPLDigitizer
     //   mDigitizer.setDeadChannelsMap((o2::itsmft::NoiseMap*)obj);
     //   return;
     // }
+    if (matcher == ConcreteDataMatcher(mOrigin, "APTSRESP", 0)) {
+      LOG(info) << mID.getName() << " loaded APTSResponseData";
+      if (mLocalRespFile.empty()) {
+        LOG(info) << "Using CCDB/APTS response file";
+        mDigitizer.getParams().setAlpSimResponse((const o2::itsmft::AlpideSimResponse*)obj);
+        mDigitizer.setResponseName("APTS");
+      } else {
+        LOG(info) << "Response function will be loaded from local file: " << mLocalRespFile;
+        setLocalResponseFunction();
+        mDigitizer.setResponseName("ALICE3");
+      }
+    }
   }
 
  private:
   bool mWithMCTruth{true};
   bool mFinished{false};
   bool mDisableQED{false};
+  std::string mLocalRespFile{""};
   const o2::detectors::DetID mID{o2::detectors::DetID::TRK};
   const o2::header::DataOrigin mOrigin{o2::header::gDataOriginTRK};
   o2::trk::Digitizer mDigitizer{};
   std::vector<o2::itsmft::Digit> mDigits{};
   std::vector<o2::itsmft::ROFRecord> mROFRecords{};
   std::vector<o2::itsmft::ROFRecord> mROFRecordsAccum{};
-  std::vector<o2::itsmft::Hit> mHits{};
-  std::vector<o2::itsmft::Hit>* mHitsP{&mHits};
+  std::vector<o2::trk::Hit> mHits{};
+  std::vector<o2::trk::Hit>* mHitsP{&mHits};
   o2::dataformats::MCTruthContainer<o2::MCCompLabel> mLabels{};
   o2::dataformats::MCTruthContainer<o2::MCCompLabel> mLabelsAccum{};
   std::vector<o2::itsmft::MC2ROFRecord> mMC2ROFRecordsAccum{};
@@ -294,11 +322,14 @@ DataProcessorSpec getTRKDigitizerSpec(int channel, bool mctruth)
   // if (oTRKParams::Instance().useDeadChannelMap) {
   //   inputs.emplace_back("TRK_dead", "TRK", "DEADMAP", 0, Lifetime::Condition, ccdbParamSpec("TRK/Calib/DeadMap"));
   // }
+  inputs.emplace_back("TRK_aptsresp", "TRK", "APTSRESP", 0, Lifetime::Condition, ccdbParamSpec("IT3/Calib/APTSResponse"));
 
   return DataProcessorSpec{detStr + "Digitizer",
                            inputs, makeOutChannels(detOrig, mctruth),
                            AlgorithmSpec{adaptFromTask<TRKDPLDigitizerTask>(mctruth)},
-                           Options{{"disable-qed", o2::framework::VariantType::Bool, false, {"disable QED handling"}}}};
+                           Options{
+                             {"disable-qed", o2::framework::VariantType::Bool, false, {"disable QED handling"}},
+                             {"local-response-file", o2::framework::VariantType::String, "", {"use response file saved locally at this path/filename"}}}};
 }
 
 } // namespace o2::trk

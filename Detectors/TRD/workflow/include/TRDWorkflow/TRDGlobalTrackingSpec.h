@@ -18,8 +18,9 @@
 #include "Framework/Task.h"
 #include "TStopwatch.h"
 #include "TRDBase/GeometryFlat.h"
-#include "GPUO2Interface.h"
+#include "GPUO2ExternalUser.h"
 #include "GPUTRDTracker.h"
+#include "GPUTRDRecoParam.h"
 #include "ReconstructionDataFormats/GlobalTrackID.h"
 #include "DataFormatsGlobalTracking/RecoContainer.h"
 #include "DataFormatsTRD/TrackTRD.h"
@@ -34,7 +35,6 @@
 #include "TPCCalibration/CorrectionMapsLoader.h"
 #include "GPUO2InterfaceRefit.h"
 #include "TPCFastTransform.h"
-#include "TRDBase/RecoParam.h"
 #include "DataFormatsTPC/TrackTPC.h"
 #include "DataFormatsITS/TrackITS.h"
 #include "DataFormatsITSMFT/TrkClusRef.h"
@@ -57,6 +57,7 @@ class TRDGlobalTracking : public o2::framework::Task
   {
     mTPCCorrMapsLoader.setLumiScaleType(sclOpts.lumiType);
     mTPCCorrMapsLoader.setLumiScaleMode(sclOpts.lumiMode);
+    mTPCCorrMapsLoader.setCheckCTPIDCConsistency(sclOpts.checkCTPIDCconsistency);
   }
   ~TRDGlobalTracking() override = default;
   void init(o2::framework::InitContext& ic) final;
@@ -93,7 +94,7 @@ class TRDGlobalTracking : public o2::framework::Task
   // temporary members -> should go into processor (GPUTRDTracker or additional refit processor?)
   std::unique_ptr<o2::gpu::GPUO2InterfaceRefit> mTPCRefitter;         ///< TPC refitter used for TPC tracks refit during the reconstruction
   const o2::tpc::ClusterNativeAccess* mTPCClusterIdxStruct = nullptr; ///< struct holding the TPC cluster indices
-  RecoParam mRecoParam;                                               ///< parameters required for TRD reconstruction
+  o2::gpu::GPUTRDRecoParam mRecoParam;                                ///< parameters required for TRD reconstruction
   gsl::span<const Tracklet64> mTrackletsRaw;                          ///< array of raw tracklets needed for TRD refit
   gsl::span<const CalibratedTracklet> mTrackletsCalib;                ///< array of calibrated tracklets needed for TRD refit
   gsl::span<const o2::tpc::TrackTPC> mTPCTracksArray;                 ///< input TPC tracks used for refit

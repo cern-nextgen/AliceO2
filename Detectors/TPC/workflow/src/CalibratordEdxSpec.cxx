@@ -29,11 +29,11 @@
 #include "Framework/DataProcessorSpec.h"
 #include "Framework/ConfigParamRegistry.h"
 #include "Framework/CCDBParamSpec.h"
-#include "GPUO2InterfaceConfigurableParam.h"
+#include "GPUO2ConfigurableParam.h"
 #include "TPCCalibration/CalibratordEdx.h"
 #include "TPCWorkflow/ProcessingHelpers.h"
 #include "DetectorsBase/GRPGeomHelper.h"
-#include "TPCBase/CDBTypes.h"
+#include "TPCBaseRecSim/CDBTypes.h"
 #include "TPCBase/Utils.h"
 
 using namespace o2::framework;
@@ -235,7 +235,7 @@ DataProcessorSpec getCalibratordEdxSpec(const o2::base::Propagator::MatCorrType 
     Options{
       {"tf-per-slot", VariantType::UInt32, 6000u, {"number of TFs per calibration time slot, is overwritten by seconds-per-slot if > 0"}},
       {"seconds-per-slot", VariantType::Int, 180, {"seconds per calibration time slot, overwrites tf-per-slot if > 0"}},
-      {"max-delay", VariantType::UInt32, 10u, {"number of slots in past to consider"}},
+      {"max-delay", VariantType::UInt32, 1u, {"number of slots in past to consider"}},
       {"min-entries", VariantType::Int, 10000, {"minimum entries per stack to fit a single time slot"}},
       {"calib-interval-extension", VariantType::UInt32, 3600u, {"seconds by which to extend the calibration interval beyond the end of the time slot"}},
 

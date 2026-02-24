@@ -19,7 +19,6 @@
 #include "Framework/ConfigParamRegistry.h"
 #include "Framework/DataProcessorSpec.h"
 #include "Framework/ControlService.h"
-#include "DataFormatsTPC/WorkflowHelper.h"
 #include "TPCWorkflow/ProcessingHelpers.h"
 #include "TPCBase/Mapper.h"
 #include "DetectorsBase/GRPGeomHelper.h"
@@ -31,7 +30,6 @@
 #include "CommonUtils/TreeStreamRedirector.h"
 #include "MathUtils/Tsallis.h"
 #include "ReconstructionDataFormats/TrackTPCITS.h"
-#include "CommonDataFormat/AbstractRefAccessor.h"
 #include "ReconstructionDataFormats/PrimaryVertex.h"
 #include "ReconstructionDataFormats/VtxTrackIndex.h"
 #include "ReconstructionDataFormats/VtxTrackRef.h"
@@ -46,6 +44,7 @@
 #include "ReconstructionDataFormats/MatchInfoTOF.h"
 #include "DataFormatsTOF/Cluster.h"
 #include "DataFormatsFT0/RecPoints.h"
+#include "TPCCalibration/PressureTemperatureHelper.h"
 
 using namespace o2::globaltracking;
 using GTrackID = o2::dataformats::GlobalTrackID;
@@ -127,16 +126,20 @@ class TPCTimeSeries : public Task
   {
     o2::base::GRPGeomHelper::instance().checkUpdates(pc);
     mTPCVDriftHelper.extractCCDBInputs(pc);
+    mPTHelper.extractCCDBInputs(pc);
     if (mTPCVDriftHelper.isUpdated()) {
       mTPCVDriftHelper.acknowledgeUpdate();
       mVDrift = mTPCVDriftHelper.getVDriftObject().getVDrift();
       LOGP(info, "Updated reference drift velocity to: {}", mVDrift);
     }
+    mBufferDCA.mVDrift = mVDrift;
 
     const int nBins = getNBins();
 
     mTimeMS = o2::base::GRPGeomHelper::instance().getOrbitResetTimeMS() + processing_helpers::getFirstTForbit(pc) * o2::constants::lhc::LHCOrbitMUS / 1000;
     mRun = processing_helpers::getRunNumber(pc);
+    mBufferDCA.mTemperature = mPTHelper.getMeanTemperature(mTimeMS);
+    mBufferDCA.mPressure = mPTHelper.getPressure(mTimeMS);
 
     // init only once
     if (mAvgADCAr.size() != nBins) {
@@ -207,14 +210,14 @@ class TPCTimeSeries : public Task
       indicesITSTPC[tracksITSTPC[i].getRefTPC().getIndex()] = {i, idxVtx};
     }
 
-    std::vector<std::tuple<int, float, float, o2::track::TrackLTIntegral, double, float, unsigned int>> idxTPCTrackToTOFCluster; // store for each tpc track index the index to the TOF cluster
+    std::vector<std::tuple<int, float, float, o2::track::TrackLTIntegral, double, float, unsigned int, unsigned short>> idxTPCTrackToTOFCluster; // store for each tpc track index the index to the TOF cluster
 
     // get matches to TOF in case skimmed data is produced
     if (mUnbinnedWriter) {
       //   getLTIntegralOut(), ///< L,TOF integral calculated during the propagation
       //  getSignal()  mSignal = 0.0;              ///< TOF time in ps
       o2::track::TrackLTIntegral defLT;
-      idxTPCTrackToTOFCluster = std::vector<std::tuple<int, float, float, o2::track::TrackLTIntegral, double, float, unsigned int>>(tracksTPC.size(), {-1, -999, -999, defLT, 0, 0, 0});
+      idxTPCTrackToTOFCluster = std::vector<std::tuple<int, float, float, o2::track::TrackLTIntegral, double, float, unsigned int, unsigned short>>(tracksTPC.size(), {-1, -999, -999, defLT, 0, 0, 0, 0});
       const std::vector<gsl::span<const o2::dataformats::MatchInfoTOF>> tofMatches{recoData.getTPCTOFMatches(), recoData.getTPCTRDTOFMatches(), recoData.getITSTPCTOFMatches(), recoData.getITSTPCTRDTOFMatches()};
 
       const auto& ft0rec = recoData.getFT0RecPoints();
@@ -286,7 +289,7 @@ class TPCTimeSeries : public Task
               mask |= o2::dataformats::MatchInfoTOF::QualityFlags::hasT0_1BCbefore;
             }
 
-            idxTPCTrackToTOFCluster[refTPC] = {tpctofmatch.getIdxTOFCl(), tpctofmatch.getDXatTOF(), tpctofmatch.getDZatTOF(), ltIntegral, signal, deltaT, mask};
+            idxTPCTrackToTOFCluster[refTPC] = {tpctofmatch.getIdxTOFCl(), tpctofmatch.getDXatTOF(), tpctofmatch.getDZatTOF(), ltIntegral, signal, deltaT, mask, tpctofmatch.getChannel() % 8736};
           }
         }
       }
@@ -870,6 +873,7 @@ class TPCTimeSeries : public Task
   void finaliseCCDB(o2::framework::ConcreteDataMatcher& matcher, void* obj) final
   {
     mTPCVDriftHelper.accountCCDBInputs(matcher, obj);
+    mPTHelper.accountCCDBInputs(matcher, obj);
     o2::base::GRPGeomHelper::instance().finaliseCCDB(matcher, obj);
   }
 
@@ -1107,6 +1111,7 @@ class TPCTimeSeries : public Task
   long mTimeMS{};                                                          ///< time in MS of current TF
   int mRun{};                                                              ///< run number
   int mMaxOccupancyHistBins{912};                                          ///< maximum number of occupancy bins
+  PressureTemperatureHelper mPTHelper;                                     ///< helper to extract pressure and temperature from CCDB
 
   /// check if track passes coarse cuts
   bool acceptTrack(const TrackTPC& track) const { return std::abs(track.getTgl()) < mMaxTgl; }
@@ -1117,7 +1122,7 @@ class TPCTimeSeries : public Task
     return isGoodTrack;
   }
 
-  void fillDCA(const gsl::span<const TrackTPC> tracksTPC, const gsl::span<const o2::dataformats::TrackTPCITS> tracksITSTPC, const gsl::span<const o2::dataformats::PrimaryVertex> vertices, const int iTrk, const int iThread, const std::unordered_map<unsigned int, std::array<int, 2>>& indicesITSTPC, const gsl::span<const o2::its::TrackITS> tracksITS, const std::vector<std::tuple<int, float, float, o2::track::TrackLTIntegral, double, float, unsigned int>>& idxTPCTrackToTOFCluster, const gsl::span<const o2::tof::Cluster> tofClusters)
+  void fillDCA(const gsl::span<const TrackTPC> tracksTPC, const gsl::span<const o2::dataformats::TrackTPCITS> tracksITSTPC, const gsl::span<const o2::dataformats::PrimaryVertex> vertices, const int iTrk, const int iThread, const std::unordered_map<unsigned int, std::array<int, 2>>& indicesITSTPC, const gsl::span<const o2::its::TrackITS> tracksITS, const std::vector<std::tuple<int, float, float, o2::track::TrackLTIntegral, double, float, unsigned int, unsigned short>>& idxTPCTrackToTOFCluster, const gsl::span<const o2::tof::Cluster> tofClusters)
   {
     const auto& trackFull = tracksTPC[iTrk];
     const bool isGoodTrack = checkTrack(trackFull);
@@ -1507,6 +1512,7 @@ class TPCTimeSeries : public Task
                             << "vertexTime=" << vertexTime                                    /// time stamp assigned to the vertex
                             << "trackTime0=" << trackTime0                                    /// time stamp assigned to the track
                             << "TOFmask=" << std::get<6>(idxTPCTrackToTOFCluster[iTrk])       /// delta T- TPC TOF
+                            << "TOFchannel=" << std::get<7>(idxTPCTrackToTOFCluster[iTrk])    /// TOF channel inside a sector
                             // TPC delta param
                             << "deltaTPCParamInOutTgl=" << deltaTPCParamInOutTgl
                             << "deltaTPCParamInOutQPt=" << deltaTPCParamInOutQPt
@@ -1823,12 +1829,11 @@ o2::framework::DataProcessorSpec getTPCTimeSeriesSpec(const bool disableWriter, 
   dataRequest->requestTracks(srcTracks, useMC);
   dataRequest->requestClusters(GTrackID::getSourcesMask("TPC"), useMC);
 
-  dataRequest->requestFT0RecPoints(false);
-
   bool tpcOnly = srcTracks == GTrackID::getSourcesMask("TPC");
   if (!tpcOnly) {
-    dataRequest->requestPrimaryVertices(useMC);
+    dataRequest->requestFT0RecPoints(useMC);
   }
+  dataRequest->requestPrimaryVertices(useMC);
 
   const bool enableAskMatLUT = matType == o2::base::Propagator::MatCorrType::USEMatCorrLUT;
   auto ccdbRequest = std::make_shared<o2::base::GRPGeomRequest>(!disableWriter,                 // orbitResetTime
@@ -1842,6 +1847,7 @@ o2::framework::DataProcessorSpec getTPCTimeSeriesSpec(const bool disableWriter, 
                                                                 true);
 
   o2::tpc::VDriftHelper::requestCCDBInputs(dataRequest->inputs);
+  PressureTemperatureHelper::requestCCDBInputs(dataRequest->inputs);
   std::vector<OutputSpec> outputs;
   outputs.emplace_back(o2::header::gDataOriginTPC, getDataDescriptionTimeSeries(), 0, Lifetime::Sporadic);
   if (!disableWriter) {

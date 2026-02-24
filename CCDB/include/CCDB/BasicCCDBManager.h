@@ -20,9 +20,12 @@
 #include "CommonUtils/NameConf.h"
 #include "Framework/DataTakingContext.h"
 #include "Framework/DefaultsHelpers.h"
+#include "Framework/ServiceRegistryRef.h"
+#include "Framework/DataProcessingStats.h"
 #include <string>
 #include <chrono>
 #include <map>
+#include <string_view>
 #include <unordered_map>
 #include <memory>
 #include <cstdlib>
@@ -57,6 +60,7 @@ class CCDBManagerInstance
     int queries = 0;
     int fetches = 0;
     int failures = 0;
+    std::map<std::string, std::string> cacheOfHeaders;
     bool isValid(long ts) { return ts < endvalidity && ts >= startvalidity; }
     bool isCacheValid(long ts)
     {
@@ -70,6 +74,7 @@ class CCDBManagerInstance
       uuid = "";
       startvalidity = 0;
       endvalidity = -1;
+      cacheOfHeaders.clear();
     }
   };
 
@@ -98,9 +103,9 @@ class CCDBManagerInstance
   /// query timestamp
   long getTimestamp() const { return mTimestamp; }
 
-  /// retrieve an object of type T from CCDB as stored under path and timestamp
+  /// retrieve an object of type T from CCDB as stored under path and timestamp. Optional to get the headers.
   template <typename T>
-  T* getForTimeStamp(std::string const& path, long timestamp);
+  T* getForTimeStamp(std::string const& path, long timestamp, std::map<std::string, std::string>* headers = nullptr);
 
   /// retrieve an object of type T from CCDB as stored under path and using the timestamp in the middle of the run
   template <typename T>
@@ -112,10 +117,7 @@ class CCDBManagerInstance
   {
     // TODO: add some error info/handling when failing
     mMetaData = metaData;
-    auto obj = getForTimeStamp<T>(path, timestamp);
-    if (headers) {
-      *headers = mHeaders;
-    }
+    auto obj = getForTimeStamp<T>(path, timestamp, headers);
     return obj;
   }
 
@@ -235,7 +237,7 @@ class CCDBManagerInstance
 };
 
 template <typename T>
-T* CCDBManagerInstance::getForTimeStamp(std::string const& path, long timestamp)
+T* CCDBManagerInstance::getForTimeStamp(std::string const& path, long timestamp, std::map<std::string, std::string>* headers)
 {
   mHeaders.clear(); // we clear at the beginning; to allow to retrieve the header information in a subsequent call
   T* ptr = nullptr;
@@ -258,15 +260,32 @@ T* CCDBManagerInstance::getForTimeStamp(std::string const& path, long timestamp)
         mFetchedSize += s;
       }
     }
+
+    if (headers) {
+      *headers = mHeaders;
+    }
   } else {
     auto& cached = mCache[path];
     cached.queries++;
     if ((!isOnline() && cached.isCacheValid(timestamp)) || (mCheckObjValidityEnabled && cached.isValid(timestamp))) {
+      // Give back the cached/saved headers
+      if (headers) {
+        *headers = cached.cacheOfHeaders;
+      }
       return reinterpret_cast<T*>(cached.noCleanupPtr ? cached.noCleanupPtr : cached.objPtr.get());
     }
     ptr = mCCDBAccessor.retrieveFromTFileAny<T>(path, mMetaData, timestamp, &mHeaders, cached.uuid,
                                                 mCreatedNotAfter ? std::to_string(mCreatedNotAfter) : "",
                                                 mCreatedNotBefore ? std::to_string(mCreatedNotBefore) : "");
+    // update the cached headers
+    for (auto const& h : mHeaders) {
+      cached.cacheOfHeaders[h.first] = h.second;
+    }
+    // return the cached headers
+    if (headers) {
+      *headers = cached.cacheOfHeaders;
+    }
+
     if (ptr) { // new object was shipped, old one (if any) is not valid anymore
       cached.fetches++;
       mFetches++;
@@ -323,6 +342,13 @@ T* CCDBManagerInstance::getForTimeStamp(std::string const& path, long timestamp)
   }
   auto end = std::chrono::system_clock::now();
   mTimerMS += std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+  auto *ref = o2::framework::ServiceRegistryRef::globalDeviceRef();
+  if (ref && ref->active<framework::DataProcessingStats>()) {
+    auto& stats = ref->get<o2::framework::DataProcessingStats>();
+    stats.updateStats({(int)o2::framework::ProcessingStatsId::CCDB_CACHE_HIT, o2::framework::DataProcessingStats::Op::Set, (int64_t)mQueries - mFailures - mFetches});
+    stats.updateStats({(int)o2::framework::ProcessingStatsId::CCDB_CACHE_MISS, o2::framework::DataProcessingStats::Op::Set, (int64_t)mFetches});
+    stats.updateStats({(int)o2::framework::ProcessingStatsId::CCDB_CACHE_FAILURE, o2::framework::DataProcessingStats::Op::Set, (int64_t)mFailures});
+  }
   return ptr;
 }
 
@@ -374,4 +400,4 @@ class BasicCCDBManager : public CCDBManagerInstance
 
 } // namespace o2::ccdb
 
-#endif //O2_BASICCCDBMANAGER_H
+#endif // O2_BASICCCDBMANAGER_H

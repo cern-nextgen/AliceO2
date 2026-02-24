@@ -363,10 +363,10 @@ void AODProducerWorkflowDPL::addToTracksQATable(TracksQACursorType& tracksQACurs
 {
   tracksQACursor(
     trackQAInfoHolder.trackID,
-    truncateFloatFraction(trackQAInfoHolder.tpcTime0, mTPCTime0),
+    mTrackQCRetainOnlydEdx ? 0.0f : truncateFloatFraction(trackQAInfoHolder.tpcTime0, mTPCTime0),
     truncateFloatFraction(trackQAInfoHolder.tpcdEdxNorm, mTrackSignal),
-    trackQAInfoHolder.tpcdcaR,
-    trackQAInfoHolder.tpcdcaZ,
+    mTrackQCRetainOnlydEdx ? std::numeric_limits<int16_t>::min() : trackQAInfoHolder.tpcdcaR,
+    mTrackQCRetainOnlydEdx ? std::numeric_limits<int16_t>::min() : trackQAInfoHolder.tpcdcaZ,
     trackQAInfoHolder.tpcClusterByteMask,
     trackQAInfoHolder.tpcdEdxMax0R,
     trackQAInfoHolder.tpcdEdxMax1R,
@@ -376,18 +376,18 @@ void AODProducerWorkflowDPL::addToTracksQATable(TracksQACursorType& tracksQACurs
     trackQAInfoHolder.tpcdEdxTot1R,
     trackQAInfoHolder.tpcdEdxTot2R,
     trackQAInfoHolder.tpcdEdxTot3R,
-    trackQAInfoHolder.dRefContY,
-    trackQAInfoHolder.dRefContZ,
-    trackQAInfoHolder.dRefContSnp,
-    trackQAInfoHolder.dRefContTgl,
-    trackQAInfoHolder.dRefContQ2Pt,
-    trackQAInfoHolder.dRefGloY,
-    trackQAInfoHolder.dRefGloZ,
-    trackQAInfoHolder.dRefGloSnp,
-    trackQAInfoHolder.dRefGloTgl,
-    trackQAInfoHolder.dRefGloQ2Pt,
-    trackQAInfoHolder.dTofdX,
-    trackQAInfoHolder.dTofdZ);
+    mTrackQCRetainOnlydEdx ? std::numeric_limits<int8_t>::min() : trackQAInfoHolder.dRefContY,
+    mTrackQCRetainOnlydEdx ? std::numeric_limits<int8_t>::min() : trackQAInfoHolder.dRefContZ,
+    mTrackQCRetainOnlydEdx ? std::numeric_limits<int8_t>::min() : trackQAInfoHolder.dRefContSnp,
+    mTrackQCRetainOnlydEdx ? std::numeric_limits<int8_t>::min() : trackQAInfoHolder.dRefContTgl,
+    mTrackQCRetainOnlydEdx ? std::numeric_limits<int8_t>::min() : trackQAInfoHolder.dRefContQ2Pt,
+    mTrackQCRetainOnlydEdx ? std::numeric_limits<int8_t>::min() : trackQAInfoHolder.dRefGloY,
+    mTrackQCRetainOnlydEdx ? std::numeric_limits<int8_t>::min() : trackQAInfoHolder.dRefGloZ,
+    mTrackQCRetainOnlydEdx ? std::numeric_limits<int8_t>::min() : trackQAInfoHolder.dRefGloSnp,
+    mTrackQCRetainOnlydEdx ? std::numeric_limits<int8_t>::min() : trackQAInfoHolder.dRefGloTgl,
+    mTrackQCRetainOnlydEdx ? std::numeric_limits<int8_t>::min() : trackQAInfoHolder.dRefGloQ2Pt,
+    mTrackQCRetainOnlydEdx ? std::numeric_limits<int8_t>::min() : trackQAInfoHolder.dTofdX,
+    mTrackQCRetainOnlydEdx ? std::numeric_limits<int8_t>::min() : trackQAInfoHolder.dTofdZ);
 }
 
 template <typename mftTracksCursorType, typename AmbigMFTTracksCursorType>
@@ -499,7 +499,7 @@ void AODProducerWorkflowDPL::fillTrackTablesPerCollision(int collisionID,
 
           float weight = 0;
           static std::uniform_real_distribution<> distr(0., 1.);
-          bool writeQAData = o2::math_utils::Tsallis::downsampleTsallisCharged(data.getTrackParam(trackIndex).getPt(), mTrackQCFraction, mSqrtS, weight, distr(mGenerator));
+          bool writeQAData = o2::math_utils::Tsallis::downsampleTsallisCharged(data.getTrackParam(trackIndex).getPt(), mTrackQCFraction, mSqrtS, weight, distr(mGenerator)) || ((src != GIndex::TPC || mGIDUsedBySVtx.find(trackIndex) != mGIDUsedBySVtx.end() || mGIDUsedByStr.find(trackIndex) != mGIDUsedByStr.end()) && mTrackQCKeepGlobalTracks);
           auto extraInfoHolder = processBarrelTrack(collisionID, collisionBC, trackIndex, data, bcsMap);
 
           if (writeQAData) {
@@ -947,13 +947,17 @@ void clearMCKeepStore(std::vector<std::vector<std::unordered_map<int, int>>>& st
 }
 
 // helper function to add a particle/track to the MC keep store
-void keepMCParticle(std::vector<std::vector<std::unordered_map<int, int>>>& store, int source, int event, int track, int value = 1)
+void keepMCParticle(std::vector<std::vector<std::unordered_map<int, int>>>& store, int source, int event, int track, int value = 1, bool useSigFilt = false)
 {
   if (track < 0) {
     LOG(warn) << "trackID is smaller than 0. Neglecting";
     return;
   }
-  store[source][event][track] = value;
+  if (useSigFilt && source == 0) {
+    store[source][event][track] = -1;
+  } else {
+    store[source][event][track] = value;
+  }
 }
 
 void AODProducerWorkflowDPL::fillMCParticlesTable(o2::steer::MCKinematicsReader& mcReader,
@@ -982,7 +986,7 @@ void AODProducerWorkflowDPL::fillMCParticlesTable(o2::steer::MCKinematicsReader&
     if (!mcLabel.isValid()) {
       return;
     }
-    keepMCParticle(mToStore, mcLabel.getSourceID(), mcLabel.getEventID(), mcLabel.getTrackID());
+    keepMCParticle(mToStore, mcLabel.getSourceID(), mcLabel.getEventID(), mcLabel.getTrackID(), 1, mUseSigFiltMC);
   };
 
   // mark reconstructed MC particles to store them into the table
@@ -997,7 +1001,7 @@ void AODProducerWorkflowDPL::fillMCParticlesTable(o2::steer::MCKinematicsReader&
           if (!mcTruth.isValid()) {
             continue;
           }
-          keepMCParticle(mToStore, mcTruth.getSourceID(), mcTruth.getEventID(), mcTruth.getTrackID());
+          keepMCParticle(mToStore, mcTruth.getSourceID(), mcTruth.getEventID(), mcTruth.getTrackID(), 1, mUseSigFiltMC);
           // treating contributors of global tracks
           auto contributorsGID = data.getSingleDetectorRefs(trackIndex);
           if (contributorsGID[GIndex::Source::TPC].isIndexSet()) {
@@ -1012,7 +1016,7 @@ void AODProducerWorkflowDPL::fillMCParticlesTable(o2::steer::MCKinematicsReader&
               if (!mcLabel.isValid()) {
                 continue;
               }
-              keepMCParticle(mToStore, mcLabel.getSourceID(), mcLabel.getEventID(), mcLabel.getTrackID());
+              keepMCParticle(mToStore, mcLabel.getSourceID(), mcLabel.getEventID(), mcLabel.getTrackID(), 1, mUseSigFiltMC);
             }
           }
         }
@@ -1026,7 +1030,7 @@ void AODProducerWorkflowDPL::fillMCParticlesTable(o2::steer::MCKinematicsReader&
       if (!mcTruth.isValid()) {
         continue;
       }
-      keepMCParticle(mToStore, mcTruth.getSourceID(), mcTruth.getEventID(), mcTruth.getTrackID());
+      keepMCParticle(mToStore, mcTruth.getSourceID(), mcTruth.getEventID(), mcTruth.getTrackID(), 1, mUseSigFiltMC);
     }
   }
   if (mInputSources[GIndex::PHS]) {
@@ -1035,7 +1039,7 @@ void AODProducerWorkflowDPL::fillMCParticlesTable(o2::steer::MCKinematicsReader&
       if (!mcTruth.isValid()) {
         continue;
       }
-      keepMCParticle(mToStore, mcTruth.getSourceID(), mcTruth.getEventID(), mcTruth.getTrackID());
+      keepMCParticle(mToStore, mcTruth.getSourceID(), mcTruth.getEventID(), mcTruth.getTrackID(), 1, mUseSigFiltMC);
     }
   }
   using namespace aodmchelpers;
@@ -1059,7 +1063,8 @@ void AODProducerWorkflowDPL::fillMCParticlesTable(o2::steer::MCKinematicsReader&
                              source == 0, // background
                              mMcParticleW,
                              mMcParticleMom,
-                             mMcParticlePos);
+                             mMcParticlePos,
+                             mUseSigFiltMC);
 
     mcReader.releaseTracksForSourceAndEvent(source, event);
   }
@@ -1126,7 +1131,7 @@ void AODProducerWorkflowDPL::fillMCTrackLabelsTable(MCTrackLabelCursorType& mcTr
           if (!needToStore(mGIDToTableID)) {
             continue;
           }
-          if (mcTruth.isValid()) { // if not set, -1 will be stored
+          if (mcTruth.isValid()) {                                                                               // if not set, -1 will be stored
             labelHolder.labelID = (mToStore[mcTruth.getSourceID()][mcTruth.getEventID()])[mcTruth.getTrackID()]; // defined by TPC if it contributes, otherwise: by ITS
             if (mcTruth.isFake()) {
               labelHolder.labelMask |= (0x1 << 15);
@@ -1139,6 +1144,21 @@ void AODProducerWorkflowDPL::fillMCTrackLabelsTable(MCTrackLabelCursorType& mcTr
                 }
               }
             }
+            if (trackIndex.includesDet(DetID::ITS)) {
+              auto itsGID = data.getITSContributorGID(trackIndex);
+              auto itsSource = itsGID.getSource();
+              if (itsSource == GIndex::ITS) {
+                auto& itsTrack = data.getITSTrack(itsGID);
+                for (unsigned int iL = 0; iL < 7; ++iL) {
+                  if (itsTrack.isFakeOnLayer(iL)) {
+                    labelHolder.labelMask |= (0x1 << iL);
+                  }
+                }
+              } else if (itsSource == GIndex::ITSAB) {
+                labelHolder.labelMask |= (data.getTrackMCLabel(itsGID).isFake() << 12);
+              }
+            }
+
           } else if (mcTruth.isNoise()) {
             labelHolder.labelMask |= (0x1 << 14);
           }
@@ -1699,6 +1719,8 @@ void AODProducerWorkflowDPL::init(InitContext& ic)
       LOGP(warn, "Specified non-default empty streamer mask!");
     }
   }
+  mTrackQCKeepGlobalTracks = ic.options().get<bool>("trackqc-keepglobaltracks");
+  mTrackQCRetainOnlydEdx = ic.options().get<bool>("trackqc-retainonlydedx");
   mTrackQCFraction = ic.options().get<float>("trackqc-fraction");
   mTrackQCNTrCut = ic.options().get<int64_t>("trackqc-NTrCut");
   mTrackQCDCAxy = ic.options().get<float>("trackqc-tpc-dca");
@@ -1727,6 +1749,8 @@ void AODProducerWorkflowDPL::init(InitContext& ic)
   if (mRunNumber == -1L) {
     LOG(info) << "The Run number will be obtained from DPL headers";
   }
+
+  mUseSigFiltMC = ic.options().get<bool>("mc-signal-filt");
 
   // set no truncation if selected by user
   if (mTruncate != 1) {
@@ -2041,6 +2065,28 @@ void AODProducerWorkflowDPL::run(ProcessingContext& pc)
     int nMCCollisions = mcReader->getDigitizationContext()->getNCollisions();
     const auto& mcRecords = mcReader->getDigitizationContext()->getEventRecords();
     const auto& mcParts = mcReader->getDigitizationContext()->getEventParts();
+
+    // if signal filtering enabled, let's check if there are more than one source; otherwise fatalise
+    if (mUseSigFiltMC) {
+      std::vector<int> sourceIDs{};
+      for (int iCol = 0; iCol < nMCCollisions; iCol++) {
+        for (auto const& colPart : mcParts[iCol]) {
+          int sourceID = colPart.sourceID;
+          if (std::find(sourceIDs.begin(), sourceIDs.end(), sourceID) == sourceIDs.end()) {
+            sourceIDs.push_back(sourceID);
+          }
+          if (sourceIDs.size() > 1) { // we found more than one, exit
+            break;
+          }
+        }
+        if (sourceIDs.size() > 1) { // we found more than one, exit
+          break;
+        }
+      }
+      if (sourceIDs.size() <= 1) {
+        LOGP(fatal, "Signal filtering cannot be enabled without embedding. Please fix the configuration either enabling the embedding, or turning off the signal filtering.");
+      }
+    }
 
     // count all parts
     int totalNParts = 0;
@@ -2600,6 +2646,12 @@ AODProducerWorkflowDPL::TrackExtraInfo AODProducerWorkflowDPL::processBarrelTrac
     const auto& dEdx = tpcOrig.getdEdx().dEdxTotTPC > 0 ? tpcOrig.getdEdx() : tpcOrig.getdEdxAlt();
     if (tpcOrig.getdEdx().dEdxTotTPC == 0) {
       extraInfoHolder.flags |= o2::aod::track::TPCdEdxAlt;
+    }
+    if (tpcOrig.hasASideClusters()) {
+      extraInfoHolder.flags |= o2::aod::track::TPCSideA;
+    }
+    if (tpcOrig.hasCSideClusters()) {
+      extraInfoHolder.flags |= o2::aod::track::TPCSideC;
     }
     extraInfoHolder.tpcInnerParam = tpcOrig.getP() / tpcOrig.getAbsCharge();
     extraInfoHolder.tpcChi2NCl = tpcOrig.getNClusters() ? tpcOrig.getChi2() / tpcOrig.getNClusters() : 0;
@@ -3304,6 +3356,8 @@ DataProcessorSpec getAODProducerWorkflowSpec(GID::mask_t src, bool enableSV, boo
       ConfigParamSpec{"hepmc-update", VariantType::String, "always", {"When to update HepMC Aux tables: always - force update, never - never update, all - if all keys are present, any - when any key is present (not valid yet)"}},
       ConfigParamSpec{"propagate-muons", VariantType::Bool, false, {"Propagate muons to IP"}},
       ConfigParamSpec{"thin-tracks", VariantType::Bool, false, {"Produce thinned track tables"}},
+      ConfigParamSpec{"trackqc-keepglobaltracks", VariantType::Bool, false, {"Always keep TrackQA for global tracks"}},
+      ConfigParamSpec{"trackqc-retainonlydedx", VariantType::Bool, false, {"Keep only dEdx information, zero out everything else"}},
       ConfigParamSpec{"trackqc-fraction", VariantType::Float, float(0.1), {"Fraction of tracks to QC"}},
       ConfigParamSpec{"trackqc-NTrCut", VariantType::Int64, 4L, {"Minimal length of the track - in amount of tracklets"}},
       ConfigParamSpec{"trackqc-tpc-dca", VariantType::Float, 3.f, {"Keep TPC standalone track with this DCAxy to the PV"}},
@@ -3311,7 +3365,7 @@ DataProcessorSpec getAODProducerWorkflowSpec(GID::mask_t src, bool enableSV, boo
       ConfigParamSpec{"trackqc-tpc-pt", VariantType::Float, 0.2f, {"Keep TPC standalone track with this pt"}},
       ConfigParamSpec{"with-streamers", VariantType::String, "", {"Bit-mask to steer writing of intermediate streamer files"}},
       ConfigParamSpec{"seed", VariantType::Int, 0, {"Set seed for random generator used for sampling (0 (default) means using a random_device)"}},
-    }};
+      ConfigParamSpec{"mc-signal-filt", VariantType::Bool, false, {"Enable usage of signal filtering (only for MC with embedding)"}}}};
 }
 
 } // namespace o2::aodproducer

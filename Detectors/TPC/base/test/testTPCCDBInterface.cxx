@@ -21,8 +21,7 @@
 #include "TFile.h"
 
 // o2 includes
-#include "TPCBase/CDBInterface.h"
-#include "TPCBase/CDBInterface.h"
+#include "TPCBaseRecSim/CDBInterface.h"
 #include "TPCBase/CalArray.h"
 #include "TPCBase/CalDet.h"
 #include "TPCBase/Mapper.h"

@@ -18,7 +18,7 @@
 #include "GPUCommonMath.h"
 #include "GPUCommonConstants.h"
 #include "GPUTPCGMPolynomialFieldManager.h"
-#include "GPUDataTypes.h"
+#include "GPUDataTypesIO.h"
 #include "GPUConstantMem.h"
 #include "DetectorsBase/Propagator.h"
 #include "GPUTPCGeometry.h"
@@ -35,6 +35,7 @@ void GPUParam::SetDefaults(float solenoidBz, bool assumeConstantBz)
   memset((void*)this, 0, sizeof(*this));
   new (&rec) GPUSettingsRec;
   occupancyMap = nullptr;
+  occupancyMapSize = 0;
   occupancyTotal = 0;
 
 #ifdef GPUCA_TPC_GEOMETRY_O2
@@ -111,7 +112,6 @@ void GPUParam::SetDefaults(float solenoidBz, bool assumeConstantBz)
   par.continuousTracking = false;
   continuousMaxTimeBin = 0;
   tpcCutTimeBin = 0;
-  par.earlyTpcTransform = false;
 }
 
 void GPUParam::UpdateSettings(const GPUSettingsGRP* g, const GPUSettingsProcessing* p, const GPURecoStepConfiguration* w, const GPUSettingsRecDynamic* d)
@@ -122,13 +122,12 @@ void GPUParam::UpdateSettings(const GPUSettingsGRP* g, const GPUSettingsProcessi
     continuousMaxTimeBin = g->grpContinuousMaxTimeBin == -1 ? GPUSettings::TPC_MAX_TF_TIME_BIN : g->grpContinuousMaxTimeBin;
     tpcCutTimeBin = g->tpcCutTimeBin;
   }
-  par.earlyTpcTransform = rec.tpc.forceEarlyTransform == -1 ? (!par.continuousTracking) : rec.tpc.forceEarlyTransform;
   qptB5Scaler = CAMath::Abs(bzkG) > 0.1f ? CAMath::Abs(bzkG) / 5.006680f : 1.f; // Repeat here, since passing in g is optional
   if (p) {
     UpdateRun3ClusterErrors(p->param.tpcErrorParamY, p->param.tpcErrorParamZ);
   }
   if (w) {
-    par.dodEdx = dodEdxEnabled = w->steps.isSet(GPUDataTypes::RecoStep::TPCdEdx);
+    par.dodEdx = dodEdxEnabled = w->steps.isSet(gpudatatypes::RecoStep::TPCdEdx);
     if (dodEdxEnabled && p && p->tpcDownscaledEdx != 0) {
       dodEdxEnabled = (rand() % 100) < p->tpcDownscaledEdx;
     }
@@ -156,9 +155,6 @@ void GPUParam::SetDefaults(const GPUSettingsGRP* g, const GPUSettingsRec* r, con
   SetDefaults(g->solenoidBzNominalGPU, g->constBz);
   if (r) {
     rec = *r;
-    if (rec.fitPropagateBzOnly == -1) {
-      rec.fitPropagateBzOnly = rec.tpc.nWays - 1;
-    }
   }
   UpdateSettings(g, p, w);
 }

@@ -98,29 +98,6 @@ using o2::monitoring::tags::Value;
 
 namespace o2::framework::readers
 {
-auto setEOSCallback(InitContext& ic)
-{
-  ic.services().get<CallbackService>().set<CallbackService::Id::EndOfStream>(
-    [](EndOfStreamContext& eosc) {
-      auto& control = eosc.services().get<ControlService>();
-      control.endOfStream();
-      control.readyToQuit(QuitRequest::Me);
-    });
-}
-
-template <typename O>
-static inline auto extractTypedOriginal(ProcessingContext& pc)
-{
-  /// FIXME: this should be done in invokeProcess() as some of the originals may be compound tables
-  return O{pc.inputs().get<TableConsumer>(aod::MetadataTrait<O>::metadata::tableLabel())->asArrowTable()};
-}
-
-template <typename... Os>
-static inline auto extractOriginalsTuple(framework::pack<Os...>, ProcessingContext& pc)
-{
-  return std::make_tuple(extractTypedOriginal<Os>(pc)...);
-}
-
 AlgorithmSpec AODJAlienReaderHelpers::rootFileReaderCallback(ConfigContext const& ctx)
 {
   // aod-parent-base-path-replacement is now a workflow option, so it needs to be
@@ -145,6 +122,7 @@ AlgorithmSpec AODJAlienReaderHelpers::rootFileReaderCallback(ConfigContext const
     stats.updateStats({static_cast<short>(ProcessingStatsId::ARROW_BYTES_DESTROYED), DataProcessingStats::Op::Set, 0});
     stats.updateStats({static_cast<short>(ProcessingStatsId::ARROW_MESSAGES_DESTROYED), DataProcessingStats::Op::Set, 0});
     stats.updateStats({static_cast<short>(ProcessingStatsId::ARROW_BYTES_EXPIRED), DataProcessingStats::Op::Set, 0});
+    stats.updateStats({static_cast<short>(ProcessingStatsId::CONSUMED_TIMEFRAMES), DataProcessingStats::Op::Set, 0});
 
     if (!options.isSet("aod-file-private")) {
       LOGP(fatal, "No input file defined!");
@@ -198,7 +176,7 @@ AlgorithmSpec AODJAlienReaderHelpers::rootFileReaderCallback(ConfigContext const
                            numTF,
                            watchdog,
                            maxRate,
-                           didir, reportTFN, reportTFFileName](Monitoring& monitoring, DataAllocator& outputs, ControlService& control, DeviceSpec const& device) {
+                           didir, reportTFN, reportTFFileName](Monitoring& monitoring, DataAllocator& outputs, ControlService& control, DeviceSpec const& device, DataProcessingStats& dpstats) {
       // Each parallel reader device.inputTimesliceId reads the files fileCounter*device.maxInputTimeslices+device.inputTimesliceId
       // the TF to read is numTF
       assert(device.inputTimesliceId < device.maxInputTimeslices);
@@ -301,6 +279,10 @@ AlgorithmSpec AODJAlienReaderHelpers::rootFileReaderCallback(ConfigContext const
         }
       }
       totalDFSent++;
+
+      // Use the new API for sending TIMESLICE_NUMBER_STARTED
+      dpstats.updateStats({(int)ProcessingStatsId::TIMESLICE_NUMBER_STARTED, DataProcessingStats::Op::Add, 1});
+      dpstats.processCommandQueue();
       monitoring.send(Metric{(uint64_t)totalDFSent, "df-sent"}.addTag(Key::Subsystem, monitoring::tags::Value::DPL));
       monitoring.send(Metric{(uint64_t)totalSizeUncompressed / 1000, "aod-bytes-read-uncompressed"}.addTag(Key::Subsystem, monitoring::tags::Value::DPL));
       monitoring.send(Metric{(uint64_t)totalSizeCompressed / 1000, "aod-bytes-read-compressed"}.addTag(Key::Subsystem, monitoring::tags::Value::DPL));

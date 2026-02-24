@@ -49,18 +49,19 @@
 #include "GPUO2Interface.h"
 #include "GPUO2InterfaceUtils.h"
 #include "CalibdEdxContainer.h"
+#include "ORTRootSerializer.h"
 #include "GPUNewCalibValues.h"
 #include "TPCPadGainCalib.h"
 #include "TPCZSLinkMapping.h"
 #include "display/GPUDisplayInterface.h"
 #include "TPCBase/Sector.h"
 #include "TPCBase/Utils.h"
-#include "TPCBase/CDBInterface.h"
+#include "TPCBaseRecSim/CDBInterface.h"
 #include "TPCCalibration/VDriftHelper.h"
 #include "CorrectionMapsHelper.h"
 #include "TPCCalibration/CorrectionMapsLoader.h"
 #include "TPCCalibration/IDCContainer.h"
-#include "TPCBase/DeadChannelMapCreator.h"
+#include "TPCBaseRecSim/DeadChannelMapCreator.h"
 #include "SimulationDataFormat/ConstMCTruthContainer.h"
 #include "SimulationDataFormat/MCCompLabel.h"
 #include "Algorithm/Parser.h"
@@ -114,6 +115,7 @@ void GPURecoWorkflowSpec::initFunctionTPCCalib(InitContext& ic)
   mCalibObjects.mFastTransformHelper->setLumiScaleType(mSpecConfig.lumiScaleType);
   mCalibObjects.mFastTransformHelper->setCorrMapMShape(mCalibObjects.mFastTransformMShape.get());
   mCalibObjects.mFastTransformHelper->setLumiScaleMode(mSpecConfig.lumiScaleMode);
+  mCalibObjects.mFastTransformHelper->setCheckCTPIDCConsistency(mSpecConfig.checkCTPIDCconsistency);
   mCalibObjects.mFastTransformHelper->enableMShapeCorrection(mSpecConfig.enableMShape);
   if (mSpecConfig.outputTracks) {
     mCalibObjects.mFastTransformHelper->init(ic);
@@ -292,6 +294,18 @@ void GPURecoWorkflowSpec::finaliseCCDBTPC(ConcreteDataMatcher& matcher, void* ob
          mTPCDeadChannelMapCreator->getDeadChannelMapFEE().getSum<int32_t>(), mTPCDeadChannelMapCreator->getDeadChannelMap().getSum<int32_t>());
   } else if (mTPCVDriftHelper->accountCCDBInputs(matcher, obj)) {
   } else if (mCalibObjects.mFastTransformHelper->accountCCDBInputs(matcher, obj)) {
+  } else if (matcher == ConcreteDataMatcher(gDataOriginTPC, "NNCLUSTERIZER_C1", 0)) {
+    mConfig->configCalib.nnClusterizerNetworks[0] = static_cast<o2::tpc::ORTRootSerializer*>(obj);
+    LOG(info) << "(NN CLUS) " << (mConfig->configCalib.nnClusterizerNetworks[0])->getONNXModelSize() << " bytes loaded for NN clusterizer: classification_c1";
+  } else if (matcher == ConcreteDataMatcher(gDataOriginTPC, "NNCLUSTERIZER_C2", 0)) {
+    mConfig->configCalib.nnClusterizerNetworks[0] = static_cast<o2::tpc::ORTRootSerializer*>(obj);
+    LOG(info) << "(NN CLUS) " << (mConfig->configCalib.nnClusterizerNetworks[0])->getONNXModelSize() << " bytes loaded for NN clusterizer: classification_c2";
+  } else if (matcher == ConcreteDataMatcher(gDataOriginTPC, "NNCLUSTERIZER_R1", 0)) {
+    mConfig->configCalib.nnClusterizerNetworks[1] = static_cast<o2::tpc::ORTRootSerializer*>(obj);
+    LOG(info) << "(NN CLUS) " << (mConfig->configCalib.nnClusterizerNetworks[1])->getONNXModelSize() << " bytes loaded for NN clusterizer: regression_c1";
+  } else if (matcher == ConcreteDataMatcher(gDataOriginTPC, "NNCLUSTERIZER_R2", 0)) {
+    mConfig->configCalib.nnClusterizerNetworks[2] = static_cast<o2::tpc::ORTRootSerializer*>(obj);
+    LOG(info) << "(NN CLUS) " << (mConfig->configCalib.nnClusterizerNetworks[2])->getONNXModelSize() << " bytes loaded for NN clusterizer: regression_c2";
   }
 }
 
@@ -403,6 +417,21 @@ bool GPURecoWorkflowSpec::fetchCalibsCCDBTPC<GPUCalibObjectsConst>(ProcessingCon
       mCalibObjects.mTPCPadGainCalib = std::move(mTPCPadGainCalibBufferNew);
       newCalibObjects.tpcPadGain = mCalibObjects.mTPCPadGainCalib.get();
       mustUpdate = true;
+    }
+
+    // NN clusterizer networks
+    if (mSpecConfig.nnLoadFromCCDB) {
+
+      if (mSpecConfig.nnEvalMode[0] == "c1") {
+        pc.inputs().get<o2::tpc::ORTRootSerializer*>("nn_classification_c1");
+      } else if (mSpecConfig.nnEvalMode[0] == "c2") {
+        pc.inputs().get<o2::tpc::ORTRootSerializer*>("nn_classification_c2");
+      }
+
+      pc.inputs().get<o2::tpc::ORTRootSerializer*>("nn_regression_c1");
+      if (mSpecConfig.nnEvalMode[1] == "r2") {
+        pc.inputs().get<o2::tpc::ORTRootSerializer*>("nn_regression_c2");
+      }
     }
   }
   return mustUpdate;

@@ -91,13 +91,15 @@ int32_t GPUReconstructionCUDA::GPUChkErrInternal(const int64_t error, const char
 
 GPUReconstruction* GPUReconstruction_Create_CUDA(const GPUSettingsDeviceBackend& cfg) { return new GPUReconstructionCUDA(cfg); }
 
-void GPUReconstructionCUDA::GetITSTraits(std::unique_ptr<o2::its::TrackerTraits<7>>* trackerTraits, std::unique_ptr<o2::its::VertexerTraits>* vertexerTraits, std::unique_ptr<o2::its::TimeFrame<7>>* timeFrame)
+void GPUReconstructionCUDA::GetITSTraits(std::unique_ptr<o2::its::TrackerTraits<7>>* trackerTraits, std::unique_ptr<o2::its::VertexerTraits<7>>* vertexerTraits, std::unique_ptr<o2::its::TimeFrame<7>>* timeFrame)
 {
   if (trackerTraits) {
     trackerTraits->reset(new o2::its::TrackerTraitsGPU);
   }
   if (vertexerTraits) {
-    vertexerTraits->reset(new o2::its::VertexerTraits); // TODO gpu-code to be implemented
+    vertexerTraits->reset(new o2::its::VertexerTraits<7>);
+    // TODO gpu-code to be implemented then remove line above and uncomment line below
+    // vertexerTraits->reset(new o2::its::VertexerTraitsGPU<7>);
   }
   if (timeFrame) {
     timeFrame->reset(new o2::its::gpu::TimeFrameGPU);
@@ -111,13 +113,14 @@ int32_t GPUReconstructionCUDA::InitDevice_Runtime()
   constexpr int32_t reqVerMin = 0;
 #endif
   if (GetProcessingSettings().rtc.enable && GetProcessingSettings().rtctech.runTest == 2) {
-    mWarpSize = GPUCA_WARP_SIZE;
+    mWarpSize = GetProcessingSettings().rtc.overrideWarpSize != -1 ? GetProcessingSettings().rtc.overrideWarpSize : GPUCA_WARP_SIZE;
     genAndLoadRTC();
     exit(0);
   }
 
   if (mMaster == nullptr) {
     cudaDeviceProp deviceProp;
+    int deviceMemoryClockRate{0}, deviceClockRate{0};
     int32_t count, bestDevice = -1;
     double bestDeviceSpeed = -1, deviceSpeed;
     if (GPUChkErrI(cudaGetDeviceCount(&count))) {
@@ -151,7 +154,9 @@ int32_t GPUReconstructionCUDA::InitDevice_Runtime()
       if (GetProcessingSettings().debugLevel >= 4) {
         GPUInfo("Obtained current memory usage for device %d", i);
       }
-      if (GPUChkErrI(cudaGetDeviceProperties(&deviceProp, i))) {
+      if (GPUChkErrI(cudaGetDeviceProperties(&deviceProp, i)) ||
+          GPUChkErrI(cudaDeviceGetAttribute(&deviceMemoryClockRate, cudaDevAttrMemoryClockRate, i)) ||
+          GPUChkErrI(cudaDeviceGetAttribute(&deviceClockRate, cudaDevAttrClockRate, i))) {
         continue;
       }
       if (GetProcessingSettings().debugLevel >= 4) {
@@ -170,7 +175,7 @@ int32_t GPUReconstructionCUDA::InitDevice_Runtime()
         deviceFailure = "Insufficient GPU memory";
       }
 
-      deviceSpeed = (double)deviceProp.multiProcessorCount * (double)deviceProp.clockRate * (double)deviceProp.warpSize * (double)free * (double)deviceProp.major * (double)deviceProp.major;
+      deviceSpeed = (double)deviceProp.multiProcessorCount * (double)deviceClockRate * (double)deviceProp.warpSize * (double)free * (double)deviceProp.major * (double)deviceProp.major;
       if (GetProcessingSettings().debugLevel >= 2) {
         GPUImportant("Device %s%2d: %s (Rev: %d.%d - Mem Avail %lu / %lu)%s %s", deviceOK ? " " : "[", i, deviceProp.name, deviceProp.major, deviceProp.minor, free, (size_t)deviceProp.totalGlobalMem, deviceOK ? " " : " ]", deviceOK ? "" : deviceFailure);
       }
@@ -184,7 +189,7 @@ int32_t GPUReconstructionCUDA::InitDevice_Runtime()
         bestDeviceSpeed = deviceSpeed;
       } else {
         if (GetProcessingSettings().debugLevel >= 2 && GetProcessingSettings().deviceNum < 0) {
-          GPUInfo("Skipping: Speed %f < %f\n", deviceSpeed, bestDeviceSpeed);
+          GPUInfo("Skipping: Speed %f <= %f\n", deviceSpeed, bestDeviceSpeed);
         }
       }
     }
@@ -237,18 +242,18 @@ int32_t GPUReconstructionCUDA::InitDevice_Runtime()
       GPUInfo("\ttotalConstMem = %ld", (uint64_t)deviceProp.totalConstMem);
       GPUInfo("\tmajor = %d", deviceProp.major);
       GPUInfo("\tminor = %d", deviceProp.minor);
-      GPUInfo("\tclockRate = %d", deviceProp.clockRate);
-      GPUInfo("\tmemoryClockRate = %d", deviceProp.memoryClockRate);
+      GPUInfo("\tclockRate = %d", deviceClockRate);
+      GPUInfo("\tdeviceMemoryClockRateRate = %d", deviceMemoryClockRate);
       GPUInfo("\tmultiProcessorCount = %d", deviceProp.multiProcessorCount);
       GPUInfo("\ttextureAlignment = %ld", (uint64_t)deviceProp.textureAlignment);
       GPUInfo(" ");
     }
-    if (deviceProp.warpSize != GPUCA_WARP_SIZE && !GetProcessingSettings().rtc.enable) {
+    if (GetProcessingSettings().rtc.enable ? (GetProcessingSettings().rtc.overrideWarpSize != -1 && deviceProp.warpSize != GetProcessingSettings().rtc.overrideWarpSize) : (deviceProp.warpSize != GPUCA_WARP_SIZE)) {
       throw std::runtime_error("Invalid warp size on GPU");
     }
     mWarpSize = deviceProp.warpSize;
-    mBlockCount = deviceProp.multiProcessorCount;
-    mMaxBackendThreads = std::max<int32_t>(mMaxBackendThreads, deviceProp.maxThreadsPerBlock * mBlockCount);
+    mMultiprocessorCount = deviceProp.multiProcessorCount;
+    mMaxBackendThreads = std::max<int32_t>(mMaxBackendThreads, deviceProp.maxThreadsPerBlock * mMultiprocessorCount);
     mDeviceName = deviceProp.name;
     mDeviceName += " (CUDA GPU)";
 
@@ -329,9 +334,9 @@ int32_t GPUReconstructionCUDA::InitDevice_Runtime()
     }
 
 #ifndef __HIPCC__ // CUDA
-    dummyInitKernel<<<mBlockCount, 256>>>(mDeviceMemoryBase);
+    dummyInitKernel<<<mMultiprocessorCount, 256>>>(mDeviceMemoryBase); // TODO: Can't we just use the CUDA version and hipify will take care of the rest?
 #else // HIP
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(dummyInitKernel), dim3(mBlockCount), dim3(256), 0, 0, mDeviceMemoryBase);
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(dummyInitKernel), dim3(mMultiprocessorCount), dim3(256), 0, 0, mDeviceMemoryBase);
 #endif
 
     if (GetProcessingSettings().rtc.enable) {
@@ -369,11 +374,11 @@ int32_t GPUReconstructionCUDA::InitDevice_Runtime()
 #endif
     mDeviceConstantMem = (GPUConstantMem*)devPtrConstantMem;
 
-    GPUInfo("CUDA Initialisation successfull (Device %d: %s (Frequency %d, Cores %d), %ld / %ld bytes host / global memory, Stack frame %d, Constant memory %ld)", mDeviceId, deviceProp.name, deviceProp.clockRate, deviceProp.multiProcessorCount, (int64_t)mHostMemorySize, (int64_t)mDeviceMemorySize, (int32_t)GPUCA_GPU_STACK_SIZE, (int64_t)gGPUConstantMemBufferSize);
+    GPUInfo("CUDA Initialisation successfull (Device %d: %s (Frequency %d, Cores %d), %ld / %ld bytes host / global memory, Stack frame %d, Constant memory %ld)", mDeviceId, deviceProp.name, deviceClockRate, deviceProp.multiProcessorCount, (int64_t)mHostMemorySize, (int64_t)mDeviceMemorySize, (int32_t)GPUCA_GPU_STACK_SIZE, (int64_t)gGPUConstantMemBufferSize);
   } else {
     GPUReconstructionCUDA* master = dynamic_cast<GPUReconstructionCUDA*>(mMaster);
     mDeviceId = master->mDeviceId;
-    mBlockCount = master->mBlockCount;
+    mMultiprocessorCount = master->mMultiprocessorCount;
     mWarpSize = master->mWarpSize;
     mMaxBackendThreads = master->mMaxBackendThreads;
     mDeviceName = master->mDeviceName;

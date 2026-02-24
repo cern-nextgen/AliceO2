@@ -17,7 +17,6 @@
 #include "DataFormatsITS/TrackITS.h"
 #include "ITStracking/ExternalAllocator.h"
 #include "GPUReconstructionIncludesITS.h"
-#include <algorithm>
 
 using namespace o2::gpu;
 
@@ -26,11 +25,19 @@ namespace o2::its
 class GPUFrameworkExternalAllocator final : public o2::its::ExternalAllocator
 {
  public:
-  void* allocate(size_t size) override
+  void* allocate(size_t size) final
   {
-    return mFWReco->AllocateDirectMemory(size, GPUMemoryResource::MEMORY_GPU);
+    return mFWReco->AllocateDirectMemory(size, mType);
   }
-  void deallocate(char* ptr, size_t) override {}
+  void deallocate(char* ptr, size_t size) final {} // this is a simple no-op
+  void pushTagOnStack(uint64_t tag) final
+  {
+    mFWReco->PushNonPersistentMemory(tag);
+  }
+  void popTagOffStack(uint64_t tag) final
+  {
+    mFWReco->PopNonPersistentMemory(gpudatatypes::RecoStep::ITSTracking, tag);
+  }
   void setReconstructionFramework(o2::gpu::GPUReconstruction* fwr) { mFWReco = fwr; }
 
  private:
@@ -38,11 +45,7 @@ class GPUFrameworkExternalAllocator final : public o2::its::ExternalAllocator
 };
 } // namespace o2::its
 
-GPUChainITS::~GPUChainITS()
-{
-  mITSTrackerTraits.reset();
-  mITSVertexerTraits.reset();
-}
+GPUChainITS::~GPUChainITS() = default;
 
 GPUChainITS::GPUChainITS(GPUReconstruction* rec) : GPUChain(rec) {}
 
@@ -56,7 +59,7 @@ o2::its::TrackerTraits<7>* GPUChainITS::GetITSTrackerTraits()
   return mITSTrackerTraits.get();
 }
 
-o2::its::VertexerTraits* GPUChainITS::GetITSVertexerTraits()
+o2::its::VertexerTraits<7>* GPUChainITS::GetITSVertexerTraits()
 {
   if (mITSVertexerTraits == nullptr) {
     mRec->GetITSTraits(nullptr, &mITSVertexerTraits, nullptr);
@@ -70,12 +73,10 @@ o2::its::TimeFrame<7>* GPUChainITS::GetITSTimeframe()
     mRec->GetITSTraits(nullptr, nullptr, &mITSTimeFrame);
   }
 #if !defined(GPUCA_STANDALONE)
-  if (mITSTimeFrame->mIsGPU) {
-    auto doFWExtAlloc = [this](size_t size) -> void* { return rec()->AllocateDirectMemory(size, GPUMemoryResource::MEMORY_GPU); };
-
-    mFrameworkAllocator.reset(new o2::its::GPUFrameworkExternalAllocator);
+  if (mITSTimeFrame->isGPU()) {
+    mFrameworkAllocator.reset(new o2::its::GPUFrameworkExternalAllocator());
     mFrameworkAllocator->setReconstructionFramework(rec());
-    mITSTimeFrame->setExternalAllocator(mFrameworkAllocator.get());
+    mITSTimeFrame->setFrameworkAllocator(mFrameworkAllocator.get());
   }
 #endif
   return mITSTimeFrame.get();

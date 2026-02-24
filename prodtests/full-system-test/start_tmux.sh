@@ -1,5 +1,39 @@
 #!/bin/bash
 
+### --- Early safety checks ----------------------------------------------------
+
+# Skip checks if FST_RUN_WITHOUT_CHECKS=1
+if [[ "${FST_RUN_WITHOUT_CHECKS:-0}" != "1" ]]; then
+
+  # 1. Abort if running inside a Slurm shell
+  if [[ -n "${SLURM_JOB_ID:-}" ]]; then
+    echo "ERROR: This script must not be run inside a Slurm job (SLURM_JOB_ID=${SLURM_JOB_ID})." >&2
+    echo "Please run it from a normal ssh shell." >&2
+    exit 1
+  fi
+
+  # 2. Abort if FMQ shared-memory files exist in /dev/shm
+  if compgen -G "/dev/shm/fmq*" > /dev/null; then
+    echo "ERROR: Found existing /dev/shm/fmq* files." >&2
+    echo "Please clean them manually before running the FST." >&2
+    exit 1
+  fi
+
+  # 3. MI100 check: detect MI100 GPU but EPN_NODE_MI100 not set or set to 0
+  if lspci | grep -qi "MI100"; then
+    if [[ -z "${EPN_NODE_MI100:-}" || "${EPN_NODE_MI100}" == "0" ]]; then
+      echo "ERROR: MI100 GPU detected on this node, but EPN_NODE_MI100 is not set to 1." >&2
+      echo "Please export EPN_NODE_MI100=1 before running this script." >&2
+      echo "See installation instructions here:" >&2
+      echo "  https://alice-pdp-operations.docs.cern.ch/o2install/#install-and-validate-the-new-o2pdpsuite-on-one-production-epn-using-the-fst"
+      exit 1
+    fi
+  fi
+
+fi
+
+### ---------------------------------------------------------------------------
+
 if [ "0$1" != "0dd" ] && [ "0$1" != "0rr" ] && [ "0$1" != "0tf" ]; then
   echo Please indicate whether to start with raw-reader [rr] or with DataDistribution [dd] or TfReader [tf] 1>&2
   exit 1
@@ -38,7 +72,7 @@ if [[ "0$FST_TMUX_NO_EPN" != "01" ]]; then
   [[ -z $EPNPIPELINES ]] && export EPNPIPELINES=1
   [[ -z $O2_GPU_DOUBLE_PIPELINE ]] && export O2_GPU_DOUBLE_PIPELINE=1
   [[ -z $O2_GPU_RTC ]] && export O2_GPU_RTC=1
-  [[ -z $DPL_CONDITION_BACKEND ]] && export DPL_CONDITION_BACKEND="http://localhost:8084"
+  [[ -z $DPL_CONDITION_BACKEND ]] && export DPL_CONDITION_BACKEND="http://o2-ccdb.internal"
   export ALL_EXTRA_CONFIG="$ALL_EXTRA_CONFIG;NameConf.mCCDBServer=${DPL_CONDITION_BACKEND};"
   export GEN_TOPO_QC_OVERRIDE_CCDB_SERVER="${DPL_CONDITION_BACKEND}"
   [[ -z $NUM_DPL_WORKFLOWS ]] && NUM_DPL_WORKFLOWS=2
@@ -57,6 +91,7 @@ export DATADIST_NEW_DPL_CHAN=1
 
 [[ -z $GEN_TOPO_MYDIR ]] && GEN_TOPO_MYDIR="$(dirname $(realpath $0))"
 source $GEN_TOPO_MYDIR/setenv.sh || { echo "setenv.sh failed" 1>&2 && exit 1; }
+mkdir -p $EDJSONS_DIR  # create event display directory to avoid filesystem error messages
 
 workflow_has_parameter QC && export QC_REDIRECT_MERGER_TO_LOCALHOST=1
 

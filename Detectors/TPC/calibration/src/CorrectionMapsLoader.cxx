@@ -12,7 +12,7 @@
 #include "TPCCalibration/CorrectionMapsLoader.h"
 #include "TPCCalibration/CorrMapParam.h"
 #include "TPCReconstruction/TPCFastTransformHelperO2.h"
-#include "TPCBase/CDBInterface.h"
+#include "TPCBaseRecSim/CDBInterface.h"
 #include "Framework/Logger.h"
 #include "Framework/ProcessingContext.h"
 #include "Framework/CCDBParamSpec.h"
@@ -53,6 +53,37 @@ void CorrectionMapsLoader::extractCCDBInputs(ProcessingContext& pc)
   o2::ctp::LumiInfo lumiObj;
   static o2::ctp::LumiInfo lumiPrev;
 
+  if (getLumiScaleType() == 2 || mIDC2CTPFallbackActive) {
+    float tpcScaler = pc.inputs().get<float>("tpcscaler");
+    // check if tpcScaler is valid and CTP fallback is allowed
+    if (tpcScaler == -1.f) {
+      const bool canUseCTPScaling = mCorrMap && mCorrMapRef && mCorrMap->isIDCSet() && mCorrMapRef->isIDCSet() && mCorrMap->isLumiSet() && mCorrMapRef->isLumiSet();
+      if (canUseCTPScaling) {
+        LOGP(info, "Invalid TPC scaler value {} received for IDC-based scaling! Using CTP fallback", tpcScaler);
+        mIDC2CTPFallbackActive = true;
+        setMeanLumi(mCorrMap->getLumi(), false);
+        setMeanLumiRef(mCorrMapRef->getLumi());
+        setLumiScaleType(1);
+      } else if (mCorrMap) {
+        // CTP scaling is not possible, dont do any scaling to avoid applying wrong corrections
+        const float storedIDC = mCorrMap->getIDC();
+        LOGP(warning, "Invalid TPC scaler value {} received for IDC-based scaling! CTP fallback not possible, using stored IDC of {} from the map to avoid applying wrong corrections", tpcScaler, storedIDC);
+        setInstLumi(storedIDC);
+      }
+    } else {
+      if (mIDC2CTPFallbackActive) {
+        // reset back to normal operation
+        LOGP(info, "Valid TPC scaler value {} received, switching back to IDC-based scaling", tpcScaler);
+        mIDC2CTPFallbackActive = false;
+        setMeanLumi(mCorrMap->getIDC(), false);
+        setMeanLumiRef(mCorrMapRef->getIDC());
+        setLumiScaleType(2);
+      }
+      // correct IDC received
+      setInstLumi(tpcScaler);
+    }
+  }
+
   if (getLumiCTPAvailable() && mInstCTPLumiOverride <= 0.) {
     if (pc.inputs().get<gsl::span<char>>("CTPLumi").size() == sizeof(o2::ctp::LumiInfo)) {
       lumiPrev = lumiObj = pc.inputs().get<o2::ctp::LumiInfo>("CTPLumi");
@@ -67,10 +98,7 @@ void CorrectionMapsLoader::extractCCDBInputs(ProcessingContext& pc)
       setInstLumi(getInstLumiCTP());
     }
   }
-  if (getLumiScaleType() == 2) {
-    float tpcScaler = pc.inputs().get<float>("tpcscaler");
-    setInstLumi(tpcScaler);
-  }
+
   if (getUseMShapeCorrection()) {
     LOGP(info, "Setting M-Shape map");
     const auto mapMShape = pc.inputs().get<o2::gpu::TPCFastTransform*>("mshape");
@@ -138,6 +166,7 @@ void CorrectionMapsLoader::addGlobalOptions(std::vector<ConfigParamSpec>& option
   addOption(options, ConfigParamSpec{"corrmap-lumi-mode", o2::framework::VariantType::Int, 0, {"scaling mode: (default) 0 = static + scale * full; 1 = full + scale * derivative; 2 = full + scale * derivative (for MC)"}});
   addOption(options, ConfigParamSpec{"enable-M-shape-correction", o2::framework::VariantType::Bool, false, {"Enable M-shape distortion correction"}});
   addOption(options, ConfigParamSpec{"disable-ctp-lumi-request", o2::framework::VariantType::Bool, false, {"do not request CTP lumi (regardless what is used for corrections)"}});
+  addOption(options, ConfigParamSpec{"disable-lumi-type-consistency-check", o2::framework::VariantType::Bool, false, {"disable check of selected CTP or IDC scaling source being consistent with the map"}});
 }
 
 //________________________________________________________
@@ -148,6 +177,7 @@ CorrectionMapsLoaderGloOpts CorrectionMapsLoader::parseGlobalOptions(const o2::f
   tpcopt.lumiMode = opts.get<int>("corrmap-lumi-mode");
   tpcopt.enableMShapeCorrection = opts.get<bool>("enable-M-shape-correction");
   tpcopt.requestCTPLumi = !opts.get<bool>("disable-ctp-lumi-request");
+  tpcopt.checkCTPIDCconsistency = !opts.get<bool>("disable-lumi-type-consistency-check");
   if (!tpcopt.requestCTPLumi && tpcopt.lumiType == 1) {
     LOGP(fatal, "Scaling with CTP Lumi is requested but this input is disabled");
   }
@@ -192,6 +222,9 @@ bool CorrectionMapsLoader::accountCCDBInputs(const ConcreteDataMatcher& matcher,
     } else if (getLumiScaleType() == 2) {
       mapMeanRate = mCorrMap->getIDC();
     }
+    if (mCheckCTPIDCConsistency) {
+      checkMeanScaleConsistency(mapMeanRate, mCorrMap->getCTP2IDCFallBackThreshold());
+    }
     if (getMeanLumiOverride() == 0 && mapMeanRate > 0.) {
       setMeanLumi(mapMeanRate, false);
     }
@@ -217,6 +250,9 @@ bool CorrectionMapsLoader::accountCCDBInputs(const ConcreteDataMatcher& matcher,
       mapRefMeanRate = mCorrMapRef->getLumi();
     } else if (getLumiScaleType() == 2) {
       mapRefMeanRate = mCorrMapRef->getIDC();
+    }
+    if (mCheckCTPIDCConsistency) {
+      checkMeanScaleConsistency(mapRefMeanRate, mCorrMapRef->getCTP2IDCFallBackThreshold());
     }
     if (getMeanLumiRefOverride() == 0) {
       setMeanLumiRef(mapRefMeanRate);
@@ -309,6 +345,7 @@ void CorrectionMapsLoader::copySettings(const CorrectionMapsLoader& src)
   mLumiCTPSource = src.mLumiCTPSource;
   mLumiScaleMode = src.mLumiScaleMode;
   mScaleInverse = src.getScaleInverse();
+  mIDC2CTPFallbackActive = src.mIDC2CTPFallbackActive;
 }
 
 void CorrectionMapsLoader::updateInverse()
@@ -325,6 +362,19 @@ void CorrectionMapsLoader::updateInverse()
     TPCFastSpaceChargeCorrectionHelper::instance()->initInverse(corr, scaling, false);
   } else {
     LOGP(info, "Reinitializing inverse correction with lumi scale mode {} not supported for now", mLumiScaleMode);
+  }
+}
+
+void CorrectionMapsLoader::checkMeanScaleConsistency(float meanLumi, float threshold) const
+{
+  if (getLumiScaleType() == 1) {
+    if (meanLumi < threshold) {
+      LOGP(fatal, "CTP Lumi scaling source is requested, but the map mean scale {} is below the threshold {}", meanLumi, threshold);
+    }
+  } else if (getLumiScaleType() == 2) {
+    if (meanLumi > threshold) {
+      LOGP(fatal, "IDC scaling source is requested, but the map mean scale {} is above the threshold {}", meanLumi, threshold);
+    }
   }
 }
 

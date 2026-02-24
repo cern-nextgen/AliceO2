@@ -110,6 +110,8 @@ std::string upcastTo(atype::type f);
 
 /// An expression tree node corresponding to a literal value
 struct LiteralNode {
+  using var_t = LiteralValue::stored_type;
+
   LiteralNode()
     : value{-1},
       type{atype::INT32}
@@ -120,7 +122,12 @@ struct LiteralNode {
   {
   }
 
-  using var_t = LiteralValue::stored_type;
+  LiteralNode(var_t v, atype::type t)
+    : value{v},
+      type{t}
+  {
+  }
+
   var_t value;
   atype::type type = atype::NA;
 };
@@ -165,11 +172,21 @@ struct PlaceholderNode : LiteralNode {
     retrieve = [](InitContext& context, char const* name) { return LiteralNode::var_t{static_cast<AT>(context.options().get<T>(name))}; };
   }
 
-  void reset(InitContext& context)
+  template <typename T>
+  PlaceholderNode(T defaultValue, std::string&& path)
+    : LiteralNode{defaultValue},
+      stored_name{path},
+      name{stored_name}
   {
-    value = retrieve(context, name.data());
+    retrieve = [](InitContext& context, char const* name) { return LiteralNode::var_t{context.options().get<T>(name)}; };
   }
 
+  void reset(InitContext& context)
+  {
+    value = retrieve(context, stored_name.empty() ? name.data() : stored_name.data());
+  }
+
+  std::string stored_name;
   std::string const& name;
   LiteralNode::var_t (*retrieve)(InitContext&, char const*);
 };
@@ -596,9 +613,22 @@ inline Node protect0(Node&& expr)
   return ifnode(nabs(Node{copy}) < o2::constants::math::Almost0, o2::constants::math::Almost0, Node{copy});
 }
 
+/// context-independent configurable
+template <typename T>
+inline Node ncfg(T defaultValue, std::string path)
+{
+  return PlaceholderNode(defaultValue, path);
+}
+
 /// A struct, containing the root of the expression tree
 struct Filter {
   Filter() = default;
+
+  Filter(std::unique_ptr<Node>&& ptr)
+  {
+    node = std::move(ptr);
+    (void)designateSubtrees(node.get());
+  }
 
   Filter(Node&& node_) : node{std::make_unique<Node>(std::forward<Node>(node_))}
   {
@@ -607,7 +637,6 @@ struct Filter {
 
   Filter(Filter&& other) : node{std::forward<std::unique_ptr<Node>>(other.node)}
   {
-    (void)designateSubtrees(node.get());
   }
 
   Filter(std::string const& input_) : input{input_} {}
@@ -682,6 +711,8 @@ void updatePlaceholders(Filter& filter, InitContext& context);
 std::shared_ptr<gandiva::Projector> createProjectorHelper(size_t nColumns, expressions::Projector* projectors,
                                                           std::shared_ptr<arrow::Schema> schema,
                                                           std::vector<std::shared_ptr<arrow::Field>> const& fields);
+
+std::vector<std::shared_ptr<gandiva::Expression>> materializeProjectors(std::vector<expressions::Projector> const& projectors, std::shared_ptr<arrow::Schema> const& inputSchema, std::vector<std::shared_ptr<arrow::Field>> const& outputFields);
 
 template <typename... C>
 std::shared_ptr<gandiva::Projector> createProjectors(framework::pack<C...>, std::vector<std::shared_ptr<arrow::Field>> const& fields, gandiva::SchemaPtr schema)

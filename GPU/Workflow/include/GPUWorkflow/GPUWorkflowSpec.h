@@ -85,6 +85,7 @@ struct TPCPadGainCalib;
 struct TPCZSLinkMapping;
 struct GPUSettingsO2;
 struct GPUSettingsProcessingNNclusterizer;
+class GPUTRDRecoParam;
 class GPUO2InterfaceQA;
 struct GPUTrackingInOutPointers;
 struct GPUTrackingInOutZS;
@@ -105,6 +106,7 @@ class GPURecoWorkflowSpec : public o2::framework::Task
   struct Config {
     int32_t itsTriggerType = 0;
     int32_t lumiScaleMode = 0;
+    bool checkCTPIDCconsistency = true;
     bool enableMShape = false;
     bool enableCTPLumi = false;
     int32_t enableDoublePipeline = 0;
@@ -116,7 +118,7 @@ class GPURecoWorkflowSpec : public o2::framework::Task
     bool zsDecoder = false;
     bool zsOnTheFly = false;
     bool outputTracks = false;
-    bool outputCompClusters = false;
+    bool outputCompClustersRoot = false;
     bool outputCompClustersFlat = false;
     bool outputCAClusters = false;
     bool outputQA = false;
@@ -133,6 +135,12 @@ class GPURecoWorkflowSpec : public o2::framework::Task
     bool itsOverrBeamEst = false;
     bool tpcTriggerHandling = false;
     bool isITS3 = false;
+    bool useFilteredOutputSpecs = false;
+
+    // NN clusterizer
+    bool nnLoadFromCCDB = false;
+    bool nnDumpToFile = false;
+    std::vector<std::string> nnEvalMode;
   };
 
   GPURecoWorkflowSpec(CompletionPolicyData* policyData, Config const& specconfig, std::vector<int32_t> const& tpcsectors, uint64_t tpcSectorMask, std::shared_ptr<o2::base::GRPGeomRequest>& ggr, std::function<bool(o2::framework::DataProcessingHeader::StartTime)>** gPolicyOrder = nullptr);
@@ -205,6 +213,7 @@ class GPURecoWorkflowSpec : public o2::framework::Task
   std::unique_ptr<TPCZSLinkMapping> mTPCZSLinkMapping;
   std::unique_ptr<o2::tpc::VDriftHelper> mTPCVDriftHelper;
   std::unique_ptr<o2::trd::GeometryFlat> mTRDGeometry;
+  std::unique_ptr<GPUTRDRecoParam> mTRDRecoParam;
   std::unique_ptr<GPUO2InterfaceConfiguration> mConfig;
   std::unique_ptr<GPUSettingsO2> mConfParam;
   std::unique_ptr<TStopwatch> mTimer;
@@ -223,11 +232,12 @@ class GPURecoWorkflowSpec : public o2::framework::Task
   int64_t mCreationForCalib = -1; ///< creation time for calib manipulation
   int32_t mVerbosity = 0;
   uint32_t mNTFs = 0;
+  uint32_t mNTFDumps = 0;
   uint32_t mNDebugDumps = 0;
   uint32_t mNextThreadIndex = 0;
   bool mUpdateGainMapCCDB = true;
   std::unique_ptr<o2::gpu::GPUSettingsTF> mTFSettings;
-  std::unique_ptr<o2::gpu::GPUSettingsProcessingNNclusterizer> mNNClusterizerSettings;
+  std::map<std::string, std::string> nnCCDBSettings;
 
   Config mSpecConfig;
   std::shared_ptr<o2::base::GRPGeomRequest> mGGR;
@@ -237,6 +247,7 @@ class GPURecoWorkflowSpec : public o2::framework::Task
   bool mMatLUTCreated = false;
   bool mITSGeometryCreated = false;
   bool mTRDGeometryCreated = false;
+  bool mTRDRecoParamCreated = false;
   bool mPropagatorInstanceCreated = false;
   int32_t mTPCCutAtTimeBin = -1;
 };

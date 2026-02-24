@@ -37,6 +37,12 @@
 #include "SimConfig/GlobalProcessCutSimParam.h"
 #include "DetectorsBase/GeometryManagerParam.h"
 #include <TGeoParallelWorld.h>
+#include <TGeoVolume.h>
+#include <TBuffer3D.h>
+#include <TGeoTessellated.h>
+#include <DetectorsBase/O2Tessellated.h>
+#include <unordered_set>
+#include "SimConfig/G4Params.h"
 
 namespace o2
 {
@@ -209,8 +215,68 @@ bool O2MCApplicationBase::MisalignGeometry()
     gGeoManager->SetUseParallelWorldNav(true);
   }
 
+  // performs possible optimizations (shape replacements on the runtime geometry)
+  fixTGeoRuntimeShapes();
+
   // return original return value of misalignment procedure
   return true;
+}
+
+void O2MCApplicationBase::fixTGeoRuntimeShapes()
+{
+  auto& g4Params = o2::conf::G4Params::Instance();
+  if (g4Params.navmode != o2::conf::EG4Nav::kTGeo) {
+    return;
+  }
+
+  // Replace TGeo shapes by other ones for performance or other reasons.
+  // Should only affect runtime of simulation.
+
+  // TODO: make this configurable via external JSON rules/macro
+
+  // Also delete original shapes for memory reasons
+
+  // We follow a visitor pattern on a geom hierarchy
+  // for now replace a TGeoTessellate by our own implementation
+  std::unordered_set<TGeoVolume*> volumes_visited;
+  std::unordered_set<TGeoShape*> old_shape_pointers;
+
+  std::function<void(TGeoNode*)> visit;
+  visit = [&](TGeoNode* node) -> void {
+    if (!node) {
+      return;
+    }
+    auto vol = node->GetVolume();
+    if (volumes_visited.find(vol) != volumes_visited.end()) {
+      return;
+    }
+    volumes_visited.insert(vol);
+
+    // transform the shape of this volume
+    auto shape = vol->GetShape();
+    if (shape->IsA() == TGeoTessellated::Class()) {
+      auto tsl = static_cast<TGeoTessellated*>(shape);
+
+      // make a new O2Tessellated until ROOT has proper support for navigation in TGeoTessellated
+      std::cout << "Converting to O2Tessellated for vol " << vol->GetName() << "\n";
+      auto replacement_shape = new o2::base::O2Tessellated(*tsl, false);
+      vol->SetShape(replacement_shape);
+      old_shape_pointers.insert(shape);
+    }
+    // other cases could come here
+
+    for (int i = 0; i < vol->GetNdaughters(); ++i) {
+      auto child_node = vol->GetNode(i);
+      visit(child_node);
+    }
+  };
+
+  visit(gGeoManager->GetTopNode());
+
+  for (auto ptr : old_shape_pointers) {
+    delete ptr;
+    ptr = nullptr;
+  }
 }
 
 void O2MCApplicationBase::finishEventCommon()
@@ -375,8 +441,8 @@ void addSpecialParticles()
   // f0(980) assume 70 MeV as width (PDG: 40 to 100 MeV)
   TVirtualMC::GetMC()->DefineParticle(9010221, "f0_980", kPTNeutron, 0.98, 0.0, 9.403e-24, "Hadron", 7e-2, 0, 1, 1, 0, 0, 1, 0, 0, kTRUE);
 
-  // f2(1270) (PDG: width = 185 MeV)
-  TVirtualMC::GetMC()->DefineParticle(225, "f2_1270", kPTNeutron, 1.275, 0.0, 3.558e-24, "Hadron", 0.185, 4, 1, 1, 0, 0, 1, 0, 0, kTRUE);
+  // f2(1270) (PDG: width = 186 MeV)
+  TVirtualMC::GetMC()->DefineParticle(225, "f2_1270", kPTNeutron, 1.275, 0.0, 3.538e-24, "Hadron", 0.186, 2, 1, 1, 0, 0, 1, 0, 0, kTRUE);
 
   // f1(1285) (PDG: width = 24.20 MeV) Spin/Parity might not be correct
   TVirtualMC::GetMC()->DefineParticle(20223, "f1_1285", kPTNeutron, 1.28210, 0.0, 1e-24, "Hadron", 0.02420, 3, 1, 0, 0, 0, 0, 0, 1, kTRUE);
@@ -391,14 +457,14 @@ void addSpecialParticles()
   // Their life times are not known, so we set them to 1e-24
   // f0(1370) (PDG: width = 200-500 MeV) Spin/Parity might not be correct
   TVirtualMC::GetMC()->DefineParticle(10221, "f0_1370", kPTNeutron, 1.37, 0.0, 1e-24, "Hadron", 0.2, 1, 1, 1, 0, 0, 1, 0, 0, kTRUE);
-  // a2(1320) (PDG: width = 107.8 MeV) (Spin/Parity might not be correct)
-  TVirtualMC::GetMC()->DefineParticle(115, "a2_1320", kPTNeutron, 1.3182, 0.0, 1e-24, "Hadron", 0.1078, 1, 1, 1, 1, 0, 1, 0, 0, kTRUE);
-  // f0(1500) (PDG: width = 112 MeV) Spin/Parity might not be correct
+  // a2(1320) (PDG: width = 107.8 MeV)
+  TVirtualMC::GetMC()->DefineParticle(115, "a2_1320", kPTNeutron, 1.3182, 0.0, 6.1e-24, "Hadron", 0.1078, 2, 1, 1, 1, 0, -1, 0, 0, kTRUE);
+  // f0(1500) (PDG: width = 112 MeV)
   TVirtualMC::GetMC()->DefineParticle(9030221, "f0_1500", kPTNeutron, 1.506, 0.0, 1e-24, "Hadron", 0.112, 0, 1, 1, 0, 0, 1, 0, 0, kTRUE);
-  // f0(1710) (PDG: width = 139 MeV) Spin/Parity might not be correct
-  TVirtualMC::GetMC()->DefineParticle(10331, "f0_1710", kPTNeutron, 1.71, 0.0, 1e-24, "Hadron", 0.139, 1, 1, 1, 0, 0, 1, 0, 0, kTRUE);
-  // f2(1525) (PDG: width = 73 MeV) Spin/Parity might not be correct
-  TVirtualMC::GetMC()->DefineParticle(335, "f2_1525", kPTNeutron, 1.525, 0.0, 1e-24, "Hadron", 0.073, 5, 1, 1, 0, 0, 1, 0, 0, kTRUE);
+  // f0(1710) (PDG: width = 150 MeV)
+  TVirtualMC::GetMC()->DefineParticle(10331, "f0_1710", kPTNeutron, 1.71, 0.0, 4.4e-24, "Hadron", 0.150, 0, 1, 1, 0, 0, 1, 0, 0, kTRUE);
+  // f2(1525) (PDG: width = 84 MeV)
+  TVirtualMC::GetMC()->DefineParticle(335, "f2_1525", kPTNeutron, 1.525, 0.0, 7.798e-24, "Hadron", 0.084, 2, 1, 1, 0, 0, 1, 0, 0, kTRUE);
 
   // Xi_0(1820)
   TVirtualMC::GetMC()->DefineParticle(123324, "Xi_0_1820", kPTNeutron, 1.8234, 0.0, 2.742550e-23, "Hadron", 0.024, 3, -1, 0, 1, 1, 0, 0, 1, kTRUE);
@@ -1331,22 +1397,20 @@ void addSpecialParticles()
   TVirtualMC::GetMC()->SetDecayMode(9010221, bratio, mode);
 
   // Define the 2-body phase space decay for the f2(1270)
-  //  Int_t mode[6][3];
-  //  Float_t bratio[6];
 
-  for (Int_t kz = 0; kz < 6; kz++) {
-    bratio[kz] = 0.;
-    mode[kz][0] = 0;
-    mode[kz][1] = 0;
-    mode[kz][2] = 0;
-  }
-  bratio[0] = 100.;
-  mode[0][0] = 211;  // pion
-  mode[0][1] = -211; // pion
+  // for (Int_t kz = 0; kz < 6; kz++) {
+  //   bratio[kz] = 0.;
+  //   mode[kz][0] = 0;
+  //   mode[kz][1] = 0;
+  //   mode[kz][2] = 0;
+  // }
+  // bratio[0] = 100.;
+  // mode[0][0] = 211;  // pion
+  // mode[0][1] = -211; // pion
 
-  TVirtualMC::GetMC()->SetDecayMode(225, bratio, mode);
+  // TVirtualMC::GetMC()->SetDecayMode(225, bratio, mode);
 
-  // Define the 2-body phase space decay for the resonances: f0(1500), f2(1525), f0(1710
+  // Define the 2-body phase space decay for the resonances: f0(1500), f2(1525), f0(1710), f0(1370), a2(1320), f2(1270)
   for (Int_t kz = 0; kz < 6; kz++) {
     bratio[kz] = 0.;
     mode[kz][0] = 0;
@@ -1362,6 +1426,7 @@ void addSpecialParticles()
   TVirtualMC::GetMC()->SetDecayMode(10331, bratio, mode);   // f0(1710)
   TVirtualMC::GetMC()->SetDecayMode(10221, bratio, mode);   // f0(1370)
   TVirtualMC::GetMC()->SetDecayMode(115, bratio, mode);     // a2(1320)
+  TVirtualMC::GetMC()->SetDecayMode(225, bratio, mode);     // f2(1270)
 
   // Define the 3-body phase space decay for the resonances: f1(1285), f1(1420)
   for (Int_t kz = 0; kz < 6; kz++) {

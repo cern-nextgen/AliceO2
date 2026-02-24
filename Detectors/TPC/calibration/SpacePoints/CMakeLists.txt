@@ -8,6 +8,7 @@
 # In applying this license CERN does not waive the privileges and immunities
 # granted to it by virtue of its status as an Intergovernmental Organization
 # or submit itself to any jurisdiction.
+# add_compile_options(-O0 -g -fPIC)
 
 o2_add_library(SpacePoints
                SOURCES src/SpacePointsCalibParam.cxx
@@ -19,6 +20,7 @@ o2_add_library(SpacePoints
                                      O2::CommonUtils
                                      O2::TPCBase
                                      O2::TRDBase
+                                     O2::TOFBase
                                      O2::TPCReconstruction
                                      O2::TPCFastTransformation
                                      O2::ITStracking
@@ -27,7 +29,8 @@ o2_add_library(SpacePoints
                                      O2::DataFormatsITSMFT
                                      O2::DataFormatsTRD
                                      O2::DataFormatsTOF
-                                     O2::DataFormatsGlobalTracking)
+                                     O2::DataFormatsGlobalTracking
+                                     O2::GPUTracking)
 
 o2_target_root_dictionary(SpacePoints
                           HEADERS include/SpacePoints/TrackResiduals.h

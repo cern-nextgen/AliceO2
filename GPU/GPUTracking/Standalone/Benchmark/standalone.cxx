@@ -72,6 +72,7 @@ extern GPUSettingsStandalone configStandalone;
 }
 
 GPUReconstruction *rec, *recAsync, *recPipeline;
+uint32_t syncAsyncDecodedClusters = 0;
 GPUChainTracking *chainTracking, *chainTrackingAsync, *chainTrackingPipeline;
 GPUChainITS *chainITS, *chainITSAsync, *chainITSPipeline;
 std::string eventsDir;
@@ -172,7 +173,7 @@ int32_t ReadConfiguration(int argc, char** argv)
     return 1;
   }
   if (configStandalone.proc.doublePipeline && (configStandalone.runs < 4 || !configStandalone.outputcontrolmem)) {
-    printf("Double pipeline mode needs at least 3 runs per event and external output. To cycle though multiple events, use --preloadEvents and --runs n for n iterations round-robin\n");
+    printf("Double pipeline mode needs at least 4 runs per event and external output. To cycle though multiple events, use --preloadEvents and --runs n for n iterations round-robin\n");
     return 1;
   }
   if (configStandalone.TF.bunchSim && configStandalone.TF.nMerge) {
@@ -196,8 +197,12 @@ int32_t ReadConfiguration(int argc, char** argv)
     printf("Can only produce QA pdf output when input files are specified!\n");
     return 1;
   }
+  if (configStandalone.QA.enableLocalOutput && !configStandalone.QA.inputHistogramsOnly && configStandalone.QA.output == "" && configStandalone.QA.plotsDir != "") {
+    configStandalone.QA.output = configStandalone.QA.plotsDir + "/output.root";
+  }
   if (configStandalone.QA.inputHistogramsOnly) {
     configStandalone.rundEdx = false;
+    configStandalone.noEvents = true;
   }
   if (configStandalone.QA.dumpToROOT) {
     configStandalone.proc.outputSharedClusterMap = true;
@@ -213,14 +218,13 @@ int32_t ReadConfiguration(int argc, char** argv)
     }
   }
   if (configStandalone.setO2Settings) {
-    if (!(configStandalone.inputcontrolmem && configStandalone.outputcontrolmem)) {
-      printf("setO2Settings requires the usage of --inputMemory and --outputMemory as in O2\n");
-      return 1;
-    }
-    if (configStandalone.runGPU) {
+    if (configStandalone.runGPU && configStandalone.proc.debugLevel <= 1) {
+      if (!(configStandalone.inputcontrolmem && configStandalone.outputcontrolmem)) {
+        printf("setO2Settings requires the usage of --inputMemory and --outputMemory as in O2\n");
+        return 1;
+      }
       configStandalone.proc.forceHostMemoryPoolSize = 1024 * 1024 * 1024;
     }
-    configStandalone.rec.tpc.nWaysOuter = 1;
     configStandalone.rec.tpc.trackReferenceX = 83;
     configStandalone.proc.outputSharedClusterMap = 1;
     configStandalone.proc.clearO2OutputFromGPU = 1;
@@ -293,7 +297,8 @@ int32_t SetupReconstruction()
       printf("Error reading event config file\n");
       return 1;
     }
-    printf("Read event settings from dir %s (solenoidBz: %f, constBz %d, maxTimeBin %d)\n", eventsDir.c_str(), rec->GetGRPSettings().solenoidBzNominalGPU, (int32_t)rec->GetGRPSettings().constBz, rec->GetGRPSettings().grpContinuousMaxTimeBin);
+    const char* tmptext = configStandalone.noEvents ? "Using default event settings, no event dir loaded" : "Read event settings from dir ";
+    printf("%s%s (solenoidBz: %f, constBz %d, maxTimeBin %d)\n", tmptext, configStandalone.noEvents ? "" : eventsDir.c_str(), rec->GetGRPSettings().solenoidBzNominalGPU, (int32_t)rec->GetGRPSettings().constBz, rec->GetGRPSettings().grpContinuousMaxTimeBin);
     if (configStandalone.testSyncAsync) {
       recAsync->ReadSettings(eventsDir.c_str());
     }
@@ -304,6 +309,10 @@ int32_t SetupReconstruction()
 
   chainTracking->mConfigQA = &configStandalone.QA;
   chainTracking->mConfigDisplay = &configStandalone.display;
+  if (configStandalone.testSyncAsync) {
+    chainTrackingAsync->mConfigQA = &configStandalone.QA;
+    chainTrackingAsync->mConfigDisplay = &configStandalone.display;
+  }
 
   GPUSettingsGRP grp = rec->GetGRPSettings();
   GPUSettingsRec recSet;
@@ -331,8 +340,14 @@ int32_t SetupReconstruction()
       grp.grpContinuousMaxTimeBin = configStandalone.TF.timeFrameLen * ((double)GPUReconstructionTimeframe::TPCZ / (double)GPUReconstructionTimeframe::DRIFT_TIME) / chainTracking->GetTPCTransformHelper()->getCorrMap()->getVDrift();
     }
   }
-  if (configStandalone.cont && grp.grpContinuousMaxTimeBin == 0) {
+  if (configStandalone.setMaxTimeBin != -2) {
+    grp.grpContinuousMaxTimeBin = configStandalone.setMaxTimeBin;
+  } else if (configStandalone.cont && grp.grpContinuousMaxTimeBin == 0) {
     grp.grpContinuousMaxTimeBin = -1;
+  }
+  if (grp.grpContinuousMaxTimeBin < -1 && !configStandalone.noEvents) {
+    printf("Invalid maxTimeBin %d\n", grp.grpContinuousMaxTimeBin);
+    return 1;
   }
   if (rec->GetDeviceType() == GPUReconstruction::DeviceType::CPU) {
     printf("Standalone Test Framework for CA Tracker - Using CPU\n");
@@ -357,50 +372,59 @@ int32_t SetupReconstruction()
     procSet.runMC = true;
   }
 
-  steps.steps = GPUDataTypes::RecoStep::AllRecoSteps;
+  steps.steps = gpudatatypes::RecoStep::AllRecoSteps;
   if (configStandalone.runTRD != -1) {
-    steps.steps.setBits(GPUDataTypes::RecoStep::TRDTracking, configStandalone.runTRD > 0);
+    steps.steps.setBits(gpudatatypes::RecoStep::TRDTracking, configStandalone.runTRD > 0);
   } else if (chainTracking->GetTRDGeometry() == nullptr) {
-    steps.steps.setBits(GPUDataTypes::RecoStep::TRDTracking, false);
-  }
-  if (configStandalone.rundEdx != -1) {
-    steps.steps.setBits(GPUDataTypes::RecoStep::TPCdEdx, configStandalone.rundEdx > 0);
+    steps.steps.setBits(gpudatatypes::RecoStep::TRDTracking, false);
   }
   if (configStandalone.runCompression != -1) {
-    steps.steps.setBits(GPUDataTypes::RecoStep::TPCCompression, configStandalone.runCompression > 0);
+    steps.steps.setBits(gpudatatypes::RecoStep::TPCCompression, configStandalone.runCompression > 0);
   }
   if (configStandalone.runTransformation != -1) {
-    steps.steps.setBits(GPUDataTypes::RecoStep::TPCConversion, configStandalone.runTransformation > 0);
+    steps.steps.setBits(gpudatatypes::RecoStep::TPCConversion, configStandalone.runTransformation > 0);
   }
-  steps.steps.setBits(GPUDataTypes::RecoStep::Refit, configStandalone.runRefit);
+  steps.steps.setBits(gpudatatypes::RecoStep::Refit, configStandalone.runRefit);
   if (!configStandalone.runMerger) {
-    steps.steps.setBits(GPUDataTypes::RecoStep::TPCMerging, false);
-    steps.steps.setBits(GPUDataTypes::RecoStep::TRDTracking, false);
-    steps.steps.setBits(GPUDataTypes::RecoStep::TPCdEdx, false);
-    steps.steps.setBits(GPUDataTypes::RecoStep::TPCCompression, false);
-    steps.steps.setBits(GPUDataTypes::RecoStep::Refit, false);
+    steps.steps.setBits(gpudatatypes::RecoStep::TPCMerging, false);
+    steps.steps.setBits(gpudatatypes::RecoStep::TRDTracking, false);
+    steps.steps.setBits(gpudatatypes::RecoStep::TPCdEdx, false);
+    steps.steps.setBits(gpudatatypes::RecoStep::TPCCompression, false);
+    steps.steps.setBits(gpudatatypes::RecoStep::Refit, false);
   }
 
   if (configStandalone.TF.bunchSim || configStandalone.TF.nMerge) {
-    steps.steps.setBits(GPUDataTypes::RecoStep::TRDTracking, false);
+    steps.steps.setBits(gpudatatypes::RecoStep::TRDTracking, false);
   }
-  steps.inputs.set(GPUDataTypes::InOutType::TPCClusters, GPUDataTypes::InOutType::TRDTracklets);
-  steps.steps.setBits(GPUDataTypes::RecoStep::TPCDecompression, false);
-  steps.inputs.setBits(GPUDataTypes::InOutType::TPCCompressedClusters, false);
+  steps.inputs.set(gpudatatypes::InOutType::TPCClusters, gpudatatypes::InOutType::TRDTracklets);
+  steps.steps.setBits(gpudatatypes::RecoStep::TPCDecompression, false);
+  steps.inputs.setBits(gpudatatypes::InOutType::TPCCompressedClusters, false);
   if (grp.doCompClusterDecode) {
-    steps.inputs.setBits(GPUDataTypes::InOutType::TPCCompressedClusters, true);
-    steps.inputs.setBits(GPUDataTypes::InOutType::TPCClusters, false);
-    steps.steps.setBits(GPUDataTypes::RecoStep::TPCCompression, false);
-    steps.steps.setBits(GPUDataTypes::RecoStep::TPCClusterFinding, false);
-    steps.steps.setBits(GPUDataTypes::RecoStep::TPCDecompression, true);
-    steps.outputs.setBits(GPUDataTypes::InOutType::TPCCompressedClusters, false);
+    steps.inputs.setBits(gpudatatypes::InOutType::TPCCompressedClusters, true);
+    steps.inputs.setBits(gpudatatypes::InOutType::TPCClusters, false);
+    steps.steps.setBits(gpudatatypes::RecoStep::TPCCompression, false);
+    steps.steps.setBits(gpudatatypes::RecoStep::TPCClusterFinding, false);
+    steps.steps.setBits(gpudatatypes::RecoStep::TPCDecompression, true);
+    steps.outputs.setBits(gpudatatypes::InOutType::TPCCompressedClusters, false);
   } else if (grp.needsClusterer) {
-    steps.inputs.setBits(GPUDataTypes::InOutType::TPCRaw, true);
-    steps.inputs.setBits(GPUDataTypes::InOutType::TPCClusters, false);
+    steps.inputs.setBits(gpudatatypes::InOutType::TPCRaw, true);
+    steps.inputs.setBits(gpudatatypes::InOutType::TPCClusters, false);
   } else {
-    steps.steps.setBits(GPUDataTypes::RecoStep::TPCClusterFinding, false);
+    steps.steps.setBits(gpudatatypes::RecoStep::TPCClusterFinding, false);
   }
 
+  // Set settings for synchronous
+  GPUChainTracking::ApplySyncSettings(procSet, recSet, steps.steps, configStandalone.testSyncAsync || configStandalone.testSync, configStandalone.rundEdx);
+  int32_t runAsyncQA = procSet.runQA && !configStandalone.testSyncAsyncQcInSync ? procSet.runQA : 0;
+  if (configStandalone.testSyncAsync) {
+    procSet.eventDisplay = nullptr;
+    if (!configStandalone.testSyncAsyncQcInSync) {
+      procSet.runQA = false;
+    }
+  }
+
+  // Apply --recoSteps flag last so it takes precedence
+  // E.g. ApplySyncSettings might enable TPCdEdx, but might not be needed if only clusterizer was requested
   if (configStandalone.recoSteps >= 0) {
     steps.steps &= configStandalone.recoSteps;
   }
@@ -409,60 +433,41 @@ int32_t SetupReconstruction()
   }
 
   steps.outputs.clear();
-  steps.outputs.setBits(GPUDataTypes::InOutType::TPCMergedTracks, steps.steps.isSet(GPUDataTypes::RecoStep::TPCMerging));
-  steps.outputs.setBits(GPUDataTypes::InOutType::TPCCompressedClusters, steps.steps.isSet(GPUDataTypes::RecoStep::TPCCompression));
-  steps.outputs.setBits(GPUDataTypes::InOutType::TRDTracks, steps.steps.isSet(GPUDataTypes::RecoStep::TRDTracking));
-  steps.outputs.setBits(GPUDataTypes::InOutType::TPCClusters, steps.steps.isSet(GPUDataTypes::RecoStep::TPCClusterFinding));
+  steps.outputs.setBits(gpudatatypes::InOutType::TPCMergedTracks, steps.steps.isSet(gpudatatypes::RecoStep::TPCMerging));
+  steps.outputs.setBits(gpudatatypes::InOutType::TPCCompressedClusters, steps.steps.isSet(gpudatatypes::RecoStep::TPCCompression));
+  steps.outputs.setBits(gpudatatypes::InOutType::TRDTracks, steps.steps.isSet(gpudatatypes::RecoStep::TRDTracking));
+  steps.outputs.setBits(gpudatatypes::InOutType::TPCClusters, steps.steps.isSet(gpudatatypes::RecoStep::TPCClusterFinding));
 
-  if (steps.steps.isSet(GPUDataTypes::RecoStep::TRDTracking)) {
-    if (recSet.tpc.nWays > 1) {
-      recSet.tpc.nWaysOuter = 1;
-    }
+  if (steps.steps.isSet(gpudatatypes::RecoStep::TRDTracking)) {
     if (procSet.createO2Output && !procSet.trdTrackModelO2) {
       procSet.createO2Output = 1; // Must not be 2, to make sure TPC GPU tracks are still available for TRD
     }
-  }
-
-  if (configStandalone.testSyncAsync || configStandalone.testSync) {
-    // Set settings for synchronous
-    if (configStandalone.rundEdx == -1) {
-      steps.steps.setBits(GPUDataTypes::RecoStep::TPCdEdx, 0);
-    }
-    recSet.useMatLUT = false;
-    if (configStandalone.testSyncAsync) {
-      procSet.eventDisplay = nullptr;
-    }
-  }
-  if (configStandalone.proc.rtc.optSpecialCode == -1) {
-    configStandalone.proc.rtc.optSpecialCode = configStandalone.testSyncAsync || configStandalone.testSync;
   }
 
   rec->SetSettings(&grp, &recSet, &procSet, &steps);
   if (configStandalone.proc.doublePipeline) {
     recPipeline->SetSettings(&grp, &recSet, &procSet, &steps);
   }
-  if (configStandalone.testSyncAsync) {
+  if (configStandalone.testSyncAsync) { // TODO: Add --async mode / flag
     // Set settings for asynchronous
-    steps.steps.setBits(GPUDataTypes::RecoStep::TPCDecompression, true);
-    steps.steps.setBits(GPUDataTypes::RecoStep::TPCdEdx, true);
-    steps.steps.setBits(GPUDataTypes::RecoStep::TPCCompression, false);
-    steps.steps.setBits(GPUDataTypes::RecoStep::TPCClusterFinding, false);
-    steps.inputs.setBits(GPUDataTypes::InOutType::TPCRaw, false);
-    steps.inputs.setBits(GPUDataTypes::InOutType::TPCClusters, false);
-    steps.inputs.setBits(GPUDataTypes::InOutType::TPCCompressedClusters, true);
-    steps.outputs.setBits(GPUDataTypes::InOutType::TPCCompressedClusters, false);
+    steps.steps.setBits(gpudatatypes::RecoStep::TPCDecompression, true);
+    steps.steps.setBits(gpudatatypes::RecoStep::TPCdEdx, true);
+    steps.steps.setBits(gpudatatypes::RecoStep::TPCCompression, false);
+    steps.steps.setBits(gpudatatypes::RecoStep::TPCClusterFinding, false);
+    steps.inputs.setBits(gpudatatypes::InOutType::TPCRaw, false);
+    steps.inputs.setBits(gpudatatypes::InOutType::TPCClusters, false);
+    steps.inputs.setBits(gpudatatypes::InOutType::TPCCompressedClusters, true);
+    steps.outputs.setBits(gpudatatypes::InOutType::TPCCompressedClusters, false);
     procSet.runMC = false;
-    procSet.runQA = false;
+    procSet.runQA = runAsyncQA;
     procSet.eventDisplay = eventDisplay.get();
     procSet.runCompressionStatistics = 0;
-    procSet.rtc.optSpecialCode = 0;
     if (recSet.tpc.rejectionStrategy >= GPUSettings::RejectionStrategyB) {
       procSet.tpcInputWithClusterRejection = 1;
     }
     recSet.tpc.disableRefitAttachment = 0xFF;
-    recSet.tpc.looperInterpolationInExtraPass = 0;
     recSet.maxTrackQPtB5 = CAMath::Min(recSet.maxTrackQPtB5, recSet.tpc.rejectQPtB5);
-    recSet.useMatLUT = true;
+    GPUChainTracking::ApplySyncSettings(procSet, recSet, steps.steps, false, configStandalone.rundEdx);
     recAsync->SetSettings(&grp, &recSet, &procSet, &steps);
   }
 
@@ -586,7 +591,7 @@ int32_t LoadEvent(int32_t iEvent, int32_t x)
     }
   }
 
-  if (!rec->GetParam().par.earlyTpcTransform && !chainTracking->mIOPtrs.clustersNative && !chainTracking->mIOPtrs.tpcPackedDigits && !chainTracking->mIOPtrs.tpcZS && !chainTracking->mIOPtrs.tpcCompressedClusters) {
+  if (!chainTracking->mIOPtrs.clustersNative && !chainTracking->mIOPtrs.tpcPackedDigits && !chainTracking->mIOPtrs.tpcZS && !chainTracking->mIOPtrs.tpcCompressedClusters) {
     printf("Need cluster native data for on-the-fly TPC transform\n");
     return 1;
   }
@@ -653,20 +658,15 @@ int32_t RunBenchmark(GPUReconstruction* recUse, GPUChainTracking* chainTrackingU
 
     if (tmpRetVal == 0 || tmpRetVal == 2) {
       OutputStat(chainTrackingUse, iRun == 0 ? nTracksTotal : nullptr, iRun == 0 ? nClustersTotal : nullptr);
-      if (configStandalone.memoryStat) {
-        recUse->PrintMemoryStatistics();
-      } else if (configStandalone.proc.debugLevel >= 2) {
-        recUse->PrintMemoryOverview();
-      }
     }
 
     if (tmpRetVal == 0 && configStandalone.testSyncAsync) {
-      if (configStandalone.testSyncAsync) {
-        printf("Running asynchronous phase\n");
-      }
 
       vecpod<char> compressedTmpMem(chainTracking->mIOPtrs.tpcCompressedClusters->totalDataSize);
       memcpy(compressedTmpMem.data(), (const void*)chainTracking->mIOPtrs.tpcCompressedClusters, chainTracking->mIOPtrs.tpcCompressedClusters->totalDataSize);
+      o2::tpc::CompressedClusters tmp(*chainTracking->mIOPtrs.tpcCompressedClusters);
+      syncAsyncDecodedClusters = tmp.nAttachedClusters + tmp.nUnattachedClusters;
+      printf("Running asynchronous phase from %'u compressed clusters\n", syncAsyncDecodedClusters);
 
       chainTrackingAsync->mIOPtrs = ioPtrs;
       chainTrackingAsync->mIOPtrs.tpcCompressedClusters = (o2::tpc::CompressedClustersFlat*)compressedTmpMem.data();
@@ -689,9 +689,6 @@ int32_t RunBenchmark(GPUReconstruction* recUse, GPUChainTracking* chainTrackingU
       tmpRetVal = recAsync->RunChains();
       if (tmpRetVal == 0 || tmpRetVal == 2) {
         OutputStat(chainTrackingAsync, nullptr, nullptr);
-        if (configStandalone.memoryStat) {
-          recAsync->PrintMemoryStatistics();
-        }
       }
       recAsync->ClearAllocatedMemory();
     }
@@ -704,10 +701,10 @@ int32_t RunBenchmark(GPUReconstruction* recUse, GPUChainTracking* chainTrackingU
       configStandalone.noprompt = 1;
     }
     if (tmpRetVal == 3 && configStandalone.proc.ignoreNonFatalGPUErrors) {
-      printf("Non-FATAL GPU error occured, ignoring\n");
+      printf("GPU Standalone Benchmark: Non-FATAL GPU error occured, ignoring\n");
     } else if (tmpRetVal && !configStandalone.continueOnError) {
       if (tmpRetVal != 2) {
-        printf("Error occured\n");
+        printf("GPU Standalone Benchmark: Error occured\n");
       }
       return 1;
     }
@@ -730,7 +727,7 @@ int32_t main(int argc, char** argv)
   eventsDir = std::string(configStandalone.absoluteEventsDir ? "" : "events/") + configStandalone.eventsDir + "/";
 
   GPUSettingsDeviceBackend deviceSet;
-  deviceSet.deviceType = configStandalone.runGPU ? GPUDataTypes::GetDeviceType(configStandalone.gpuType.c_str()) : GPUDataTypes::DeviceType::CPU;
+  deviceSet.deviceType = configStandalone.runGPU ? gpudatatypes::GetDeviceType(configStandalone.gpuType.c_str()) : gpudatatypes::DeviceType::CPU;
   deviceSet.forceDeviceType = configStandalone.runGPUforce;
   deviceSet.master = nullptr;
   recUnique.reset(GPUReconstruction::CreateInstance(deviceSet));
@@ -755,7 +752,6 @@ int32_t main(int argc, char** argv)
       recAsync->SetDebugLevelTmp(configStandalone.proc.debugLevel);
     }
     chainTrackingAsync = recAsync->AddChain<GPUChainTracking>();
-    chainTrackingAsync->SetQAFromForeignChain(chainTracking);
   }
   if (configStandalone.proc.doublePipeline) {
     if (configStandalone.proc.debugLevel >= 3) {
@@ -788,13 +784,17 @@ int32_t main(int argc, char** argv)
 
   srand(configStandalone.seed);
 
-  for (nEventsInDirectory = 0; true; nEventsInDirectory++) {
-    std::ifstream in;
-    in.open((eventsDir + GPUCA_EVDUMP_FILE "." + std::to_string(nEventsInDirectory) + ".dump").c_str(), std::ifstream::binary);
-    if (in.fail()) {
-      break;
+  nEventsInDirectory = 0;
+  if (!configStandalone.noEvents) {
+    while (true) {
+      std::ifstream in;
+      in.open((eventsDir + GPUCA_EVDUMP_FILE "." + std::to_string(nEventsInDirectory) + ".dump").c_str(), std::ifstream::binary);
+      if (in.fail()) {
+        break;
+      }
+      in.close();
+      nEventsInDirectory++;
     }
-    in.close();
   }
 
   if (configStandalone.TF.bunchSim || configStandalone.TF.nMerge) {
@@ -831,11 +831,7 @@ int32_t main(int argc, char** argv)
     fflush(stdout);
     for (int32_t i = 0; i < nEvents - configStandalone.StartEvent; i++) {
       LoadEvent(configStandalone.StartEvent + i, i);
-      if (configStandalone.proc.debugLevel >= 2) {
-        printf("Loading event %d\n", i);
-      } else {
-        printf(" %d", i);
-      }
+      printf(configStandalone.proc.debugLevel >= 2 ? "Loading event %d\n" : " %d", i + configStandalone.StartEvent);
       fflush(stdout);
     }
     printf("\n");
@@ -847,7 +843,7 @@ int32_t main(int argc, char** argv)
       break;
     }
     if (configStandalone.runs2 > 1) {
-      printf("RUN2: %d\n", iRunOuter);
+      printf("\nRUN2: %d\n", iRunOuter);
     }
     int64_t nTracksTotal = 0;
     int64_t nClustersTotal = 0;
@@ -863,7 +859,7 @@ int32_t main(int argc, char** argv)
       if (iEvent != configStandalone.StartEvent) {
         printf("\n");
       }
-      if (configStandalone.noEvents == false && !configStandalone.preloadEvents) {
+      if (!configStandalone.noEvents && !configStandalone.preloadEvents) {
         HighResTimer timerLoad;
         timerLoad.Start();
         if (LoadEvent(iEvent, 0)) {
@@ -896,12 +892,14 @@ int32_t main(int argc, char** argv)
         }
         printf("Loading time: %'d us\n", (int32_t)(1000000 * timerLoad.GetCurrentElapsedTime()));
       }
-      printf("Processing Event %d\n", iEvent);
 
       nIteration.store(0);
       nIterationEnd.store(0);
       double pipelineWalltime = 1.;
-      if (configStandalone.proc.doublePipeline) {
+      if (configStandalone.noEvents) {
+        printf("No processing, no events loaded\n");
+      } else if (configStandalone.proc.doublePipeline) {
+        printf(configStandalone.preloadEvents ? "Processing Events %d to %d in Pipeline\n" : "Processing Event %d in Pipeline %d times\n", iEvent, configStandalone.preloadEvents ? std::min(iEvent + configStandalone.runs - 1, nEvents - 1) : configStandalone.runs);
         HighResTimer timerPipeline;
         if (configStandalone.proc.debugLevel < 2 && (RunBenchmark(rec, chainTracking, 1, iEvent, &nTracksTotal, &nClustersTotal) || RunBenchmark(recPipeline, chainTrackingPipeline, 2, iEvent, &nTracksTotal, &nClustersTotal))) {
           goto breakrun;
@@ -914,6 +912,7 @@ int32_t main(int argc, char** argv)
         pipelineWalltime = timerPipeline.GetElapsedTime() / (configStandalone.runs - 2);
         printf("Pipeline wall time: %f, %d iterations, %f per event\n", timerPipeline.GetElapsedTime(), configStandalone.runs - 2, pipelineWalltime);
       } else {
+        printf("Processing Event %d\n", iEvent);
         if (RunBenchmark(rec, chainTracking, configStandalone.runs, iEvent, &nTracksTotal, &nClustersTotal)) {
           goto breakrun;
         }
@@ -937,6 +936,11 @@ int32_t main(int argc, char** argv)
           }
           printf("%s (Measured %s time - Extrapolated from %d clusters to %d)\n", stat, configStandalone.proc.debugLevel ? "kernel" : "wall", (int32_t)nClusters, (int32_t)nClsPerTF);
         }
+      }
+      if (configStandalone.testSyncAsync && chainTracking->mIOPtrs.clustersNative && chainTrackingAsync->mIOPtrs.clustersNative) {
+        uint32_t rejected = chainTracking->mIOPtrs.clustersNative->nClustersTotal - syncAsyncDecodedClusters;
+        float rejectionPercentage = (rejected) * 100.f / chainTracking->mIOPtrs.clustersNative->nClustersTotal;
+        printf("Cluster Rejection: Sync: %'u, Compressed %'u, Async %'u, Rejected %'u (%7.2f%%)\n", chainTracking->mIOPtrs.clustersNative->nClustersTotal, syncAsyncDecodedClusters, chainTrackingAsync->mIOPtrs.clustersNative->nClustersTotal, rejected, rejectionPercentage);
       }
 
       if (configStandalone.preloadEvents && configStandalone.proc.doublePipeline) {
@@ -965,6 +969,9 @@ breakrun:
   }
 
   rec->Finalize();
+  if (configStandalone.testSyncAsync) {
+    recAsync->Finalize();
+  }
   if (configStandalone.outputcontrolmem && rec->IsGPU()) {
     if (rec->unregisterMemoryForGPU(outputmemory.get()) || (configStandalone.proc.doublePipeline && recPipeline->unregisterMemoryForGPU(outputmemoryPipeline.get()))) {
       printf("Error unregistering memory\n");

@@ -19,30 +19,44 @@
 namespace o2::framework
 {
 
-void updatePairList(Cache& list, std::string const& binding, std::string const& key, bool enabled = true)
+namespace
 {
-  auto locate = std::find_if(list.begin(), list.end(), [&binding, &key](auto const& entry) { return (entry.binding == binding) && (entry.key == key); });
+std::shared_ptr<arrow::ChunkedArray> GetColumnByNameCI(std::shared_ptr<arrow::Table> const& table, std::string const& key)
+{
+  auto const& fields = table->schema()->fields();
+  auto target = std::find_if(fields.begin(), fields.end(), [&key](std::shared_ptr<arrow::Field> const& field) {
+    return [](std::string_view const& s1, std::string_view const& s2) {
+      return std::ranges::equal(
+        s1, s2,
+        [](char c1, char c2) {
+          return std::tolower(static_cast<unsigned char>(c1)) == std::tolower(static_cast<unsigned char>(c2));
+        });
+    }(field->name(), key);
+  });
+  return table->column(std::distance(fields.begin(), target));
+}
+} // namespace
+
+void updatePairList(Cache& list, Entry& entry)
+{
+  auto locate = std::find(list.begin(), list.end(), entry);
   if (locate == list.end()) {
-    list.emplace_back(binding, key, enabled);
-  } else if (!locate->enabled && enabled) {
+    list.emplace_back(entry);
+  } else if (!locate->enabled && entry.enabled) {
     locate->enabled = true;
   }
 }
 
 std::pair<int64_t, int64_t> SliceInfoPtr::getSliceFor(int value) const
 {
-  int64_t offset = 0;
-  if (offsets.empty()) {
-    return {offset, 0};
-  }
   if ((size_t)value >= offsets.size()) {
-    return {offset, 0};
+    return {0, 0};
   }
 
   return {offsets[value], sizes[value]};
 }
 
-gsl::span<const int64_t> SliceInfoUnsortedPtr::getSliceFor(int value) const
+std::span<const int64_t> SliceInfoUnsortedPtr::getSliceFor(int value) const
 {
   if (values.empty()) {
     return {};
@@ -68,8 +82,6 @@ ArrowTableSlicingCache::ArrowTableSlicingCache(Cache&& bsks, Cache&& bsksUnsorte
   : bindingsKeys{bsks},
     bindingsKeysUnsorted{bsksUnsorted}
 {
-  values.resize(bindingsKeys.size());
-  counts.resize(bindingsKeys.size());
   offsets.resize(bindingsKeys.size());
   sizes.resize(bindingsKeys.size());
 
@@ -81,10 +93,6 @@ void ArrowTableSlicingCache::setCaches(Cache&& bsks, Cache&& bsksUnsorted)
 {
   bindingsKeys = bsks;
   bindingsKeysUnsorted = bsksUnsorted;
-  values.clear();
-  values.resize(bindingsKeys.size());
-  counts.clear();
-  counts.resize(bindingsKeys.size());
   offsets.clear();
   offsets.resize(bindingsKeys.size());
   sizes.clear();
@@ -97,53 +105,60 @@ void ArrowTableSlicingCache::setCaches(Cache&& bsks, Cache&& bsksUnsorted)
 
 arrow::Status ArrowTableSlicingCache::updateCacheEntry(int pos, std::shared_ptr<arrow::Table> const& table)
 {
-  values[pos].reset();
-  counts[pos].reset();
   offsets[pos].clear();
   sizes[pos].clear();
   if (table->num_rows() == 0) {
     return arrow::Status::OK();
   }
-  auto& [b, k, e] = bindingsKeys[pos];
+  auto& [b, m, k, e] = bindingsKeys[pos];
   if (!e) {
     throw runtime_error_f("Disabled cache %s/%s update requested", b.c_str(), k.c_str());
   }
   validateOrder(bindingsKeys[pos], table);
-  arrow::Datum value_counts;
-  auto options = arrow::compute::ScalarAggregateOptions::Defaults();
-  ARROW_ASSIGN_OR_RAISE(value_counts,
-                        arrow::compute::CallFunction("value_counts", {table->GetColumnByName(bindingsKeys[pos].key)},
-                                                     &options));
-  auto pair = static_cast<arrow::StructArray>(value_counts.array());
-  values[pos].reset();
-  counts[pos].reset();
-  values[pos] = std::make_shared<arrow::NumericArray<arrow::Int32Type>>(pair.field(0)->data());
-  counts[pos] = std::make_shared<arrow::NumericArray<arrow::Int64Type>>(pair.field(1)->data());
 
   int maxValue = -1;
-  for (auto i = values[pos]->length() - 1; i >= 0; --i) {
-    if (values[pos]->Value(i) < 0) {
-      continue;
-    } else {
-      maxValue = values[pos]->Value(i);
+  auto column = GetColumnByNameCI(table, k);
+
+  // starting from the end, find the first positive value, in a sorted column it is the largest index
+  for (auto iChunk = column->num_chunks() - 1; iChunk >= 0; --iChunk) {
+    auto chunk = static_cast<arrow::NumericArray<arrow::Int32Type>>(column->chunk(iChunk)->data());
+    for (auto iElement = chunk.length() - 1; iElement >= 0; --iElement) {
+      auto value = chunk.Value(iElement);
+      if (value < 0) {
+        continue;
+      } else {
+        maxValue = value;
+        break;
+      }
+    }
+    if (maxValue >= 0) {
       break;
     }
   }
 
   offsets[pos].resize(maxValue + 1);
   sizes[pos].resize(maxValue + 1);
-  std::fill(offsets[pos].begin(), offsets[pos].end(), 0);
-  std::fill(sizes[pos].begin(), sizes[pos].end(), 0);
-  int64_t offset = 0;
-  for (auto i = 0U; i < values[pos]->length(); ++i) {
-    auto value = values[pos]->Value(i);
-    auto count = counts[pos]->Value(i);
-    if (value >= 0) {
-      offsets[pos][value] = offset;
-      sizes[pos][value] = count;
+
+  // loop over the index and collect size/offset
+  int lastValue = std::numeric_limits<int>::max();
+  int globalRow = 0;
+  for (auto iChunk = 0; iChunk < column->num_chunks(); ++iChunk) {
+    auto chunk = static_cast<arrow::NumericArray<arrow::Int32Type>>(column->chunk(iChunk)->data());
+    for (auto iElement = 0; iElement < chunk.length(); ++iElement) {
+      auto v = chunk.Value(iElement);
+      if (v >= 0) {
+        if (v == lastValue) {
+          ++sizes[pos][v];
+        } else {
+          lastValue = v;
+          ++sizes[pos][v];
+          offsets[pos][v] = globalRow;
+        }
+      }
+      ++globalRow;
     }
-    offset += count;
   }
+
   return arrow::Status::OK();
 }
 
@@ -154,11 +169,11 @@ arrow::Status ArrowTableSlicingCache::updateCacheEntryUnsorted(int pos, const st
   if (table->num_rows() == 0) {
     return arrow::Status::OK();
   }
-  auto& [b, k, e] = bindingsKeysUnsorted[pos];
+  auto& [b, m, k, e] = bindingsKeysUnsorted[pos];
   if (!e) {
     throw runtime_error_f("Disabled unsorted cache %s/%s update requested", b.c_str(), k.c_str());
   }
-  auto column = table->GetColumnByName(k);
+  auto column = GetColumnByNameCI(table, k);
   auto row = 0;
   for (auto iChunk = 0; iChunk < column->num_chunks(); ++iChunk) {
     auto chunk = static_cast<arrow::NumericArray<arrow::Int32Type>>(column->chunk(iChunk)->data());
@@ -195,7 +210,7 @@ std::pair<int, bool> ArrowTableSlicingCache::getCachePos(const Entry& bindingKey
 
 int ArrowTableSlicingCache::getCachePosSortedFor(Entry const& bindingKey) const
 {
-  auto locate = std::find_if(bindingsKeys.begin(), bindingsKeys.end(), [&](Entry const& bk) { return (bindingKey.binding == bk.binding) && (bindingKey.key == bk.key); });
+  auto locate = std::ranges::find(bindingsKeys, bindingKey);
   if (locate != bindingsKeys.end()) {
     return std::distance(bindingsKeys.begin(), locate);
   }
@@ -204,7 +219,7 @@ int ArrowTableSlicingCache::getCachePosSortedFor(Entry const& bindingKey) const
 
 int ArrowTableSlicingCache::getCachePosUnsortedFor(Entry const& bindingKey) const
 {
-  auto locate_unsorted = std::find_if(bindingsKeysUnsorted.begin(), bindingsKeysUnsorted.end(), [&](Entry const& bk) { return (bindingKey.binding == bk.binding) && (bindingKey.key == bk.key); });
+  auto locate_unsorted = std::ranges::find(bindingsKeysUnsorted, bindingKey);
   if (locate_unsorted != bindingsKeysUnsorted.end()) {
     return std::distance(bindingsKeysUnsorted.begin(), locate_unsorted);
   }
@@ -238,13 +253,6 @@ SliceInfoUnsortedPtr ArrowTableSlicingCache::getCacheUnsortedFor(const Entry& bi
 
 SliceInfoPtr ArrowTableSlicingCache::getCacheForPos(int pos) const
 {
-  if (values[pos] == nullptr && counts[pos] == nullptr) {
-    return {
-      {}, //
-      {}  //
-    };
-  }
-
   return {
     gsl::span{offsets[pos].data(), offsets[pos].size()}, //
     gsl::span(sizes[pos].data(), sizes[pos].size())      //
@@ -261,10 +269,13 @@ SliceInfoUnsortedPtr ArrowTableSlicingCache::getCacheUnsortedForPos(int pos) con
 
 void ArrowTableSlicingCache::validateOrder(Entry const& bindingKey, const std::shared_ptr<arrow::Table>& input)
 {
-  auto const& [target, key, enabled] = bindingKey;
-  auto column = input->GetColumnByName(key);
+  auto const& [target, matcher, key, enabled] = bindingKey;
+  if (!enabled) {
+    return;
+  }
+  auto column = o2::framework::GetColumnByNameCI(input, key);
   auto array0 = static_cast<arrow::NumericArray<arrow::Int32Type>>(column->chunk(0)->data());
-  int32_t prev = 0;
+  int32_t prev;
   int32_t cur = array0.Value(0);
   int32_t lastNeg = cur < 0 ? cur : 0;
   int32_t lastPos = cur < 0 ? -1 : cur;

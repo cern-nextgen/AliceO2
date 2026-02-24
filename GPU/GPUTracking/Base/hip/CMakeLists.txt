@@ -11,6 +11,12 @@
 
 set(MODULE GPUTrackingHIP)
 
+if(GPUCA_BUILD_DEBUG AND GPUCA_BUILD_DEBUG_HOSTONLY)
+  set(CMAKE_BUILD_TYPE RELEASE)
+  set(CMAKE_HIP_FLAGS_RELEASE "${CMAKE_HIP_FLAGS_RELEASE} -O3 -march=native -ggdb -fno-sanitize=all -DNDEBUG")
+  set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native -ggdb -fno-sanitize=all -DNDEBUG")
+endif()
+
 # -------------------------------- Options -------------------------------------------------------
 # set(GPUCA_HIP_HIPIFY_FROM_CUDA 0) # Use local HIP source files
 
@@ -63,8 +69,9 @@ if(NOT DEFINED GPUCA_HIP_HIPIFY_FROM_CUDA OR "${GPUCA_HIP_HIPIFY_FROM_CUDA}")
   endforeach()
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${MODULE}_HIPIFIED_CHK.done
-                     COMMAND diff -u ${GPUCA_HIP_SOURCE_DIR}/GPUReconstructionHIPkernel.template.hip ${CMAKE_CURRENT_SOURCE_DIR}/GPUReconstructionHIPkernel.template.hip > ${CMAKE_CURRENT_BINARY_DIR}/${MODULE}_HIPIFIED_CHK.done
+                     COMMAND bash -c "diff -u <(sed 's,//.*$,,g' ${GPUCA_HIP_SOURCE_DIR}/GPUReconstructionHIPkernel.template.hip) <(sed 's,//.*$,,g' ${CMAKE_CURRENT_SOURCE_DIR}/GPUReconstructionHIPkernel.template.hip) > ${CMAKE_CURRENT_BINARY_DIR}/${MODULE}_HIPIFIED_CHK.done"
                      DEPENDS ${GPUCA_HIP_SOURCE_DIR}/GPUReconstructionHIPkernel.template.hip ${CMAKE_CURRENT_SOURCE_DIR}/GPUReconstructionHIPkernel.template.hip
+                     VERBATIM
                      COMMENT "Checking HIPified file ${CMAKE_CURRENT_SOURCE_DIR}/GPUReconstructionHIPkernel.template.hip")
   add_custom_target(${MODULE}_HIPIFIED_CHK ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${MODULE}_HIPIFIED_CHK.done)
 else()
@@ -212,7 +219,7 @@ endif()
 
 # Setting target architecture and adding GPU libraries
 target_link_libraries(${targetName} PRIVATE hip::host hip::device hip::hipcub roc::rocthrust)
-set_target_hip_arch(${targetName})
+set_target_gpu_arch("HIP" ${targetName})
 
 target_link_libraries(${MODULE}_CXX PRIVATE TBB::tbb)
 

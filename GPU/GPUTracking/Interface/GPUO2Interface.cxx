@@ -60,10 +60,10 @@ int32_t GPUO2Interface::Initialize(const GPUO2InterfaceConfiguration& config)
   mConfig.reset(new GPUO2InterfaceConfiguration(config));
   mNContexts = mConfig->configProcessing.doublePipeline ? 2 : 1;
   mCtx.reset(new GPUO2Interface_processingContext[mNContexts]);
-  if (mConfig->configWorkflow.inputs.isSet(GPUDataTypes::InOutType::TPCRaw)) {
+  if (mConfig->configWorkflow.inputs.isSet(gpudatatypes::InOutType::TPCRaw)) {
     mConfig->configGRP.needsClusterer = 1;
   }
-  if (mConfig->configWorkflow.inputs.isSet(GPUDataTypes::InOutType::TPCCompressedClusters)) {
+  if (mConfig->configWorkflow.inputs.isSet(gpudatatypes::InOutType::TPCCompressedClusters)) {
     mConfig->configGRP.doCompClusterDecode = 1;
   }
   for (uint32_t i = 0; i < mNContexts; i++) {
@@ -89,7 +89,7 @@ int32_t GPUO2Interface::Initialize(const GPUO2InterfaceConfiguration& config)
     mCtx[i].mRec->SetSettings(&mConfig->configGRP, &mConfig->configReconstruction, &mConfig->configProcessing, &mConfig->configWorkflow);
     mCtx[i].mChain->SetCalibObjects(mConfig->configCalib);
 
-    if (i == 0 && mConfig->configWorkflow.steps.isSet(GPUDataTypes::RecoStep::ITSTracking)) {
+    if (i == 0 && mConfig->configWorkflow.steps.isSet(gpudatatypes::RecoStep::ITSTracking)) {
       mChainITS = mCtx[i].mRec->AddChain<GPUChainITS>();
     }
 
@@ -137,29 +137,30 @@ void GPUO2Interface::Deinitialize()
   mNContexts = 0;
 }
 
-void GPUO2Interface::DumpEvent(int32_t nEvent, GPUTrackingInOutPointers* data)
+void GPUO2Interface::DumpEvent(int32_t nEvent, GPUTrackingInOutPointers* data, uint32_t iThread, const char* dir)
 {
-  mCtx[0].mChain->ClearIOPointers();
-  mCtx[0].mChain->mIOPtrs = *data;
+  const auto oldPtrs = mCtx[iThread].mChain->mIOPtrs;
+  mCtx[iThread].mChain->mIOPtrs = *data;
   char fname[1024];
-  snprintf(fname, 1024, "event.%d.dump", nEvent);
-  mCtx[0].mChain->DumpData(fname);
+  snprintf(fname, 1024, "%sevent.%d.dump", dir, nEvent);
+  mCtx[iThread].mChain->DumpData(fname);
   if (nEvent == 0) {
 #ifdef GPUCA_BUILD_QA
     if (mConfig->configProcessing.runMC) {
-      mCtx[0].mChain->ForceInitQA();
+      mCtx[iThread].mChain->ForceInitQA();
       snprintf(fname, 1024, "mc.%d.dump", nEvent);
-      mCtx[0].mChain->GetQA()->UpdateChain(mCtx[0].mChain);
-      mCtx[0].mChain->GetQA()->DumpO2MCData(fname);
+      mCtx[iThread].mChain->GetQA()->UpdateChain(mCtx[iThread].mChain);
+      mCtx[iThread].mChain->GetQA()->DumpO2MCData(fname);
     }
 #endif
   }
+  mCtx[iThread].mChain->mIOPtrs = oldPtrs;
 }
 
-void GPUO2Interface::DumpSettings()
+void GPUO2Interface::DumpSettings(uint32_t iThread, const char* dir)
 {
-  mCtx[0].mChain->DoQueuedUpdates(-1);
-  mCtx[0].mRec->DumpSettings();
+  mCtx[iThread].mChain->DoQueuedUpdates(-1);
+  mCtx[iThread].mRec->DumpSettings(dir);
 }
 
 int32_t GPUO2Interface::RunTracking(GPUTrackingInOutPointers* data, GPUInterfaceOutputs* outputs, uint32_t iThread, GPUInterfaceInputUpdate* inputUpdateCallback)
@@ -251,7 +252,7 @@ void GPUO2Interface::setErrorCodeOutput(std::vector<std::array<uint32_t, 4>>* v)
   }
 }
 
-void GPUO2Interface::GetITSTraits(o2::its::TrackerTraits<7>*& trackerTraits, o2::its::VertexerTraits*& vertexerTraits, o2::its::TimeFrame<7>*& timeFrame)
+void GPUO2Interface::GetITSTraits(o2::its::TrackerTraits<7>*& trackerTraits, o2::its::VertexerTraits<7>*& vertexerTraits, o2::its::TimeFrame<7>*& timeFrame)
 {
   trackerTraits = mChainITS->GetITSTrackerTraits();
   vertexerTraits = mChainITS->GetITSVertexerTraits();
@@ -266,4 +267,9 @@ const o2::base::Propagator* GPUO2Interface::GetDeviceO2Propagator(int32_t iThrea
 void GPUO2Interface::UseGPUPolynomialFieldInPropagator(o2::base::Propagator* prop) const
 {
   prop->setGPUField(&mCtx[0].mRec->GetParam().polynomialField);
+}
+
+void GPUO2Interface::ApplySyncSettings(GPUSettingsProcessing& proc, GPUSettingsRec& rec, gpudatatypes::RecoStepField& steps, bool syncMode, int32_t dEdxMode)
+{
+  GPUChainTracking::ApplySyncSettings(proc, rec, steps, syncMode, dEdxMode);
 }

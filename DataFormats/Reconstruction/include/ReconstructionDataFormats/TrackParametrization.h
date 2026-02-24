@@ -119,6 +119,9 @@ constexpr float MaxPT = 100000.;                  // do not allow pTs exceeding 
 constexpr float MinPTInv = 1. / MaxPT;            // do not allow q/pTs less this value (to avoid NANs)
 constexpr float ELoss2EKinThreshInv = 1. / 0.025; // do not allow E.Loss correction step with dE/Ekin above the inverse of this value
 constexpr int MaxELossIter = 50;                  // max number of iteration for the ELoss to account for BB dependence on beta*gamma
+constexpr float DefaultDCA = 999.f;               // default DCA value
+constexpr float DefaultDCACov = 999.f;            // default DCA cov value
+
 // uncomment this to enable correction for BB dependence on beta*gamma via BB derivative
 // #define _BB_NONCONST_CORR_
 
@@ -226,6 +229,7 @@ class TrackParametrization
   // parameters manipulation
   GPUd() bool correctForELoss(value_t xrho, bool anglecorr = false);
   GPUd() bool rotateParam(value_t alpha);
+  GPUd() bool rotateParam(value_t& alpha, value_t& ca, value_t& sa);
   GPUd() bool propagateParamTo(value_t xk, value_t b);
   GPUd() bool propagateParamTo(value_t xk, const dim3_t& b);
   GPUd() void invertParam();
@@ -277,6 +281,7 @@ GPUdi() TrackParametrization<value_T>::TrackParametrization(value_t x, value_t a
   : mX{x}, mAlpha{alpha}, mAbsCharge{char(gpu::CAMath::Abs(charge))}, mPID{pid}
 {
   // explicit constructor
+  math_utils::detail::bringToPMPi<value_t>(mAlpha);
   for (int i = 0; i < kNParams; i++) {
     mP[i] = par[i];
   }
@@ -295,6 +300,7 @@ GPUdi() void TrackParametrization<value_T>::set(value_t x, value_t alpha, const 
 {
   mX = x;
   mAlpha = alpha;
+  math_utils::detail::bringToPMPi<value_t>(mAlpha);
   mAbsCharge = char(gpu::CAMath::Abs(charge));
   for (int i = 0; i < kNParams; i++) {
     mP[i] = par[i];
@@ -430,6 +436,7 @@ template <typename value_T>
 GPUdi() void TrackParametrization<value_T>::setAlpha(value_t v)
 {
   mAlpha = v;
+  math_utils::detail::bringToPMPi<value_t>(mAlpha);
 }
 
 //____________________________________________________________
