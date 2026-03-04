@@ -40,13 +40,12 @@ jobs:
 
       - name: Build and Run
         run: |
-          mkdir -p ${STANDALONE_DIR}
-          . ${WORK_DIR}/${ALIBUILD_ARCH_PREFIX}/ninja/fortran-v1.11.1.g9-15/etc/profile.d/init.sh
-          . ${WORK_DIR}/${ALIBUILD_ARCH_PREFIX}/O2/${O2_REVISION}/etc/profile.d/init.sh
+          source /etc/profile.d/modules.sh
+          module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
 
-          cmake -B ${BUILD_DIR} ${{ matrix.cmake_args }} -DENABLE_OPENCL=0 -DGPUCA_BUILD_EVENT_DISPLAY=0 -DGPUCA_DETERMINISTIC_MODE=GPU -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
-          cd ${BUILD_DIR}
-          make install -j8
+          mkdir -p ${STANDALONE_DIR}
+          cmake -B ${STANDALONE_DIR}/build ${{ matrix.cmake_args }} -DENABLE_OPENCL=0 -DGPUCA_BUILD_EVENT_DISPLAY=0 -DGPUCA_DETERMINISTIC_MODE=GPU -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
+          cmake --build ${STANDALONE_DIR}/build --target install -j 8
 
           cd ${STANDALONE_DIR}
           mkdir -p ${STANDALONE_DIR}/genGPUArch
@@ -64,15 +63,12 @@ jobs:
 
           curl -v -o ${STANDALONE_DIR}/o2-simple-GPU.out https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/o2-simple-GPU.out
           cmp ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/o2-simple-GPU.out
-          rm -rf ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/o2-simple-GPU.out
-
-          rm -rf ${STANDALONE_DIR}/events
+          rm -rf ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/o2-simple-GPU.out ${STANDALONE_DIR}/events ${STANDALONE_DIR}/build
         env:
           WORK_DIR: /cvmfs/alice.cern.ch
           ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
-          O2_REVISION: daily-20260223-0000-1
+          MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
           STANDALONE_DIR: /root/standalone
-          BUILD_DIR: /root/standalone/build
           ARTIFACT_FILE: /root/artifact.txt
           LD_LIBRARY_PATH: /usr/local/cuda-13.0/compat
 
