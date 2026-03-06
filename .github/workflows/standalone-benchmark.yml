@@ -9,6 +9,14 @@ on:
 
 jobs:
   benchmark:
+    env:
+      ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
+      ARTIFACT_FILE: /root/artifact.txt
+      LD_LIBRARY_PATH: /usr/local/cuda-13.0/compat
+      MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
+      STANDALONE_DIR: /root/standalone
+      WORK_DIR: /cvmfs/alice.cern.ch
+
     runs-on: ${{ matrix.runner }}
     container: registry.cern.ch/alisw/slc9-gpu-builder@sha256:ea3443f9dfbc770e4b4bce0d1a9ecc0b7a7c16e9f76e416b796d170877220820
     strategy:
@@ -19,92 +27,73 @@ jobs:
           - name: nvidia-h100
             runner: cern-nextgen-h100
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=90
-            ca_args: --gpuType CUDA
           - name: nvidia-l40s
             runner: cern-nextgen-l40s
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=89
-            ca_args: --gpuType CUDA
           - name: amd-mi300x
             runner: cern-nextgen-mi300x
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx942
-            ca_args: --gpuType HIP
           - name: amd-w7900
             runner: cern-nextgen-w7900
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx1100
-            ca_args: --gpuType HIP
 
     name: ${{ matrix.name }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Download Files
-        run: |
-          mkdir -p ${STANDALONE_DIR}
-
-          mkdir -p ${STANDALONE_DIR}/events
-          curl -v -o ${STANDALONE_DIR}/events/50kHz.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/events/50kHz.tar.xz
-          tar -xf ${STANDALONE_DIR}/events/50kHz.tar.xz -C ${STANDALONE_DIR}/events
-
-          curl -v -o ${STANDALONE_DIR}/o2-simple-GPU.out https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/o2-simple-GPU.out
-        env:
-          STANDALONE_DIR: /root/standalone
-
       - name: Build Deterministic
         run: &build |
           source /etc/profile.d/modules.sh
           module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
 
+          mkdir -p ${STANDALONE_DIR}
           cmake -B ${STANDALONE_DIR}/build ${{ matrix.cmake_args }} -DENABLE_OPENCL=0 -DGPUCA_BUILD_EVENT_DISPLAY=0 -DGPUCA_DETERMINISTIC_MODE=${DETERMINISTIC_MODE} -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
           cmake --build ${STANDALONE_DIR}/build --target install -j 8
         env:
           DETERMINISTIC_MODE: GPU
-          WORK_DIR: /cvmfs/alice.cern.ch
-          ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
-          MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
-          STANDALONE_DIR: /root/standalone
-          LD_LIBRARY_PATH: /usr/local/cuda-13.0/compat
+
+      - name: Download Small Event File
+        run: &download |
+          mkdir -p ${STANDALONE_DIR}/events
+          curl -o ${STANDALONE_DIR}/events/${EVENT_FILE}.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/events/${EVENT_FILE}.tar.xz
+          tar -xf ${STANDALONE_DIR}/events/${EVENT_FILE}.tar.xz -C ${STANDALONE_DIR}/events
+          ls -la ${STANDALONE_DIR}/events/o2-simple
+        env:
+          EVENT_FILE: o2-simple
 
       - name: Test
         run: |
           source /etc/profile.d/modules.sh
           module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
 
-          ${STANDALONE_DIR}/ca -e o2-simple -g --seed 0 --memSize 20000000000 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptSpecialCode 1 --RTCoptConstexpr 1 --debug 6 ${{ matrix.ca_args }}
+          ls -la ${STANDALONE_DIR}/events/o2-simple
 
+          ${STANDALONE_DIR}/ca -e o2-simple -g --seed 0 --memSize 20000000000 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptSpecialCode 1 --RTCoptConstexpr 1 --debug 6
+
+          curl -v -o ${STANDALONE_DIR}/o2-simple-GPU.out https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/o2-simple-GPU.out
           cmp ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/o2-simple-GPU.out
           rm -rf ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/o2-simple-GPU.out ${STANDALONE_DIR}/build
         env:
-          WORK_DIR: /cvmfs/alice.cern.ch
-          ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
-          MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
-          STANDALONE_DIR: /root/standalone
-          LD_LIBRARY_PATH: /usr/local/cuda-13.0/compat
+          EVENT_FILE: o2-simple
 
       - name: Build Non-Deterministic
         run: *build
         env:
           DETERMINISTIC_MODE: OFF
-          WORK_DIR: /cvmfs/alice.cern.ch
-          ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
-          MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
-          STANDALONE_DIR: /root/standalone
-          LD_LIBRARY_PATH: /usr/local/cuda-13.0/compat
+
+      - name: Download Large Event File
+        run: *download
+        env:
+          EVENT_FILE: 50kHz
 
       - name: Benchmark
         run: |
           source /etc/profile.d/modules.sh
           module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
 
-          ${STANDALONE_DIR}/ca -e 50kHz -g --seed 0 --memSize 15000000000 --sync --runs 1 --RTCenable --RTCoptSpecialCode 1 --RTCoptConstexpr 1 --debug 1 ${{ matrix.ca_args }} > ${ARTIFACT_FILE}
+          ${STANDALONE_DIR}/ca -e 50kHz -g --memSize 15000000000 --sync --runs 1 --RTCenable --RTCoptSpecialCode 1 --RTCoptConstexpr 1 --debug 1 > ${ARTIFACT_FILE}
           rm -rf ${STANDALONE_DIR}/events ${STANDALONE_DIR}/build
-        env:
-          WORK_DIR: /cvmfs/alice.cern.ch
-          ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
-          MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
-          STANDALONE_DIR: /root/standalone
-          ARTIFACT_FILE: /root/artifact.txt
-          LD_LIBRARY_PATH: /usr/local/cuda-13.0/compat
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
