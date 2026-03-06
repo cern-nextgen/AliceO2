@@ -19,51 +19,85 @@ jobs:
           - name: nvidia-h100
             runner: cern-nextgen-h100
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=90
-            ca_args: --gpuType CUDA --RTCTECHloadLaunchBoundsFromFile genGPUArch/nvidia-h100.par
+            ca_args: --gpuType CUDA
           - name: nvidia-l40s
             runner: cern-nextgen-l40s
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=89
-            ca_args: --gpuType CUDA --RTCTECHloadLaunchBoundsFromFile genGPUArch/nvidia-l40s.par
+            ca_args: --gpuType CUDA
           - name: amd-mi300x
             runner: cern-nextgen-mi300x
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx942
-            ca_args: --gpuType HIP --RTCTECHloadLaunchBoundsFromFile genGPUArch/amd-mi300x.par
+            ca_args: --gpuType HIP
           - name: amd-w7900
             runner: cern-nextgen-w7900
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx1100
-            ca_args: --gpuType HIP --RTCTECHloadLaunchBoundsFromFile genGPUArch/amd-w7900.par
+            ca_args: --gpuType HIP
 
     name: ${{ matrix.name }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Build and Run
+      - name: Download Files
+        run: |
+          mkdir -p ${STANDALONE_DIR}
+
+          mkdir -p ${STANDALONE_DIR}/events
+          curl -v -o ${STANDALONE_DIR}/events/50kHz.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/events/50kHz.tar.xz
+          tar -xf ${STANDALONE_DIR}/events/50kHz.tar.xz -C ${STANDALONE_DIR}/events
+
+          curl -v -o ${STANDALONE_DIR}/o2-simple-GPU.out https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/o2-simple-GPU.out
+        env:
+          STANDALONE_DIR: /root/standalone
+
+      - name: Build Deterministic
+        run: &build |
+          source /etc/profile.d/modules.sh
+          module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
+
+          cmake -B ${STANDALONE_DIR}/build ${{ matrix.cmake_args }} -DENABLE_OPENCL=0 -DGPUCA_BUILD_EVENT_DISPLAY=0 -DGPUCA_DETERMINISTIC_MODE=${DETERMINISTIC_MODE} -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
+          cmake --build ${STANDALONE_DIR}/build --target install -j 8
+        env:
+          DETERMINISTIC_MODE: GPU
+          WORK_DIR: /cvmfs/alice.cern.ch
+          ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
+          MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
+          STANDALONE_DIR: /root/standalone
+          LD_LIBRARY_PATH: /usr/local/cuda-13.0/compat
+
+      - name: Test
         run: |
           source /etc/profile.d/modules.sh
           module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
 
-          mkdir -p ${STANDALONE_DIR}
-          cmake -B ${STANDALONE_DIR}/build ${{ matrix.cmake_args }} -DENABLE_OPENCL=0 -DGPUCA_BUILD_EVENT_DISPLAY=0 -DGPUCA_DETERMINISTIC_MODE=GPU -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
-          cmake --build ${STANDALONE_DIR}/build --target install -j 8
+          ${STANDALONE_DIR}/ca -e o2-simple -g --seed 0 --memSize 20000000000 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptSpecialCode 1 --RTCoptConstexpr 1 --debug 6 ${{ matrix.ca_args }}
 
-          cd ${STANDALONE_DIR}
-          mkdir -p ${STANDALONE_DIR}/genGPUArch
-          curl -v -o ${STANDALONE_DIR}/genGPUArch/${{ matrix.name }}.par https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/genGPUArch/${{ matrix.name }}.par
-
-          mkdir -p ${STANDALONE_DIR}/events
-
-          curl -v -o ${STANDALONE_DIR}/events/50kHz.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/events/50kHz.tar.xz
-          tar -xf ${STANDALONE_DIR}/events/50kHz.tar.xz -C ${STANDALONE_DIR}/events
-          ${STANDALONE_DIR}/ca -e 50kHz -g --seed 0 --memSize 15000000000 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptSpecialCode 1 --debug 1 ${{ matrix.ca_args }} > ${ARTIFACT_FILE}
-
-          curl -v -o ${STANDALONE_DIR}/events/o2-simple.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/events/o2-simple.tar.xz
-          tar -xf ${STANDALONE_DIR}/events/o2-simple.tar.xz -C ${STANDALONE_DIR}/events
-          ${STANDALONE_DIR}/ca -e o2-simple -g --seed 0 --memSize 20000000000 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptSpecialCode 1 --debug 6 ${{ matrix.ca_args }}
-
-          curl -v -o ${STANDALONE_DIR}/o2-simple-GPU.out https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/o2-simple-GPU.out
           cmp ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/o2-simple-GPU.out
-          rm -rf ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/o2-simple-GPU.out ${STANDALONE_DIR}/events ${STANDALONE_DIR}/build
+          rm -rf ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/o2-simple-GPU.out ${STANDALONE_DIR}/build
+        env:
+          WORK_DIR: /cvmfs/alice.cern.ch
+          ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
+          MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
+          STANDALONE_DIR: /root/standalone
+          LD_LIBRARY_PATH: /usr/local/cuda-13.0/compat
+
+      - name: Build Non-Deterministic
+        run: *build
+        env:
+          DETERMINISTIC_MODE: OFF
+          WORK_DIR: /cvmfs/alice.cern.ch
+          ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
+          MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
+          STANDALONE_DIR: /root/standalone
+          LD_LIBRARY_PATH: /usr/local/cuda-13.0/compat
+
+      - name: Benchmark
+        run: |
+          source /etc/profile.d/modules.sh
+          module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
+
+          ${STANDALONE_DIR}/ca -e 50kHz -g --seed 0 --memSize 15000000000 --sync --runs 1 --RTCenable --RTCoptSpecialCode 1 --RTCoptConstexpr 1 --debug 1 ${{ matrix.ca_args }} > ${ARTIFACT_FILE}
+          rm -rf ${STANDALONE_DIR}/events ${STANDALONE_DIR}/build
         env:
           WORK_DIR: /cvmfs/alice.cern.ch
           ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
