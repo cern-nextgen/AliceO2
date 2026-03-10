@@ -22,7 +22,7 @@ for benchmark, baseline in zip(table_benchmark, table_baseline):
   assert(benchmark[0] == baseline[0])
   name = benchmark[0]
   time = benchmark[1]
-  stdev = benchmark[1]
+  stdev = u"\u00B1" + str(benchmark[2])
   d = float(baseline[1]) - float(benchmark[1])
   emoji = ':red_circle:' if 0 < d else ':green_circle:'
   difference = pretty(d)
