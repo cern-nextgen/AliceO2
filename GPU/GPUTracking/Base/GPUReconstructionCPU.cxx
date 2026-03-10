@@ -35,6 +35,7 @@
 
 #include <atomic>
 #include <ctime>
+#include <fstream>
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -263,6 +264,31 @@ int32_t GPUReconstructionCPU::RunChains()
   }
   double kernelTotal = 0;
   std::vector<double> kernelStepTimes(gpudatatypes::N_RECO_STEPS, 0.);
+  std::ofstream timingCSVFile;
+  if (!GetProcessingSettings().timingCSV.empty()) {
+    bool needHeader = true;
+    {
+      std::ifstream timingCSVIn(GetProcessingSettings().timingCSV);
+      needHeader = !timingCSVIn.good() || timingCSVIn.peek() == std::ifstream::traits_type::eof();
+    }
+    timingCSVFile.open(GetProcessingSettings().timingCSV, std::ios::out | std::ios::app);
+    if (!timingCSVFile.is_open()) {
+      GPUError("Could not open timing CSV file '%s' for writing", GetProcessingSettings().timingCSV.c_str());
+    } else if (needHeader) {
+      timingCSVFile << "name,time,count,events\n";
+    }
+  }
+  auto writeCSVString = [](std::ostream& out, const std::string& s) {
+    out << '"';
+    for (char c : s) {
+      if (c == '"') {
+        out << "\"\"";
+      } else {
+        out << c;
+      }
+    }
+    out << '"';
+  };
 
   if (GetProcessingSettings().debugLevel >= 1) {
     for (uint32_t i = 0; i < mTimers.size(); i++) {
@@ -289,6 +315,10 @@ int32_t GPUReconstructionCPU::RunChains()
         snprintf(bandwidth, 256, " (%8.3f GB/s - %'14zu bytes - %'14zu per call)", mTimers[i]->memSize / time * 1e-9, mTimers[i]->memSize / mStatNEvents, mTimers[i]->memSize / mStatNEvents / mTimers[i]->count);
       }
       printf("Execution Time: Task (%c %8ux): %50s Time: %'10.0f us%s\n", type == 0 ? 'K' : 'C', mTimers[i]->count, mTimers[i]->name.c_str(), time * 1000000 / mStatNEvents, bandwidth);
+      if (timingCSVFile.is_open()) {
+        writeCSVString(timingCSVFile, mTimers[i]->name);
+        timingCSVFile << "," << (time * 1000000 / mStatNEvents) << "," << mTimers[i]->count << "," << mStatNEvents << "\n";
+      }
       if (GetProcessingSettings().resetTimers) {
         mTimers[i]->count = 0;
         mTimers[i]->memSize = 0;
