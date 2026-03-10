@@ -47,6 +47,9 @@ jobs:
 
           curl -fL --retry 3 -o ${STANDALONE_DIR}/o2-simple-GPU.out https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/o2-simple-GPU.out
 
+          mkdir -p ${STANDALONE_DIR}/baseline
+          curl -fL --retry 3 -o ${STANDALONE_DIR}/baseline/${{ matrix.name }}.csv https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/baseline/${{ matrix.name }}.csv
+
           mkdir -p ${STANDALONE_DIR}/events
           curl -fL --retry 3 -o ${STANDALONE_DIR}/events/o2-simple.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/events/o2-simple.tar.xz
           tar -xf ${STANDALONE_DIR}/events/o2-simple.tar.xz -C ${STANDALONE_DIR}/events
@@ -91,7 +94,8 @@ jobs:
         run: |
           source /etc/profile.d/modules.sh
           module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
-          python3 ${GITHUB_WORKSPACE}/.github/scripts/csv_to_md.py ${ARTIFACT_FILE} >> ${GITHUB_STEP_SUMMARY}
+          python3 ${GITHUB_WORKSPACE}/.github/scripts/csv_to_md.py ${ARTIFACT_FILE} ${STANDALONE_DIR}/baseline/${{ matrix.name }}.csv >> ${GITHUB_STEP_SUMMARY}
+          rm -rf ${STANDALONE_DIR}/baseline
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
