@@ -1,33 +1,39 @@
-import sys
+import argparse
 import csv
 import tabulate as tab
 
-csv_benchmark = sys.argv[1]
-csv_baseline = sys.argv[2]
+parser = argparse.ArgumentParser()
+parser.add_argument('-b', '--baseline', required=True, help='Baseline CSV file')
+parser.add_argument('-c', '--current', required=True, help='Current CSV file')
+args = parser.parse_args()
 
-pretty = lambda x : "{:.1f}".format(x) if x <= 0 else "+{:.1f}".format(x)
+def get_2d_list(csv_filename):
+  with open(csv_filename) as csv_file:
+    csv_reader = csv.reader(csv_file)
+    next(csv_reader)
+    return [[str(name), float(mean), float(stdev)] for name, mean, stdev in csv_reader]
 
-with open(csv_benchmark) as csv_file:
-  csv_reader = csv.reader(csv_file)
-  next(csv_reader)
-  table_benchmark = [row for row in csv_reader]
- 
-with open(csv_baseline) as csv_file:
-  csv_reader = csv.reader(csv_file)
-  next(csv_reader)
-  table_baseline = [row for row in csv_reader]
+table_baseline = get_2d_list(args.baseline)
+table_current = get_2d_list(args.current)
+
+def get_emoji(d, stdev):
+  z = 1.96 # 95% confidence interval
+  if d < -z * stdev:
+    return ':green_circle:'
+  elif d > z * stdev:
+    return ':red_circle:'
+  else:
+    return ':white_circle:'
 
 table = []
-for benchmark, baseline in zip(table_benchmark, table_baseline):
-  assert(benchmark[0] == baseline[0])
-  name = benchmark[0]
-  time = benchmark[1]
-  stdev = u"\u00B1" + str(benchmark[2])
-  d = float(baseline[1]) - float(benchmark[1])
-  emoji = ':red_circle:' if 0 < d else ':green_circle:'
-  difference = pretty(d)
-  percent = pretty(100 * d / float(baseline[1]))
-  table.append([name, time, stdev, emoji, difference, percent])
+for baseline, current in zip(table_baseline, table_current):
+  baseline_name, baseline_mean, _ = baseline
+  name, mean, stdev = current
+  assert(baseline_name == name)
+  diff = baseline_mean - mean
+  impact = 0.0 if stdev == 0.0 else diff / stdev
+  emoji = get_emoji(diff, stdev)
+  table.append([name, int(mean), f'{stdev:.2f}', int(diff), f'{impact:.2f}', emoji])
 
-header = ["name", "time", "stdev", "", "difference", "percent"]
+header = ['name', 'mean (ms)', 'stdev \u03C3', 'diff \u0394', '\u0394 / \u03C3', '']
 print(tab.tabulate(table, header, tablefmt="github"))
