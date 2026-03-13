@@ -9,14 +9,6 @@ on:
 
 jobs:
   benchmark:
-    env:
-      ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
-      ARTIFACT_FILE: /root/artifact.txt
-      LD_LIBRARY_PATH: /usr/local/cuda-13.0/compat
-      MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
-      STANDALONE_DIR: /root/standalone
-      WORK_DIR: /cvmfs/alice.cern.ch
-
     runs-on: ${{ matrix.runner }}
     container: registry.cern.ch/alisw/slc9-gpu-builder@sha256:ea3443f9dfbc770e4b4bce0d1a9ecc0b7a7c16e9f76e416b796d170877220820
     strategy:
@@ -36,11 +28,34 @@ jobs:
           - name: amd-w7900
             runner: cern-nextgen-w7900
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx1100
+    env:
+      WORK_DIR: /cvmfs/alice.cern.ch
+      ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
+      MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
+      STANDALONE_DIR: /root/standalone
+      BENCHMARK_CSV: /root/${{ matrix.name }}.csv
+      LD_LIBRARY_PATH: /usr/local/cuda-13.0/compat
 
     name: ${{ matrix.name }}
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+
+      - name: Download Files
+        run: |
+          mkdir -p ${STANDALONE_DIR}
+
+          curl -fL --retry 3 -o ${STANDALONE_DIR}/o2-simple-GPU.out https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/o2-simple-GPU.out
+
+          mkdir -p ${STANDALONE_DIR}/baseline
+          curl -fL --retry 3 -o ${STANDALONE_DIR}/baseline/${{ matrix.name }}.csv https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/baseline/${{ matrix.name }}.csv
+
+          mkdir -p ${STANDALONE_DIR}/events
+          curl -fL --retry 3 -o ${STANDALONE_DIR}/events/o2-simple.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/events/o2-simple.tar.xz
+          tar -xf ${STANDALONE_DIR}/events/o2-simple.tar.xz -C ${STANDALONE_DIR}/events
+
+          curl -fL --retry 3 -o ${STANDALONE_DIR}/events/50kHz.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/events/50kHz.tar.xz
+          tar -xf ${STANDALONE_DIR}/events/50kHz.tar.xz -C ${STANDALONE_DIR}/events
 
       - name: Build Deterministic
         run: &build |
@@ -53,50 +68,38 @@ jobs:
         env:
           DETERMINISTIC_MODE: GPU
 
-      - name: Download Small Event File
-        run: &download |
-          mkdir -p ${STANDALONE_DIR}/events
-          curl -o ${STANDALONE_DIR}/events/${EVENT_FILE}.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/events/${EVENT_FILE}.tar.xz
-          tar -xf ${STANDALONE_DIR}/events/${EVENT_FILE}.tar.xz -C ${STANDALONE_DIR}/events
-          ls -la ${STANDALONE_DIR}/events/o2-simple
-        env:
-          EVENT_FILE: o2-simple
-
-      - name: Test
+      - name: Test GPU Track Reconstruction
         run: |
           source /etc/profile.d/modules.sh
           module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
-
-          ls -la ${STANDALONE_DIR}/events/o2-simple
-
-          ${STANDALONE_DIR}/ca -e o2-simple -g --seed 0 --memSize 20000000000 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptSpecialCode 1 --RTCoptConstexpr 1 --debug 6
-
-          curl -v -o ${STANDALONE_DIR}/o2-simple-GPU.out https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/o2-simple-GPU.out
+          cd ${STANDALONE_DIR}
+          ${STANDALONE_DIR}/ca -e o2-simple -g --seed 0 --memSize 20000000000 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptConstexpr 1 --RTCoptSpecialCode 1 --debug 6
           cmp ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/o2-simple-GPU.out
-          rm -rf ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/o2-simple-GPU.out ${STANDALONE_DIR}/build
-        env:
-          EVENT_FILE: o2-simple
+          rm -rf ${STANDALONE_DIR}/GPU.out ${STANDALONE_DIR}/o2-simple-GPU.out ${STANDALONE_DIR}/events/o2-simple ${STANDALONE_DIR}/build
 
       - name: Build Non-Deterministic
         run: *build
         env:
           DETERMINISTIC_MODE: OFF
 
-      - name: Download Large Event File
-        run: *download
-        env:
-          EVENT_FILE: 50kHz
-
-      - name: Benchmark
+      - name: Benchmark GPU Track Reconstruction
         run: |
           source /etc/profile.d/modules.sh
           module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
+          cd ${STANDALONE_DIR}
+          ${STANDALONE_DIR}/ca -e 50kHz -g --memSize 15000000000 --sync --runs 12 --debug 1 --PROCtimingCSV ${BENCHMARK_CSV}
+          rm -rf ${STANDALONE_DIR}/events/50kHz ${STANDALONE_DIR}/build
 
-          ${STANDALONE_DIR}/ca -e 50kHz -g --memSize 15000000000 --sync --runs 1 --RTCenable --RTCoptSpecialCode 1 --RTCoptConstexpr 1 --debug 1 > ${ARTIFACT_FILE}
-          rm -rf ${STANDALONE_DIR}/events ${STANDALONE_DIR}/build
+      - name: Display table on GitHub web
+        run: |
+          source /etc/profile.d/modules.sh
+          module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
+          python3 ${GITHUB_WORKSPACE}/.github/scripts/merge_runs.py --discard 2 --input ${BENCHMARK_CSV} --output ${BENCHMARK_CSV}
+          python3 ${GITHUB_WORKSPACE}/.github/scripts/csv_to_md.py --baseline ${STANDALONE_DIR}/baseline/${{ matrix.name }}.csv --current ${BENCHMARK_CSV} >> ${GITHUB_STEP_SUMMARY}
+          rm -rf ${STANDALONE_DIR}/baseline
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.name }}-artifact
-          path: /root/artifact.txt
+          path: /root/${{ matrix.name }}.csv
