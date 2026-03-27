@@ -104,8 +104,27 @@ class GeometryTGeo : public o2::detectors::DetMatrixCache
   bool isTrackingFrameCachedMLOT() const { return !mCacheRefXMLOT.empty(); }
   void fillTrackingFramesCacheMLOT();
 
-  float getSensorRefAlphaMLOT(int index) const { return mCacheRefAlphaMLOT[index]; }
-  float getSensorXMLOT(int index) const { return mCacheRefXMLOT[index]; }
+  float getSensorRefAlphaMLOT(int chipId) const
+  {
+    if (getSubDetID(chipId) == 0) {
+      LOG(error) << "getSensorRefAlphaMLOT(): VD layers are not supported yet! chipID = " << chipId
+                 << "please provide chipId for ML/OT! ";
+      return std::numeric_limits<float>::quiet_NaN();
+    }
+    const int local = chipId - getNumberOfActivePartsVD();
+    return mCacheRefAlphaMLOT[local];
+  }
+
+  float getSensorXMLOT(int chipId) const
+  {
+    if (getSubDetID(chipId) == 0) {
+      LOG(error) << "getSensorXMLOT(): VD layers are not supported yet! chipID = " << chipId
+                 << "please provide chipId for ML/OT! ";
+      return std::numeric_limits<float>::quiet_NaN();
+    }
+    const int local = chipId - getNumberOfActivePartsVD();
+    return mCacheRefXMLOT[local];
+  }
 
   // create matrix for tracking to local frame for MLOT
   TGeoHMatrix& createT2LMatrixMLOT(int);
@@ -222,8 +241,7 @@ class GeometryTGeo : public o2::detectors::DetMatrixCache
   std::vector<float> mCacheRefXMLOT;     /// cache for X of ML and OT
   std::vector<float> mCacheRefAlphaMLOT; /// cache for sensor ref alpha ML and OT
 
-  eLayout mLayoutML; // Type of segmentation for the middle layers
-  eLayout mLayoutOL; // Type of segmentation for the outer layers
+  eMLOTLayout mLayoutMLOT; // ML and OT detector layout design
 
  private:
   static std::unique_ptr<o2::trk::GeometryTGeo> sInstance;

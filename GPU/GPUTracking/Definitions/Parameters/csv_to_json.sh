@@ -2,7 +2,10 @@
 
 [[ -z $1 ]] && { echo "Usage: csv_to_json.sh CSV_FILE"; exit 1; }
 
-DELIM=$'\xFF'
+export LANG=C
+export LC_ALL=C
+DELIM=$'\x1F'
+set -o pipefail
 sed -E \
   ':loop
    s/^(([^"]*"[^"]*")*[^"]*),/\1'$DELIM'/;
