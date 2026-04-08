@@ -1278,9 +1278,10 @@ track::TrackParCov TrackerTraits<nLayers>::buildTrackSeed(const Cluster& cluster
 
   float snp, q2pt, q2pt2;
   if (mIsZeroField) {
-    const float tgp = o2::gpu::CAMath::ATan2(y3 - y1, x3 - x1);
-    snp = sign * tgp / o2::gpu::CAMath::Sqrt(1.f + tgp * tgp);
-    q2pt = sign / track::kMostProbablePt;
+    const float dx = x3 - x1;
+    const float dy = y3 - y1;
+    snp = sign * dy / o2::gpu::CAMath::Hypot(dx, dy);
+    q2pt = 1.f / track::kMostProbablePt;
     q2pt2 = 1.f;
   } else {
     const float crv = math_utils::computeCurvature(x3, y3, x2, y2, x1, y1);

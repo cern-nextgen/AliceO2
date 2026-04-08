@@ -281,6 +281,9 @@ void GPURecoWorkflowSpec::init(InitContext& ic)
 
     mConfig->configProcessing.willProvideO2PropagatorLate = true;
     mConfig->configProcessing.o2PropagatorUseGPUField = true;
+    if (mConfig->configReconstruction.tpc.trackReferenceX == 1000.f) {
+      mConfig->configReconstruction.tpc.trackReferenceX = 83.f;
+    }
 
     if (mConfParam->printSettings && (mConfParam->printSettings > 1 || ic.services().get<const o2::framework::DeviceSpec>().inputTimesliceId == 0)) {
       mConfig->configProcessing.printSettings = true;
@@ -809,6 +812,10 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
       mNTFDumps++;
     }
   }
+  if (mNTFs == 1 && pc.services().get<const o2::framework::DeviceSpec>().inputTimesliceId == 0) { // TPC ConfigurableCarams are somewhat special, need to construct by hand
+    o2::conf::ConfigurableParam::write(o2::base::NameConf::getConfigOutputFileName(pc.services().get<const o2::framework::DeviceSpec>().name, "rec_tpc"), "GPU_rec_tpc,GPU_rec,GPU_proc_param,GPU_proc,GPU_global,trackTuneParams");
+  }
+
   std::unique_ptr<GPUTrackingInOutPointers> ptrsDump;
   if (mConfParam->dumpBadTFMode == 2) {
     ptrsDump.reset(new GPUTrackingInOutPointers);

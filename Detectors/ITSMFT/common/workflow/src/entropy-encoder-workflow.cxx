@@ -24,7 +24,7 @@ void customize(std::vector<o2::framework::ConfigParamSpec>& workflowOptions)
   std::vector<ConfigParamSpec> options{
     ConfigParamSpec{"runmft", VariantType::Bool, false, {"source detector is MFT (default ITS)"}},
     ConfigParamSpec{"configKeyValues", VariantType::String, "", {"Semicolon separated key=value strings"}},
-    ConfigParamSpec{"ctf-dict", VariantType::String, "ccdb", {"CTF dictionary: empty or ccdb=CCDB, none=no external dictionary otherwise: local filename"}},
+    ConfigParamSpec{"ctf-dict", VariantType::String, "none", {"CTF dictionary: empty or ccdb=CCDB, none=no external dictionary otherwise: local filename"}},
     ConfigParamSpec{"select-ir-frames", VariantType::Bool, false, {"Subscribe and filter according to external IR Frames"}}};
 
   std::swap(workflowOptions, options);
@@ -43,7 +43,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
   if (cfgc.options().get<bool>("runmft")) {
     wf.emplace_back(o2::itsmft::getEntropyEncoderSpec("MFT", selIR, cfgc.options().get<std::string>("ctf-dict")));
   } else {
-    wf.emplace_back(o2::itsmft::getEntropyEncoderSpec("ITS", selIR));
+    wf.emplace_back(o2::itsmft::getEntropyEncoderSpec("ITS", selIR, cfgc.options().get<std::string>("ctf-dict")));
   }
   return wf;
 }

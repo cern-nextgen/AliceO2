@@ -16,5 +16,10 @@
 #pragma link off all functions;
 
 #pragma link C++ class o2::trk::TimeFrame < 11> + ;
+#pragma link C++ class o2::trk::Clusterer + ;
+#ifdef O2_WITH_ACTS
+#pragma link C++ class o2::trk::ClustererACTS + ;
+
+#endif
 
 #endif
