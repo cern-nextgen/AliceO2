@@ -13,14 +13,16 @@ def get_2d_list(csv_filename):
   with open(csv_filename) as csv_file:
     csv_reader = csv.reader(csv_file)
     next(csv_reader)
-    return [[str(name), float(mean), float(stdev)] for name, mean, stdev in csv_reader]
+    return [[str(name), float(mean), float(stdev), int(count)] for name, mean, stdev, count in csv_reader]
 
 table_baseline = get_2d_list(args.baseline)
 table_current = get_2d_list(args.current)
 
-def student(meanX, stdevX, runsX, meanY, stdevY, runsY):
-  s2 = ((runsX - 1) * stdevX**2 + (runsY - 1) * stdevY**2) / (runsX + runsY - 2)
-  return (meanX - meanY) / math.sqrt(s2 / runsX + s2 / runsY) if s2 > 0.0 else 0.0
+def student(x, sx, m, y, sy, n):
+  s = 0.0 if m < 2 or n < 2 else math.sqrt(((m - 1) * sx**2 + (n - 1) * sy**2) / (m + n - 2))
+  d = x - y
+  t = 0.0 if s == 0.0 else math.sqrt((n * m) / (n + m)) * d / s
+  return d, s, t
 
 def get_emoji(t):
   quantile = 2.0 # 95% confidence interval
@@ -33,13 +35,13 @@ def get_emoji(t):
 
 table = []
 for baseline, current in zip(table_baseline, table_current):
-  baseline_name, baseline_mean, baseline_stdev = baseline
-  name, mean, stdev = current
+  baseline_name, baseline_mean, baseline_stdev, count_baseline = baseline
+  name, mean, stdev, count = current
   assert(baseline_name == name)
-  diff = baseline_mean - mean
-  t = student(baseline_mean, baseline_stdev, args.runs, mean, stdev, args.runs) if args.runs > 2 else 0.0
+  total_time = mean * (count // args.runs)
+  d, s, t = student(baseline_mean, baseline_stdev, args.runs, mean, stdev, args.runs)
   emoji = get_emoji(t)
-  table.append([name, int(mean), f'{stdev:.2f}', int(diff), f'{t:.2f}', emoji])
+  table.append([name, int(total_time), int(mean), f'{stdev:.2f}', f'{d:.2f}', f'{t:.2f}', emoji])
 
-header = ['name', 'mean (\u03BCs)', 'stdev \u03C3', 'diff \u0394', 't', '']
+header = ['name', 'total time (\u03BCs)', 'mean (\u03BCs)', 'stdev \u03C3', 'diff \u0394', 't', '']
 print(tab.tabulate(table, header, tablefmt="github"))

@@ -3,7 +3,6 @@ import csv
 import statistics
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-r', '--runs', type=int, required=True, help='Number of runs')
 parser.add_argument('-i', '--input', required=True, help='Input CSV file')
 parser.add_argument('-o', '--output', required=True, help='Output CSV file')
 args = parser.parse_args()
@@ -22,12 +21,12 @@ with open(args.input) as csv_file:
       else:
         kernel_dict[name] = [time]
 
-data = [["name", "time", "stdev"]]
+data = [["name", "time", "stdev", "count"]]
 for name, time_list in kernel_dict.items():
-  count = len(time_list) // args.runs
-  mean = statistics.mean(time_list) * count
-  stdev = 0 if args.runs == 1 else statistics.stdev(time_list) * count
-  data.append([name, mean, stdev])
+  count = len(time_list)
+  mean = statistics.mean(time_list)
+  stdev = 0 if count == 1 else statistics.stdev(time_list)
+  data.append([name, mean, stdev, count])
 
 with open(args.output, 'w') as csv_file:
   csv_writer = csv.writer(csv_file)
