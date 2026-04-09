@@ -25,7 +25,7 @@ jobs:
           - name: nvidia-h100
             runner: cern-nextgen-h100
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=90
-            profiler_runs: 12
+            profiler_runs: 21
             standalone_runs: 42
             cpu_gpu: "-g --memSize 20000000000"
           - name: nvidia-l40s
