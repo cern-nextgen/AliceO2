@@ -41,7 +41,7 @@ for baseline, current in zip(table_baseline, table_current):
   total_time = mean * (count // args.runs)
   d, s, t = student(baseline_mean, baseline_stdev, args.runs, mean, stdev, args.runs)
   emoji = get_emoji(t)
-  table.append([name, int(total_time), int(mean), f'{stdev:.2f}', f'{d:.2f}', f'{t:.2f}', emoji])
+  table.append([name, int(total_time), int(mean), f'{stdev:.2f}', int(baseline_mean), f'{baseline_stdev:.2f}', f'{d:.2f}', f'{t:.2f}', emoji])
 
-header = ['name', 'total time (\u03BCs)', 'mean (\u03BCs)', 'stdev \u03C3', 'diff \u0394', 't', '']
+header = ['name', 'total time (\u03BCs)', 'mean (\u03BCs)', 'stdev \u03C3', 'mean (old)', 'stdev (old)', 'diff \u0394', 't', '']
 print(tab.tabulate(table, header, tablefmt="github"))
