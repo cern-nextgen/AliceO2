@@ -79,7 +79,7 @@ class GPUCommonAlgorithm
 template <typename I>
 GPUdi() void GPUCommonAlgorithm::IterSwap(I a, I b) noexcept
 {
-  auto tmp = *a;
+  auto tmp = *a; // TODO: Fails with SoA tracks (segfault)! Fix by replacing auto by typename std::iterator_traits<I>::value_type
   *a = *b;
   *b = tmp;
 }
@@ -89,7 +89,7 @@ GPUdi() void GPUCommonAlgorithm::InsertionSort(I f, I l, Cmp cmp) noexcept
 {
   auto it0{f};
   while (it0 != l) {
-    auto tmp{*it0};
+    auto tmp{*it0}; // TODO: Fails with SoA tracks (segfault)! Fix by replacing auto by typename std::iterator_traits<I>::value_type
 
     auto it1{it0};
     while (it1 != f && cmp(tmp, it1[-1])) {
