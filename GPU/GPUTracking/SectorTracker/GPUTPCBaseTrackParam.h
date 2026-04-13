@@ -109,11 +109,10 @@ struct GPUTPCBaseTrackParamSkeleton
 
 // Needed for sorting
 constexpr void swap(GPUTPCBaseTrackParamSkeleton<MemLayout::reference> a, GPUTPCBaseTrackParamSkeleton<MemLayout::reference> b) {
-    using std::swap;
-    swap(a.mX, b.mX);
-    swap(a.mC, b.mC);
-    swap(a.mZOffset, b.mZOffset);
-    swap(a.mP, b.mP);
+    std::swap(a.mX, b.mX);
+    std::swap(a.mC, b.mC);
+    std::swap(a.mZOffset, b.mZOffset);
+    std::swap(a.mP, b.mP);
 }
 
 using GPUTPCBaseTrackParam = MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::value>;

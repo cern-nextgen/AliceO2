@@ -61,10 +61,9 @@ class GPUTPCTrackSkeleton
 
 // Needed for sorting
 constexpr void swap(GPUTPCTrackSkeleton<MemLayout::reference> a, GPUTPCTrackSkeleton<MemLayout::reference> b) {
-    using std::swap;
-    swap(a.mFirstHitID, b.mFirstHitID);
-    swap(a.mNHits, b.mNHits);
-    swap(a.mLocalTrackId, b.mLocalTrackId);
+    std::swap(a.mFirstHitID, b.mFirstHitID);
+    std::swap(a.mNHits, b.mNHits);
+    std::swap(a.mLocalTrackId, b.mLocalTrackId);
     swap(a.mParam, b.mParam);
 }
 
