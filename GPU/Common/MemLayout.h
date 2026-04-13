@@ -237,6 +237,9 @@ struct wrapper<S, pointer> : public S<pointer> {
     constexpr bool operator==(const wrapper& other) const { return Base::apply(FirstMember{}) == other.apply(FirstMember{}); }
     constexpr bool operator!=(const wrapper& other) const { return !this->operator==(other); }
     constexpr bool operator<(const wrapper& other) const { return Base::apply(FirstMember{}) < other.apply(FirstMember{}); }
+    constexpr bool operator<=(const wrapper& other) const { return Base::apply(FirstMember{}) <= other.apply(FirstMember{}); }
+    constexpr bool operator>(const wrapper& other) const { return Base::apply(FirstMember{}) > other.apply(FirstMember{}); }
+    constexpr bool operator>=(const wrapper& other) const { return Base::apply(FirstMember{}) >= other.apply(FirstMember{}); }
 
     constexpr wrapper operator+(ptrdiff_t i) const { return Base::apply(Advance<Base>{i}); }
     constexpr wrapper operator-(ptrdiff_t i) const { return operator+(-i); }
