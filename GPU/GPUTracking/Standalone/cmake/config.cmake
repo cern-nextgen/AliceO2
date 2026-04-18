@@ -12,24 +12,24 @@
 # This is the configuration file for the standalone build
 # Its options do not affect the O2 build !!!!
 
-set(ENABLE_CUDA AUTO)
-set(ENABLE_HIP AUTO)
-set(ENABLE_OPENCL AUTO)
+set(ENABLE_CUDA 0)
+set(ENABLE_HIP 0)
+set(ENABLE_OPENCL 0)
 set(GPUCA_CONFIG_VC 1)
 set(GPUCA_CONFIG_FMT 1)
 set(GPUCA_CONFIG_ROOT 1)
 set(GPUCA_CONFIG_ONNX 0)
-set(GPUCA_BUILD_EVENT_DISPLAY 1)
+set(GPUCA_BUILD_EVENT_DISPLAY 0)
 set(GPUCA_BUILD_EVENT_DISPLAY_FREETYPE 1)
 set(GPUCA_BUILD_EVENT_DISPLAY_VULKAN 1)
 set(GPUCA_BUILD_EVENT_DISPLAY_WAYLAND 1)
 set(GPUCA_BUILD_EVENT_DISPLAY_QT 1)
 set(GPUCA_CONFIG_GL3W 0)
 set(GPUCA_CONFIG_O2 1)
-set(GPUCA_BUILD_DEBUG 0)
+set(GPUCA_BUILD_DEBUG 1)                    # Prevents float point exception at runtime (TODO: fix)
 set(GPUCA_BUILD_DEBUG_SANITIZE 0)
 set(GPUCA_BUILD_DEBUG_HOSTONLY 0)
-set(GPUCA_DETERMINISTIC_MODE 0)             # OFF / NO_FAST_MATH / OPTO2 / GPU / WHOLEO2
+set(GPUCA_DETERMINISTIC_MODE GPU)           # OFF / NO_FAST_MATH / OPTO2 / GPU / WHOLEO2
 #set(GPUCA_CUDA_GCCBIN c++-14)
 #set(GPUCA_OPENCL_CLANGBIN clang-20)
 set(HIP_AMDGPUTARGET "default")             # "gfx906;gfx908;gfx90a"
@@ -38,7 +38,10 @@ set(CUDA_COMPUTETARGET "default")           # 86 89
 #set(GPUCA_HIP_COMPILE_MODE perkernel)
 #set(GPUCA_RTC_NO_COMPILED_KERNELS 1)
 #set(GPUCA_KERNEL_RESOURCE_USAGE_VERBOSE 1)
-#set(GPUCA_CONFIG_COMPILER gcc)             # gcc / clang
+set(GPUCA_CONFIG_COMPILER /opt/clang-p2996/bin/clang++)             # gcc / clang
 #set(GPUCA_CONFIG_WERROR 1)
 #add_definitions(-DGPUCA_GPU_DEBUG_PRINT)
 #set(GPUCA_OVERRIDE_PARAMETER_FILE "foo.csv")
+
+add_compile_options(--gcc-toolchain=/cvmfs/alice.cern.ch/el9-x86_64/Packages/GCC-Toolchain/v14.2.0-alice2-1 -std=c++26 -freflection-latest)
+add_link_options(--gcc-toolchain=/cvmfs/alice.cern.ch/el9-x86_64/Packages/GCC-Toolchain/v14.2.0-alice2-1 -lstdc++ -lm)
