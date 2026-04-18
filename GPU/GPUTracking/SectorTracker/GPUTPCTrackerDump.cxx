@@ -15,8 +15,10 @@
 #include "GPUTPCTracker.h"
 #include "GPUReconstruction.h"
 #include "GPUTPCHitId.h"
+#include "GPUTPCTracklet.h"
 #include "GPUTPCTrack.h"
 #include "GPULogging.h"
+#include "MemLayout.h"
 
 #include <iostream>
 #include <cstring>
@@ -101,7 +103,7 @@ void GPUTPCTracker::DumpTrackHits(std::ostream& out)
     if (Tracks()[j].NHits() == 0) {
       continue;
     }
-    const GPUTPCBaseTrackParam& p = Tracks()[j].Param();
+    MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> p = Tracks()[j].Param();
     out << "  " << j << " x " << p.GetX() << " offset " << p.GetZOffset() << " y " << p.GetY() << " z " << p.GetZ() << " snp " << p.GetSinPhi() << " tgl " << p.GetDzDs() << " qpt " << p.GetQPt() << " - ";
     for (int32_t k = 0; k < 15; k++) {
       out << p.GetCov(k) << " ";
@@ -143,7 +145,7 @@ void GPUTPCTracker::DumpTrackletHits(std::ostream& out)
   }
   for (int32_t jj = 0; jj < nTracklets; jj++) {
     const int32_t j = Ids[jj];
-    const auto& tracklet = Tracklets()[j];
+    MemLayout::wrapper<GPUTPCTrackletSkeleton, MemLayout::const_reference> tracklet = Tracklets()[j];
     out << "Tracklet " << std::setw(4) << jj << " (Rows: " << Tracklets()[j].FirstRow() << " - " << tracklet.LastRow() << ", Weight " << Tracklets()[j].HitWeight() << ") ";
     if (tracklet.LastRow() > tracklet.FirstRow() && (tracklet.FirstRow() >= GPUCA_ROW_COUNT || tracklet.LastRow() >= GPUCA_ROW_COUNT)) {
       GPUError("Error: Tracklet %d First %d Last %d", j, tracklet.FirstRow(), tracklet.LastRow());

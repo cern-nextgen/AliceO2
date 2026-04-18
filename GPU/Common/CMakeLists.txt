@@ -26,7 +26,8 @@ set(HDRS_INSTALL
     GPUCommonTransform3D.h
     GPUROOTSMatrixFwd.h
     GPUROOTCartesianFwd.h
-    GPUDebugStreamer.h)
+    GPUDebugStreamer.h
+    MemLayout.h)
 
 if(ALIGPU_BUILD_TYPE STREQUAL "O2")
   o2_add_library(${MODULE}

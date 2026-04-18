@@ -18,15 +18,16 @@
 #include "GPUO2DataTypes.h"
 #include "GPUTPCGMMerger.h"
 #include "GPUTPCConvertImpl.h"
+#include "MemLayout.h"
 #include "GPUParam.inc"
 
 using namespace o2::gpu;
 using namespace o2::tpc;
 
-GPUd() void GPUTPCGMSectorTrack::Set(const GPUTPCGMMerger* merger, const GPUTPCTrack* sectorTr, float alpha, int32_t sector)
+GPUd() void GPUTPCGMSectorTrack::Set(const GPUTPCGMMerger* merger, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> sectorTr, float alpha, int32_t sector)
 {
-  const GPUTPCBaseTrackParam& t = sectorTr->Param();
-  mOrigTrack = sectorTr;
+  MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> t = sectorTr.Param();
+  mOrigTrack = &sectorTr;
   mParam.mX = t.GetX();
   mParam.mY = t.GetY();
   mParam.mZ = t.GetZ();
@@ -41,9 +42,9 @@ GPUd() void GPUTPCGMSectorTrack::Set(const GPUTPCGMMerger* merger, const GPUTPCT
   mNClusters = sectorTr->NHits();
 }
 
-GPUd() void GPUTPCGMSectorTrack::Set(const GPUTPCGMTrackParam& trk, const GPUTPCTrack* sectorTr, float alpha, int32_t sector)
+GPUd() void GPUTPCGMSectorTrack::Set(const GPUTPCGMTrackParam& trk, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> sectorTr, float alpha, int32_t sector)
 {
-  mOrigTrack = sectorTr;
+  mOrigTrack = &sectorTr;
   mParam.mX = trk.GetX();
   mParam.mY = trk.GetY();
   mParam.mZ = trk.GetZ();
@@ -495,7 +496,7 @@ GPUd() bool GPUTPCGMSectorTrack::TransportToXAlpha(GPUTPCGMMerger* merger, float
 
 GPUd() void GPUTPCGMSectorTrack::CopyBaseTrackCov()
 {
-  const float* GPUrestrict() cov = mOrigTrack -> Param().mC;
+  const float* GPUrestrict() cov = mOrigTrack->Param().mC;
   mParam.mC0 = cov[0];
   mParam.mC2 = cov[2];
   mParam.mC3 = cov[3];

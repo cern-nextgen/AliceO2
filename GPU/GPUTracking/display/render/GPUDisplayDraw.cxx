@@ -28,6 +28,7 @@
 #include "GPUParam.inc"
 #include "GPUCommonMath.h"
 #include "GPUChainTracking.h"
+#include "MemLayout.h"
 
 #include <type_traits>
 
@@ -275,7 +276,7 @@ GPUDisplay::vboList GPUDisplay::DrawTracklets(const GPUTPCTracker& tracker)
   }
   size_t startCount = mVertexBufferStart[iSector].size();
   for (uint32_t i = 0; i < *tracker.NTracklets(); i++) {
-    const GPUTPCTracklet& tracklet = tracker.Tracklet(i);
+    MemLayout::wrapper<GPUTPCTrackletSkeleton, MemLayout::const_reference> tracklet = tracker.Tracklet(i);
     size_t startCountInner = mVertexBuffer[iSector].size();
     float4 oldpos;
     for (int32_t j = tracklet.FirstRow(); j <= tracklet.LastRow(); j++) {
@@ -300,7 +301,7 @@ GPUDisplay::vboList GPUDisplay::DrawTracks(const GPUTPCTracker& tracker, int32_t
   }
   size_t startCount = mVertexBufferStart[iSector].size();
   for (uint32_t i = (global ? tracker.CommonMemory()->nLocalTracks : 0); i < (global ? *tracker.NTracks() : tracker.CommonMemory()->nLocalTracks); i++) {
-    GPUTPCTrack& track = tracker.Tracks()[i];
+    GPUTPCTrackSkeleton<MemLayout::reference> track = tracker.Tracks()[i];
     size_t startCountInner = mVertexBuffer[iSector].size();
     for (int32_t j = 0; j < track.NHits(); j++) {
       const GPUTPCHitId& hit = tracker.TrackHits()[track.FirstHitID() + j];

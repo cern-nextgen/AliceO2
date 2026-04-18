@@ -19,6 +19,7 @@
 #include "GPUTPCGMTrackParam.h"
 #include "GPUCommonMath.h"
 #include "GPUO2DataTypes.h"
+#include "MemLayout.h"
 
 namespace o2::gpu
 {
@@ -45,7 +46,7 @@ class GPUTPCGMSectorTrack
   {
     return (i < 2) ? mSegmentNeighbour[i] : mNeighbour[i - 2];
   }
-  GPUd() const GPUTPCTrack* OrigTrack() const { return mOrigTrack; }
+  GPUd() MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_pointer> OrigTrack() const { return mOrigTrack; }
   GPUd() float X() const { return mParam.mX; }
   GPUd() float Y() const { return mParam.mY; }
   GPUd() float Z() const { return mParam.mZ; }
@@ -73,9 +74,9 @@ class GPUTPCGMSectorTrack
     mClusterT[1] = v2;
   }
 
-  GPUd() void Set(const GPUTPCGMTrackParam& trk, const GPUTPCTrack* sectorTr, float alpha, int32_t sector);
+  GPUd() void Set(const GPUTPCGMTrackParam& trk, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> sectorTr, float alpha, int32_t sector);
   GPUd() void SetParam2(const GPUTPCGMTrackParam& trk);
-  GPUd() void Set(const GPUTPCGMMerger* merger, const GPUTPCTrack* sectorTr, float alpha, int32_t sector);
+  GPUd() void Set(const GPUTPCGMMerger* merger, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> sectorTr, float alpha, int32_t sector);
   GPUd() void UseParam2() { mParam = mParam2; } // TODO: Clean this up!
   GPUd() void SetX2(float v) { mParam2.mX = v; }
   GPUd() float X2() const { return mParam2.mX; }
@@ -124,7 +125,7 @@ class GPUTPCGMSectorTrack
   };
 
  private:
-  const GPUTPCTrack* mOrigTrack;    // pointer to original sector track
+  MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_pointer> mOrigTrack;    // pointer to original sector track
   sectorTrackParam mParam;          // Track parameters
   sectorTrackParam mParam2;         // Parameters at other side
   float mTOffset;                   // Z offset with early transform, T offset otherwise

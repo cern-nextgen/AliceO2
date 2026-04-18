@@ -27,6 +27,7 @@
 
 #elif defined(GPUCA_COMPRESSION_TRACK_MODEL_SECTORTRACKER)
 #include "GPUTPCTrackParam.h"
+#include "MemLayout.h"
 
 #else // Default internal track model for compression
 #endif
@@ -121,7 +122,7 @@ class GPUTPCCompressionTrackModel
   const GPUParam* mParam;
 
 #elif defined(GPUCA_COMPRESSION_TRACK_MODEL_SECTORTRACKER)
-  GPUTPCTrackParam mTrk;
+  GPUTPCTrackParamSkeleton<MemLayout::value> mTrk;
   float mAlpha;
   const GPUParam* mParam;
 

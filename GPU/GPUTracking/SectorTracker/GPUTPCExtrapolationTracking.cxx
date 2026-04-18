@@ -14,11 +14,13 @@
 
 #include "GPUTPCDef.h"
 #include "GPUTPCExtrapolationTracking.h"
+#include "GPUTPCTrackParam.h"
 #include "GPUTPCTrackletConstructor.h"
 #include "GPUTPCTrackLinearisation.h"
 #include "GPUTPCTracker.h"
 #include "GPUCommonMath.h"
 #include "GPUParam.inc"
+#include "MemLayout.h"
 
 using namespace o2::gpu;
 
@@ -30,7 +32,7 @@ GPUd() int32_t GPUTPCExtrapolationTracking::PerformExtrapolationTrackingRun(GPUT
     (float) Data().HitDataY(Row(mTrackHits[Tracks()[iTrack].FirstHitID() + j].RowIndex()), mTrackHits[Tracks()[iTrack].FirstHitID() + j].HitIndex()) * Row(mTrackHits[Tracks()[iTrack].FirstHitID() + j].RowIndex()).HstepY() + Row(mTrackHits[Tracks()[iTrack].FirstHitID() + j].RowIndex()).Grid().YMin());
   }*/
 
-  GPUTPCTrackParam tParam;
+  MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::value> tParam;
   tParam.InitParam();
   tParam.SetCov(0, 0.05f);
   tParam.SetCov(2, 0.05f);
@@ -108,7 +110,7 @@ GPUd() int32_t GPUTPCExtrapolationTracking::PerformExtrapolationTrackingRun(GPUT
         rowIndex--;
       }
     }
-    GPUTPCTrack& GPUrestrict() track = tracker.Tracks()[trackId];
+    MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::reference_restrict> track = tracker.Tracks()[trackId];
     track.SetParam(tParam.GetParam());
     track.SetNHits(nHits);
     track.SetFirstHitID(hitId);

@@ -14,11 +14,13 @@
 
 #include "GPUTPCTracker.h"
 #include "GPUTPCRow.h"
-#include "GPUTPCTrack.h"
 #include "GPUCommonMath.h"
+#include "MemLayout.h"
 
 #include "GPUO2DataTypes.h"
 #include "GPUTPCTrackParam.h"
+#include "GPUTPCTracklet.h"
+#include "GPUTPCTrack.h"
 #include "GPUParam.inc"
 #include "GPUTPCConvertImpl.h"
 #include "GPUDefParametersRuntime.h"
@@ -28,6 +30,7 @@
 #include <cmath>
 #include <algorithm>
 #include <stdexcept>
+#include <type_traits>
 
 #include "GPUReconstruction.h"
 #include "GPUMemorySizeScalers.h"
@@ -112,16 +115,41 @@ void GPUTPCTracker::RegisterMemoryAllocation()
   mMemoryResOutput = mRec->RegisterMemoryAllocation(this, &GPUTPCTracker::SetPointersOutput, type, "TPCTrackerTracks"); // TODO: Ideally this should eventually go on the stack, so that we can free it after the first phase of track merging
 }
 
+namespace {
+
+template <class Function>
+struct ApplyMemberwise {
+    Function g;
+
+    template <class ...Args>
+    void operator()(Args& ...args) const { (g(args), ...); }
+};
+
+template <class Function>
+struct ApplyRecursive {
+    Function f;
+
+    template <class T>
+    void operator()(T * & aos) const { f(aos); }
+
+    template <template <template <class> class> class S>
+    void operator()(S<MemLayout::pointer>& soa) const { soa.apply(ApplyMemberwise<ApplyRecursive>{f}); }
+};
+
+}
+
 GPUhd() void* GPUTPCTracker::SetPointersTracklets(void* mem)
 {
-  computePointerWithAlignment(mem, mTracklets, mNMaxTracklets);
+  auto tracklet_helper = [&mem, this](auto& tracklets) -> void { computePointerWithAlignment(mem, tracklets, mNMaxTracklets); };
+  ApplyRecursive{tracklet_helper}(mTracklets);
   computePointerWithAlignment(mem, mTrackletRowHits, mNMaxRowHits);
   return mem;
 }
 
 GPUhd() void* GPUTPCTracker::SetPointersOutput(void* mem)
 {
-  computePointerWithAlignment(mem, mTracks, mNMaxTracks);
+  auto track_helper = [&mem, this](auto& tracks) -> void { computePointerWithAlignment(mem, tracks, mNMaxTracks); };
+  ApplyRecursive{track_helper}(mTracks);
   computePointerWithAlignment(mem, mTrackHits, mNMaxTrackHits);
   return mem;
 }

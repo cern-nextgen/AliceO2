@@ -17,41 +17,49 @@
 
 #include "GPUTPCBaseTrackParam.h"
 #include "GPUTPCDef.h"
+#include "MemLayout.h"
 
 namespace o2::gpu
 {
+constexpr MemLayout::Flag GPUTPCTrackletLayout = MemLayout::Flag::soa;
+
 /**
  * @class GPUTPCTracklet
  *
  * The class describes the reconstructed TPC track candidate.
  * The class is dedicated for internal use by the GPUTPCTracker algorithm.
  */
-class GPUTPCTracklet
+template <template <class> class F>
+class GPUTPCTrackletSkeleton
 {
  public:
-#if !defined(GPUCA_GPUCODE)
-  GPUTPCTracklet() : mFirstRow(0), mLastRow(0), mParam(), mHitWeight(0), mFirstHit(0) {};
-#endif //! GPUCA_GPUCODE
+  MEMLAYOUT_APPLY_UNARY(mFirstRow, mLastRow, mParam, mHitWeight, mFirstHit)
+  MEMLAYOUT_APPLY_BINARY(GPUTPCTrackletSkeleton, MEMLAYOUT_EXPAND(mFirstRow), MEMLAYOUT_EXPAND(mLastRow), MEMLAYOUT_EXPAND(mParam), MEMLAYOUT_EXPAND(mHitWeight), MEMLAYOUT_EXPAND(mFirstHit))
+
+//#if !defined(GPUCA_GPUCODE)
+  //GPUTPCTrackletSkeleton() : mFirstRow(0), mLastRow(0), mParam(), mHitWeight(0), mFirstHit(0) {};
+//#endif //! GPUCA_GPUCODE
 
   GPUhd() int32_t FirstRow() const { return mFirstRow; }
   GPUhd() int32_t LastRow() const { return mLastRow; }
   GPUhd() int32_t HitWeight() const { return mHitWeight; }
   GPUhd() uint32_t FirstHit() const { return mFirstHit; }
-  GPUhd() const GPUTPCBaseTrackParam& Param() const { return mParam; }
+  GPUhd() MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> Param() const { return mParam; }
 
   GPUhd() void SetFirstRow(int32_t v) { mFirstRow = v; }
   GPUhd() void SetLastRow(int32_t v) { mLastRow = v; }
   GPUhd() void SetFirstHit(uint32_t v) { mFirstHit = v; }
-  GPUhd() void SetParam(const GPUTPCBaseTrackParam& v) { mParam = reinterpret_cast<const GPUTPCBaseTrackParam&>(v); }
+  GPUhd() void SetParam(MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> v) { mParam = v; }
   GPUhd() void SetHitWeight(const int32_t w) { mHitWeight = w; }
 
- private:
-  int32_t mFirstRow;           // first TPC row // TODO: We can use smaller data format here!
-  int32_t mLastRow;            // last TPC row
-  GPUTPCBaseTrackParam mParam; // tracklet parameters
-  int32_t mHitWeight;          // Hit Weight of Tracklet
-  uint32_t mFirstHit;          // first hit in row hit array
+// private:
+  F<int32_t> mFirstRow;           // first TPC row // TODO: We can use smaller data format here!
+  F<int32_t> mLastRow;            // last TPC row
+  MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, F> mParam; // tracklet parameters
+  F<int32_t> mHitWeight;          // Hit Weight of Tracklet
+  F<uint32_t> mFirstHit;          // first hit in row hit array
 };
+
 } // namespace o2::gpu
 
 #endif // GPUTPCTRACKLET_H

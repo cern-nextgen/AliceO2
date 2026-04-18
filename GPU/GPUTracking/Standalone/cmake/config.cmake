@@ -32,8 +32,8 @@ set(GPUCA_BUILD_DEBUG_HOSTONLY 0)
 set(GPUCA_DETERMINISTIC_MODE GPU)           # OFF / NO_FAST_MATH / OPTO2 / GPU / WHOLEO2
 #set(GPUCA_CUDA_GCCBIN c++-14)
 #set(GPUCA_OPENCL_CLANGBIN clang-20)
-set(HIP_AMDGPUTARGET "default")             # "gfx906;gfx908;gfx90a"
-set(CUDA_COMPUTETARGET "default")           # 86 89
+set(HIP_AMDGPUTARGET "default" CACHE STRING "HIP_AMDGPUTARGET")      # "gfx906;gfx908;gfx90a"
+set(CUDA_COMPUTETARGET "default" CACHE STRING "CUDA_COMPUTETARGET")  # 86 89
 #set(GPUCA_CUDA_COMPILE_MODE perkernel)     # onefile / perkernel / rtc
 #set(GPUCA_HIP_COMPILE_MODE perkernel)
 #set(GPUCA_RTC_NO_COMPILED_KERNELS 1)

@@ -25,6 +25,7 @@
 
 #include "GPUCommonDef.h"
 #include "GPUCommonHelpers.h"
+#include "GPUTPCTrack.h"
 
 #ifndef __HIPCC__ // CUDA
 #include <cub/cub.cuh>
@@ -81,19 +82,15 @@ GPUdi() void GPUCommonAlgorithm::sortInBlock(T* begin, T* end, const S& comp)
 */
 
 template <class T>
-GPUdi() void GPUCommonAlgorithm::sortDeviceDynamic(T* begin, T* end)
+GPUdi() void GPUCommonAlgorithm::sortDeviceDynamic(T begin, T end)
 {
-  thrust::device_ptr<T> thrustBegin(begin);
-  thrust::device_ptr<T> thrustEnd(end);
-  thrust::sort(GPUCA_THRUST_NAMESPACE::par, thrustBegin, thrustEnd);
+  thrust::sort(GPUCA_THRUST_NAMESPACE::par, begin, end);
 }
 
 template <class T, class S>
-GPUdi() void GPUCommonAlgorithm::sortDeviceDynamic(T* begin, T* end, const S& comp)
+GPUdi() void GPUCommonAlgorithm::sortDeviceDynamic(T begin, T end, const S& comp)
 {
-  thrust::device_ptr<T> thrustBegin(begin);
-  thrust::device_ptr<T> thrustEnd(end);
-  thrust::sort(GPUCA_THRUST_NAMESPACE::par, thrustBegin, thrustEnd, comp);
+  thrust::sort(GPUCA_THRUST_NAMESPACE::par, begin, end, comp);
 }
 
 #ifndef GPUCA_GPUCODE_COMPILEKERNELS

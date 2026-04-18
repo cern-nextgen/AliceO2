@@ -142,7 +142,9 @@ void GPUChainTracking::DumpData(const char* filename, const GPUTrackingInOutPoin
     uint32_t n = 1;
     DumpData(fp, &ioPtrs->settingsTF, &n, InOutPointerType::TF_SETTINGS);
   }
-  DumpData(fp, ioPtrs->sectorTracks, ioPtrs->nSectorTracks, InOutPointerType::SECTOR_OUT_TRACK);
+
+  //DumpData(fp, ioPtrs->sectorTracks, ioPtrs->nSectorTracks, InOutPointerType::SECTOR_OUT_TRACK);
+
   DumpData(fp, ioPtrs->sectorClusters, ioPtrs->nSectorClusters, InOutPointerType::SECTOR_OUT_CLUSTER);
   DumpData(fp, &ioPtrs->mcLabelsTPC, &ioPtrs->nMCLabelsTPC, InOutPointerType::MC_LABEL_TPC);
   DumpData(fp, &ioPtrs->mcInfosTPC, &ioPtrs->nMCInfosTPC, InOutPointerType::MC_INFO_TPC);
@@ -243,7 +245,9 @@ int32_t GPUChainTracking::ReadData(const char* filename)
   }
   uint32_t n;
   ReadData(fp, &mIOPtrs.settingsTF, &n, &mIOMem.settingsTF, InOutPointerType::TF_SETTINGS);
-  ReadData(fp, mIOPtrs.sectorTracks, mIOPtrs.nSectorTracks, mIOMem.sectorTracks, InOutPointerType::SECTOR_OUT_TRACK);
+
+  //ReadData(fp, mIOPtrs.sectorTracks, mIOPtrs.nSectorTracks, mIOMem.sectorTracks, InOutPointerType::SECTOR_OUT_TRACK);
+  
   ReadData(fp, mIOPtrs.sectorClusters, mIOPtrs.nSectorClusters, mIOMem.sectorClusters, InOutPointerType::SECTOR_OUT_CLUSTER);
   ReadData(fp, &mIOPtrs.mcLabelsTPC, &mIOPtrs.nMCLabelsTPC, &mIOMem.mcLabelsTPC, InOutPointerType::MC_LABEL_TPC);
   ReadData(fp, &mIOPtrs.mcInfosTPC, &mIOPtrs.nMCInfosTPC, &mIOMem.mcInfosTPC, InOutPointerType::MC_INFO_TPC);

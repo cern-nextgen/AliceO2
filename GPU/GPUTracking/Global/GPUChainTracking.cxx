@@ -564,12 +564,33 @@ void GPUChainTracking::ClearIOPointers()
   }
 }
 
+namespace {
+
+template <class Function>
+struct ApplyRecursive {
+    Function f;
+
+    template <class T>
+    const T * operator()(const T * & aosIOPtr, GPUChainTracking::unique_ptr_array<T>& aosIOMem) const { return f(aosIOPtr, aosIOMem); }
+
+    template <template <template <class> class> class S>
+    S<MemLayout::const_pointer> operator()(S<MemLayout::const_pointer>& soaIOPtr, S<GPUChainTracking::unique_ptr_array>& soaIOMem) const {
+        return soaIOPtr.apply(soaIOMem, ApplyRecursive{f});
+    }
+};
+
+}
+
 void GPUChainTracking::AllocateIOMemory()
 {
   for (uint32_t i = 0; i < NSECTORS; i++) {
     AllocateIOMemoryHelper(mIOPtrs.nClusterData[i], mIOPtrs.clusterData[i], mIOMem.clusterData[i]);
     AllocateIOMemoryHelper(mIOPtrs.nRawClusters[i], mIOPtrs.rawClusters[i], mIOMem.rawClusters[i]);
-    AllocateIOMemoryHelper(mIOPtrs.nSectorTracks[i], mIOPtrs.sectorTracks[i], mIOMem.sectorTracks[i]);
+    auto sectorTrackAllocator = [this, nSectorTrack = this->mIOPtrs.nSectorTracks[i]](auto& IOPtrsTrack, auto& mIOMemTrack) {
+        AllocateIOMemoryHelper(nSectorTrack, IOPtrsTrack, mIOMemTrack);
+        return IOPtrsTrack;
+    };
+    ApplyRecursive{sectorTrackAllocator}(mIOPtrs.sectorTracks[i], mIOMem.sectorTracks[i]);
     AllocateIOMemoryHelper(mIOPtrs.nSectorClusters[i], mIOPtrs.sectorClusters[i], mIOMem.sectorClusters[i]);
   }
   mIOMem.clusterNativeAccess.reset(new ClusterNativeAccess);
