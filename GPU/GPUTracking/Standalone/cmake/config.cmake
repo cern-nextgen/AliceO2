@@ -43,5 +43,8 @@ set(GPUCA_CONFIG_COMPILER /opt/clang-p2996/bin/clang++)             # gcc / clan
 #add_definitions(-DGPUCA_GPU_DEBUG_PRINT)
 #set(GPUCA_OVERRIDE_PARAMETER_FILE "foo.csv")
 
-add_compile_options(--gcc-toolchain=/cvmfs/alice.cern.ch/el9-x86_64/Packages/GCC-Toolchain/v14.2.0-alice2-1 -std=c++26 -freflection-latest)
-add_link_options(--gcc-toolchain=/cvmfs/alice.cern.ch/el9-x86_64/Packages/GCC-Toolchain/v14.2.0-alice2-1 -lstdc++ -lm)
+if(GPUCA_CONFIG_COMPILER MATCHES "clang")
+  add_compile_options(--gcc-toolchain=/cvmfs/alice.cern.ch/el9-x86_64/Packages/GCC-Toolchain/v14.2.0-alice2-1 -freflection-latest -std=c++26) # -stdlib=libc++
+  add_link_options(--gcc-toolchain=/cvmfs/alice.cern.ch/el9-x86_64/Packages/GCC-Toolchain/v14.2.0-alice2-1 -lstdc++ -lm)
+endif()
+
