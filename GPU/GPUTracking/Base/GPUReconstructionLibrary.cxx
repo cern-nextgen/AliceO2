@@ -12,6 +12,8 @@
 /// \file GPUReconstructionLibrary.cxx
 /// \author David Rohr
 
+#include <mutex>
+
 #ifdef _WIN32
 #include <windows.h>
 #include <winbase.h>

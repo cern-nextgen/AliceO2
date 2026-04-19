@@ -10,7 +10,7 @@ on:
 jobs:
   benchmark:
     runs-on: cern-nextgen-mi300x
-    container: registry.cern.ch/ngt-wp1.7/wp1.7-slc9-builder@sha256:00132a2ea4e40bea05b2369c76875f8bd6150894be58605022b8e211685d10a1
+    container: registry.cern.ch/ngt-wp1.7/wp1.7-slc9-builder@sha256:0ebde4cca8d0addc1322cfd636245c33f73d4366bd775c4f9ee454d47cd9c3bc
     env:
       WORK_DIR: /cvmfs/alice.cern.ch
       ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
@@ -20,8 +20,8 @@ jobs:
       PROFILER_CSV: profiler_cpu.csv
       TIMING_CA: ./ca -e 50kHz -c --seed 0 --sync --runsInit 0 --PROCresetTimers 1 --PROCdebugMarkdown 1 --debug 1 # Add --runs 42 for benchmark runs
       LD_LIBRARY_PATH: /usr/local/cuda-13.0/compat
-      CC: /opt/clang-p2996/bin/clang
-      CXX: /opt/clang-p2996/bin/clang++
+      CC: /opt/gcc/bin/gcc #/opt/clang-p2996/bin/clang
+      CXX: /opt/gcc/bin/g++ #/opt/clang-p2996/bin/clang++
 
     name: cpu
     steps:

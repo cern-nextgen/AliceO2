@@ -38,7 +38,7 @@ set(CUDA_COMPUTETARGET "default" CACHE STRING "CUDA_COMPUTETARGET")  # 86 89
 #set(GPUCA_HIP_COMPILE_MODE perkernel)
 #set(GPUCA_RTC_NO_COMPILED_KERNELS 1)
 #set(GPUCA_KERNEL_RESOURCE_USAGE_VERBOSE 1)
-set(GPUCA_CONFIG_COMPILER /opt/clang-p2996/bin/clang++)             # gcc / clang
+set(GPUCA_CONFIG_COMPILER /opt/gcc/bin/g++)             # gcc / clang / /opt/clang-p2996/bin/clang++
 #set(GPUCA_CONFIG_WERROR 1)
 #add_definitions(-DGPUCA_GPU_DEBUG_PRINT)
 #set(GPUCA_OVERRIDE_PARAMETER_FILE "foo.csv")
@@ -46,5 +46,10 @@ set(GPUCA_CONFIG_COMPILER /opt/clang-p2996/bin/clang++)             # gcc / clan
 if(GPUCA_CONFIG_COMPILER MATCHES "clang")
   add_compile_options(--gcc-toolchain=/cvmfs/alice.cern.ch/el9-x86_64/Packages/GCC-Toolchain/v14.2.0-alice2-1 -freflection-latest -std=c++26) # -stdlib=libc++
   add_link_options(--gcc-toolchain=/cvmfs/alice.cern.ch/el9-x86_64/Packages/GCC-Toolchain/v14.2.0-alice2-1 -lstdc++ -lm)
+else()
+  get_filename_component(_gcc_bin_dir "${GPUCA_CONFIG_COMPILER}" DIRECTORY)
+  get_filename_component(_gcc_root "${_gcc_bin_dir}" DIRECTORY)
+  list(APPEND CMAKE_INSTALL_RPATH "${_gcc_root}/lib64")
+  add_compile_options(-freflection -std=c++26)
 endif()
 
