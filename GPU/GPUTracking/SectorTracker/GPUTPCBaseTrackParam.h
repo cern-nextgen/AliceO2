@@ -54,9 +54,6 @@ struct GPUTPCParameter
 template <template <class> class F>
 struct GPUTPCBaseTrackParamSkeleton
 {
-  MEMLAYOUT_APPLY_UNARY(mX, mC, mZOffset, mP)
-  MEMLAYOUT_APPLY_BINARY(GPUTPCBaseTrackParamSkeleton, MEMLAYOUT_EXPAND(mX), MEMLAYOUT_EXPAND(mC), MEMLAYOUT_EXPAND(mZOffset), MEMLAYOUT_EXPAND(mP))
-
   GPUd() float X() const { return mX; }
   GPUd() float Y() const { return mP[0]; }
   GPUd() float Z() const { return mP[1]; }

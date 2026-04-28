@@ -33,9 +33,6 @@ template <template <class> class F>
 class GPUTPCTrackletSkeleton
 {
  public:
-  MEMLAYOUT_APPLY_UNARY(mFirstRow, mLastRow, mParam, mHitWeight, mFirstHit)
-  MEMLAYOUT_APPLY_BINARY(GPUTPCTrackletSkeleton, MEMLAYOUT_EXPAND(mFirstRow), MEMLAYOUT_EXPAND(mLastRow), MEMLAYOUT_EXPAND(mParam), MEMLAYOUT_EXPAND(mHitWeight), MEMLAYOUT_EXPAND(mFirstHit))
-
 //#if !defined(GPUCA_GPUCODE)
   //GPUTPCTrackletSkeleton() : mFirstRow(0), mLastRow(0), mParam(), mHitWeight(0), mFirstHit(0) {};
 //#endif //! GPUCA_GPUCODE
