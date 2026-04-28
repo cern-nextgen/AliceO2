@@ -9,8 +9,8 @@ on:
 
 jobs:
   benchmark:
-    runs-on: cern-nextgen-mi300x
-    container: registry.cern.ch/ngt-wp1.7/wp1.7-slc9-builder@sha256:0ebde4cca8d0addc1322cfd636245c33f73d4366bd775c4f9ee454d47cd9c3bc
+    runs-on: cern-nextgen-w7900
+    container: registry.cern.ch/ngt-wp1.7/wp1.7-slc9-builder@sha256:e2bbb089480bb39d51ae8c360ef7f9543c3de733fb831bab2c28ab2317ad7317
     env:
       WORK_DIR: /cvmfs/alice.cern.ch
       ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
@@ -19,7 +19,6 @@ jobs:
       BENCHMARK_CSV: standalone_cpu.csv
       PROFILER_CSV: profiler_cpu.csv
       TIMING_CA: ./ca -e 50kHz -c --seed 0 --sync --runsInit 0 --PROCresetTimers 1 --PROCdebugMarkdown 1 --debug 1 # Add --runs 42 for benchmark runs
-      LD_LIBRARY_PATH: /usr/local/cuda-13.0/compat
       CC: /opt/gcc/bin/gcc #/opt/clang-p2996/bin/clang
       CXX: /opt/gcc/bin/g++ #/opt/clang-p2996/bin/clang++
 
@@ -45,6 +44,7 @@ jobs:
         run: &build |
           source /etc/profile.d/modules.sh
           module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
+          export PATH=/opt/gcc/bin:$PATH && export LD_LIBRARY_PATH=/opt/gcc/lib64:/opt/gcc/lib:$LD_LIBRARY_PATH
 
           mkdir -p ${STANDALONE_DIR}
           cmake -B ${STANDALONE_DIR}/build -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
@@ -54,6 +54,7 @@ jobs:
         run: |
           source /etc/profile.d/modules.sh
           module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
+          export PATH=/opt/gcc/bin:$PATH && export LD_LIBRARY_PATH=/opt/gcc/lib64:/opt/gcc/lib:$LD_LIBRARY_PATH
           cd ${STANDALONE_DIR}
           ${STANDALONE_DIR}/ca -e o2-simple -c --seed 0 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptConstexpr 1 --RTCoptSpecialCode 1 --debug 6
           cmp ${STANDALONE_DIR}/*.out
@@ -62,6 +63,7 @@ jobs:
         run: |
           source /etc/profile.d/modules.sh
           module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
+          export PATH=/opt/gcc/bin:$PATH && export LD_LIBRARY_PATH=/opt/gcc/lib64:/opt/gcc/lib:$LD_LIBRARY_PATH
           cd ${STANDALONE_DIR}
           ${TIMING_CA} --runs 12 --PROCdebugCSV /root/${BENCHMARK_CSV}
           python3 ${GITHUB_WORKSPACE}/.github/scripts/profiler_standalone.py --discard 2 --input /root/${BENCHMARK_CSV} --output /root/summary_${BENCHMARK_CSV}
