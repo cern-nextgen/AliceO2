@@ -63,13 +63,6 @@ struct AggregateConstructor {
     constexpr SF operator()(const Args& ...args) const { return {args...}; }
 };
 
-struct FirstMember {
-    template <class T, class... Args>
-    constexpr T& operator()(T& t, Args& ...args) const { return t; }
-    template <class T, class... Args>
-    constexpr const T& operator()(const T& t, const Args& ...args) const { return t; }
-};
-
 template <class SF>
 struct PreIncrement {
     template <class... Args>
@@ -333,22 +326,22 @@ struct wrapper<S, pointer> : public S<pointer> {
     constexpr wrapper<S, const_reference> operator->() const { return operator[](0); }
 
     constexpr bool operator==(const wrapper& other) const { 
-        return apply(*this, FirstMember{}) == apply(other, FirstMember{}); }
+        return this->[:nsdms(^^Base)[0]:] == other.[:nsdms(^^Base)[0]:]; }
     constexpr bool operator!=(const wrapper& other) const { 
         return !this->operator==(other); }
     constexpr bool operator<(const wrapper& other) const { 
-        return apply(*this, FirstMember{}) < apply(other, FirstMember{}); }
+        return this->[:nsdms(^^Base)[0]:] < other.[:nsdms(^^Base)[0]:]; }
     constexpr bool operator<=(const wrapper& other) const { 
-        return apply(*this, FirstMember{}) <= apply(other, FirstMember{}); }
+        return this->[:nsdms(^^Base)[0]:] <= other.[:nsdms(^^Base)[0]:]; }
     constexpr bool operator>(const wrapper& other) const { 
-        return apply(*this, FirstMember{}) > apply(other, FirstMember{}); }
+        return this->[:nsdms(^^Base)[0]:] > other.[:nsdms(^^Base)[0]:]; }
     constexpr bool operator>=(const wrapper& other) const { 
-        return apply(*this, FirstMember{}) >= apply(other, FirstMember{}); }
+        return this->[:nsdms(^^Base)[0]:] >= other.[:nsdms(^^Base)[0]:]; }
 
     constexpr wrapper operator+(ptrdiff_t i) const { return apply(*this, Advance<Base>{i}); }
     constexpr wrapper operator-(ptrdiff_t i) const { return operator+(-i); }
     constexpr ptrdiff_t operator-(const wrapper& other) const { 
-        return apply(*this, FirstMember{}) - apply(other, FirstMember{}); }
+        return this->[:nsdms(^^Base)[0]:] - other.[:nsdms(^^Base)[0]:]; }
 
     constexpr wrapper& operator++() { apply(*this, PreIncrement<Base>{}); return *this; }
     constexpr wrapper& operator+=(ptrdiff_t i) { return *this = *this + i; }
@@ -370,17 +363,17 @@ struct wrapper<S, const_pointer> : public S<const_pointer> {
     constexpr wrapper<S, const_reference> operator->() const { return operator[](0); }
 
     constexpr bool operator==(const wrapper& other) const { 
-        return apply(*this, FirstMember{}) == apply(other, FirstMember{}); }
+        return this->[:nsdms(^^Base)[0]:] == other.[:nsdms(^^Base)[0]:]; }
     constexpr bool operator!=(const wrapper& other) const { 
         return !this->operator==(other); }
     constexpr bool operator<(const wrapper& other) const { 
-        return apply(*this, FirstMember{}) < apply(other, FirstMember{}); }
+        return this->[:nsdms(^^Base)[0]:] < other.[:nsdms(^^Base)[0]:]; }
 
     constexpr wrapper operator+(ptrdiff_t i) const { 
         return apply(*this, Advance<Base>{i}); }
     constexpr wrapper operator-(ptrdiff_t i) const { return operator+(-i); }
     constexpr ptrdiff_t operator-(const wrapper& other) const { 
-        return apply(*this, FirstMember{}) - apply(other, FirstMember{}); }
+        return this->[:nsdms(^^Base)[0]:] - other.[:nsdms(^^Base)[0]:]; }
 
     constexpr wrapper& operator++() { apply(*this, PreIncrement<Base>{}); return *this; }
     constexpr wrapper& operator+=(ptrdiff_t i) { return *this = *this + i; }
