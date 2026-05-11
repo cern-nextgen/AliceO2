@@ -9,7 +9,7 @@ on:
 
 jobs:
   benchmark:
-    runs-on: cern-nextgen-w7900
+    runs-on: cern-nextgen-mi300x
     container: registry.cern.ch/ngt-wp1.7/wp1.7-slc9-builder@sha256:e2bbb089480bb39d51ae8c360ef7f9543c3de733fb831bab2c28ab2317ad7317
     env:
       WORK_DIR: /cvmfs/alice.cern.ch
