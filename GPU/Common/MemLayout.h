@@ -42,118 +42,124 @@ template <class SF>
 struct RandomAccessAt {
     MemLayout::size_t i;
     template <class... Args>
-    constexpr SF operator()(Args& ...args) const { return {args[i]...}; }
+    [[gnu::always_inline]] constexpr SF operator()(Args& ...args) const { return {args[i]...}; }
     template <class... Args>
-    constexpr SF operator()(const Args& ...args) const { return {args[i]...}; }
+    [[gnu::always_inline]] constexpr SF operator()(const Args& ...args) const { return {args[i]...}; }
 };
 
 template <class SF>
 struct GetPointer {
     template <class... Args>
-    constexpr SF operator()(Args& ...args) const { return {&args...}; }
+    [[gnu::always_inline]] constexpr SF operator()(Args& ...args) const { return {&args...}; }
     template <class... Args>
-    constexpr SF operator()(const Args& ...args) const { return {&args...}; }
+    [[gnu::always_inline]] constexpr SF operator()(const Args& ...args) const { return {&args...}; }
 };
 
 template <class SF>
 struct AggregateConstructor {
     template <class... Args>
-    constexpr SF operator()(Args& ...args) const { return {args...}; }
+    [[gnu::always_inline]] constexpr SF operator()(Args& ...args) const { return {args...}; }
     template <class... Args>
-    constexpr SF operator()(const Args& ...args) const { return {args...}; }
+    [[gnu::always_inline]] constexpr SF operator()(const Args& ...args) const { return {args...}; }
 };
 
 template <class SF>
 struct PreIncrement {
     template <class... Args>
-    constexpr SF operator()(Args& ...args) const { return {++args...}; }
+    [[gnu::always_inline]] constexpr SF operator()(Args& ...args) const { return {++args...}; }
 };
 
 template <class SF>
 struct PreDecrement {
     template <class... Args>
-    constexpr SF operator()(Args& ...args) const { return {--args...}; }
+    [[gnu::always_inline]] constexpr SF operator()(Args& ...args) const { return {--args...}; }
 };
 
 template <class SF>
 struct Advance {
     ptrdiff_t i;
     template <class... Args>
-    constexpr SF operator()(const Args& ...args) const { return {(args + i)...}; }
+    [[gnu::always_inline]] constexpr SF operator()(const Args& ...args) const { return {(args + i)...}; }
 };
 
 struct CopyAssignment {
     template <class Left, class Right>
-    constexpr Left& operator()(Left& left, const Right& right) const { return left = right; }
+    [[gnu::always_inline]] constexpr Left& operator()(Left& left, const Right& right) const { return left = right; }
 };
 
 //////////////// apply to members methods
 
-template <class Self, class FunctionObject>
-constexpr auto apply_unary(Self &self, FunctionObject&& f) {
-    auto construct_output = [&]<size_t... Is>(std::index_sequence<Is...>) {
+struct apply_unary_helper {
+    template <class Self, class FunctionObject, size_t... Is>
+    [[gnu::always_inline]] constexpr auto operator()(Self& self, FunctionObject&& f, std::index_sequence<Is...>) const {
         return f(self.[:nsdms(^^Self)[Is]:]...);
-    };
+    }
+};
+
+template <class Self, class FunctionObject>
+[[gnu::always_inline]] constexpr auto apply_unary(Self &self, FunctionObject&& f) {
     constexpr auto indices = std::make_index_sequence<count_members<Self>()>{};
-    return construct_output(indices);
+    return apply_unary_helper{}(self, std::forward<FunctionObject>(f), indices);
 }
 
 // apply on skeleton struct S<F>
 template <class FunctionObject, template <template <class> class> class S, template <class> class F>
-constexpr auto apply(S<F> &self, FunctionObject&& f) {
+[[gnu::always_inline]] constexpr auto apply(S<F> &self, FunctionObject&& f) {
     return apply_unary(self, std::forward<FunctionObject&&>(f));
 }
 
 template <class FunctionObject, template <template <class> class> class S, template <class> class F>
-constexpr auto apply(const S<F> &self, FunctionObject&& f) {
+[[gnu::always_inline]] constexpr auto apply(const S<F> &self, FunctionObject&& f) {
     return apply_unary(self, std::forward<FunctionObject&&>(f));
 }
 
 // apply on wrappers, forwarding to the base type
 template <class FunctionObject, class Self> 
     requires requires { typename Self::Base; }
-constexpr auto apply(Self &self, FunctionObject&& f) {
+[[gnu::always_inline]] constexpr auto apply(Self &self, FunctionObject&& f) {
     return apply_unary<typename Self::Base>(self, std::forward<FunctionObject&&>(f));
 }
 
 template <class FunctionObject, class Self> 
     requires requires { typename Self::Base; }
-constexpr auto apply(const Self &self, FunctionObject&& f) {
+[[gnu::always_inline]] constexpr auto apply(const Self &self, FunctionObject&& f) {
     return apply_unary<const typename Self::Base>(self, std::forward<FunctionObject&&>(f));
 }
 
+struct apply_binary_helper {
+    template <class Self, class Other, class FunctionObject, size_t... Is>
+    [[gnu::always_inline]] constexpr Self operator()(Self& self, Other& other, FunctionObject&& f, std::index_sequence<Is...>) const {
+        return {f(self.[:nsdms(^^Self)[Is]:], other.[:nsdms(^^Other)[Is]:])...};
+    }
+};
 
 // template <class FunctionObject, class Self, class Other>
 // constexpr auto apply(Self &self, Other &other, FunctionObject&& f) {
 template <class Self, class Other, class FunctionObject>
-constexpr auto apply_binary(Self &self, Other &other, FunctionObject&& f) {
-    auto construct_output = [&]<size_t... Is>(std::index_sequence<Is...>) -> Self {
-        return {f(
-            self.[:nsdms(^^Self)[Is]:], other.[:nsdms(^^Other)[Is]:])...};
-    };
+[[gnu::always_inline]] constexpr auto apply_binary(Self &self, Other &other, FunctionObject&& f) {
     constexpr auto indices = std::make_index_sequence<count_members<Self>()>{};
-    return construct_output(indices);
+    return apply_binary_helper{}(self, other, std::forward<FunctionObject&&>(f), indices);
 }
 
 template <class FunctionObject, template <template <class> class> class S, template <class> class F_self, template <class> class F_other>
-constexpr auto apply(S<F_self> &self, S<F_other> &other, FunctionObject&& f) {
+[[gnu::always_inline]] constexpr auto apply(S<F_self> &self, S<F_other> &other, FunctionObject&& f) {
     return apply_binary(self, other, std::forward<FunctionObject&&>(f));
 }
 
 template <class FunctionObject, template <template <class> class> class S, template <class> class F_self, template <class> class F_other>
-constexpr auto apply(S<F_self> &self, const S<F_other> &other, FunctionObject&& f) {
+[[gnu::always_inline]] constexpr auto apply(S<F_self> &self, const S<F_other> &other, FunctionObject&& f) {
     return apply_binary(self, other, std::forward<FunctionObject&&>(f));
 }
 
 template <class Self, class Other, class FunctionObject>
     requires requires { typename Self::Base; typename Other::Base; }
-constexpr auto apply(Self &self, Other &other, FunctionObject&& f) {
+[[gnu::always_inline]] constexpr auto apply(Self &self, Other &other, FunctionObject&& f) {
     return apply_binary<typename Self::Base, typename Other::Base>(self, other, std::forward<FunctionObject&&>(f));
 }
 
 template <class Self, class Other, class FunctionObject>
     requires requires { typename Self::Base; typename Other::Base; }
-constexpr auto apply(Self &self, const Other &other, FunctionObject&& f) {
+[[gnu::always_inline]] constexpr auto apply(Self &self, const Other &other, FunctionObject&& f) {
     static_assert(count_members<typename Self::Base>() == 4);
     return apply_binary<typename Self::Base, const typename Other::Base>(self, other, std::forward<FunctionObject&&>(f));
 }
@@ -174,13 +180,13 @@ struct wrapper : public S<F> {
     template <template <class> class F_other>
     constexpr wrapper(const S<F_other>& other) : Base{apply(other, AggregateConstructor<Base>{})} {}
 
-    constexpr wrapper<S, reference> operator[] (size_t i) { 
+    [[gnu::always_inline]] constexpr wrapper<S, reference> operator[] (size_t i) { 
         return apply(*this, RandomAccessAt<S<reference>>{i}); }
-    constexpr wrapper<S, const_reference> operator[] (size_t i) const { 
+    [[gnu::always_inline]] constexpr wrapper<S, const_reference> operator[] (size_t i) const { 
         return apply(*this, RandomAccessAt<S<const_reference>>{i}); }
 
-    constexpr wrapper<S, reference> operator*() { return operator[](0); }
-    constexpr wrapper<S, const_reference> operator*(ptrdiff_t) const { return operator[](0); }
+    [[gnu::always_inline]] constexpr wrapper<S, reference> operator*() { return operator[](0); }
+    [[gnu::always_inline]] constexpr wrapper<S, const_reference> operator*(ptrdiff_t) const { return operator[](0); }
 };
 
 template <template <template <class> class> class S>
@@ -315,15 +321,15 @@ struct wrapper<S, pointer> : public S<pointer> {
     constexpr wrapper() = default;
     constexpr wrapper(Base b) : Base{static_cast<Base&&>(b)} {}
 
-    constexpr wrapper<S, reference> operator[] (size_t i) { 
+    [[gnu::always_inline]] constexpr wrapper<S, reference> operator[] (size_t i) { 
         return apply(*this, RandomAccessAt<S<reference>>{i}); }
-    constexpr const wrapper<S, const_reference> operator[] (size_t i) const { 
+    [[gnu::always_inline]] constexpr const wrapper<S, const_reference> operator[] (size_t i) const { 
         return apply(*this, RandomAccessAt<S<const_reference>>{i}); }
 
-    constexpr wrapper<S, reference> operator*() { return operator[](0); }
-    constexpr wrapper<S, const_reference> operator*() const { return operator[](0); }
-    constexpr wrapper<S, reference> operator->() { return operator[](0); }
-    constexpr wrapper<S, const_reference> operator->() const { return operator[](0); }
+    [[gnu::always_inline]] constexpr wrapper<S, reference> operator*() { return operator[](0); }
+    [[gnu::always_inline]] constexpr wrapper<S, const_reference> operator*() const { return operator[](0); }
+    [[gnu::always_inline]] constexpr wrapper<S, reference> operator->() { return operator[](0); }
+    [[gnu::always_inline]] constexpr wrapper<S, const_reference> operator->() const { return operator[](0); }
 
     constexpr bool operator==(const wrapper& other) const { 
         return this->[:nsdms(^^Base)[0]:] == other.[:nsdms(^^Base)[0]:]; }
@@ -357,16 +363,16 @@ struct wrapper<S, const_pointer> : public S<const_pointer> {
     constexpr wrapper(Base b) : Base{static_cast<Base&&>(b)} {}
     constexpr wrapper(const S<pointer>& other) : Base(apply(other, AggregateConstructor<Base>{})) {}
 
-    constexpr wrapper<S, const_reference> operator[] (size_t i) const { 
+    [[gnu::always_inline]] constexpr wrapper<S, const_reference> operator[] (size_t i) const { 
         return apply(*this, RandomAccessAt<S<const_reference>>{i}); }
-    constexpr wrapper<S, const_reference> operator*() const { return operator[](0); }
-    constexpr wrapper<S, const_reference> operator->() const { return operator[](0); }
+    [[gnu::always_inline]] constexpr wrapper<S, const_reference> operator*() const { return operator[](0); }
+    [[gnu::always_inline]] constexpr wrapper<S, const_reference> operator->() const { return operator[](0); }
 
-    constexpr bool operator==(const wrapper& other) const { 
+    [[gnu::always_inline]] constexpr bool operator==(const wrapper& other) const { 
         return this->[:nsdms(^^Base)[0]:] == other.[:nsdms(^^Base)[0]:]; }
-    constexpr bool operator!=(const wrapper& other) const { 
+    [[gnu::always_inline]] constexpr bool operator!=(const wrapper& other) const { 
         return !this->operator==(other); }
-    constexpr bool operator<(const wrapper& other) const { 
+    [[gnu::always_inline]] constexpr bool operator<(const wrapper& other) const { 
         return this->[:nsdms(^^Base)[0]:] < other.[:nsdms(^^Base)[0]:]; }
 
     constexpr wrapper operator+(ptrdiff_t i) const { 
