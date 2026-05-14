@@ -45,6 +45,9 @@ template <template <class> class F>
 class GPUTPCTrackParamSkeleton
 {
  public:
+  MEMLAYOUT_APPLY_UNARY(mParam, mSignCosPhi, mChi2, mNDF)
+  MEMLAYOUT_APPLY_BINARY(GPUTPCTrackParamSkeleton, MEMLAYOUT_EXPAND(mParam), MEMLAYOUT_EXPAND(mSignCosPhi), MEMLAYOUT_EXPAND(mChi2), MEMLAYOUT_EXPAND(mNDF))
+
   GPUd() MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> GetParam() const { return mParam; }
   GPUd() void SetParam(MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> v);
   GPUd() void InitParam();

@@ -575,7 +575,7 @@ struct ApplyRecursive {
 
     template <template <template <class> class> class S>
     S<MemLayout::const_pointer> operator()(S<MemLayout::const_pointer>& soaIOPtr, S<GPUChainTracking::unique_ptr_array>& soaIOMem) const {
-      return apply(soaIOPtr, soaIOMem, ApplyRecursive{f});
+        return soaIOPtr.apply(soaIOMem, ApplyRecursive{f});
     }
 };
 

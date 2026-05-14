@@ -133,7 +133,7 @@ struct ApplyRecursive {
     void operator()(T * & aos) const { f(aos); }
 
     template <template <template <class> class> class S>
-    void operator()(S<MemLayout::pointer>& soa) const { apply(soa, ApplyMemberwise<ApplyRecursive>{f}); }
+    void operator()(S<MemLayout::pointer>& soa) const { soa.apply(ApplyMemberwise<ApplyRecursive>{f}); }
 };
 
 }

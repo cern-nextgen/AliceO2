@@ -34,6 +34,9 @@ template <template <class> class F>
 class GPUTPCTrackSkeleton
 {
  public:
+    MEMLAYOUT_APPLY_UNARY(mFirstHitID, mNHits, mLocalTrackId, mParam)
+    MEMLAYOUT_APPLY_BINARY(GPUTPCTrackSkeleton, MEMLAYOUT_EXPAND(mFirstHitID), MEMLAYOUT_EXPAND(mNHits), MEMLAYOUT_EXPAND(mLocalTrackId), MEMLAYOUT_EXPAND(mParam))
+
 //#if !defined(GPUCA_GPUCODE)
 //  GPUTPCTrack() : mFirstHitID(0), mNHits(0), mLocalTrackId(-1), mParam() {}
 //  ~GPUTPCTrackSkeleton() = default;
