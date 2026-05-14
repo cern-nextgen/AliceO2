@@ -100,25 +100,25 @@ constexpr auto apply_unary(Self &self, FunctionObject&& f) {
 
 // apply on skeleton struct S<F>
 template <class FunctionObject, template <template <class> class> class S, template <class> class F>
-constexpr auto apply(S<F> &self, FunctionObject&& f) {
+__attribute__((flatten)) constexpr auto apply(S<F> &self, FunctionObject&& f) {
     return apply_unary(self, std::forward<FunctionObject&&>(f));
 }
 
 template <class FunctionObject, template <template <class> class> class S, template <class> class F>
-constexpr auto apply(const S<F> &self, FunctionObject&& f) {
+__attribute__((flatten)) constexpr auto apply(const S<F> &self, FunctionObject&& f) {
     return apply_unary(self, std::forward<FunctionObject&&>(f));
 }
 
 // apply on wrappers, forwarding to the base type
 template <class FunctionObject, class Self> 
     requires requires { typename Self::Base; }
-constexpr auto apply(Self &self, FunctionObject&& f) {
+__attribute__((flatten)) constexpr auto apply(Self &self, FunctionObject&& f) {
     return apply_unary<typename Self::Base>(self, std::forward<FunctionObject&&>(f));
 }
 
 template <class FunctionObject, class Self> 
     requires requires { typename Self::Base; }
-constexpr auto apply(const Self &self, FunctionObject&& f) {
+__attribute__((flatten)) constexpr auto apply(const Self &self, FunctionObject&& f) {
     return apply_unary<const typename Self::Base>(self, std::forward<FunctionObject&&>(f));
 }
 
@@ -126,7 +126,7 @@ constexpr auto apply(const Self &self, FunctionObject&& f) {
 // template <class FunctionObject, class Self, class Other>
 // constexpr auto apply(Self &self, Other &other, FunctionObject&& f) {
 template <class Self, class Other, class FunctionObject>
-constexpr auto apply_binary(Self &self, Other &other, FunctionObject&& f) {
+__attribute__((flatten)) constexpr auto apply_binary(Self &self, Other &other, FunctionObject&& f) {
     auto construct_output = [&]<size_t... Is>(std::index_sequence<Is...>) -> Self {
         return {f(
             self.[:nsdms(^^Self)[Is]:], other.[:nsdms(^^Other)[Is]:])...};
@@ -136,25 +136,24 @@ constexpr auto apply_binary(Self &self, Other &other, FunctionObject&& f) {
 }
 
 template <class FunctionObject, template <template <class> class> class S, template <class> class F_self, template <class> class F_other>
-constexpr auto apply(S<F_self> &self, S<F_other> &other, FunctionObject&& f) {
+__attribute__((flatten)) constexpr auto apply(S<F_self> &self, S<F_other> &other, FunctionObject&& f) {
     return apply_binary(self, other, std::forward<FunctionObject&&>(f));
 }
 
 template <class FunctionObject, template <template <class> class> class S, template <class> class F_self, template <class> class F_other>
-constexpr auto apply(S<F_self> &self, const S<F_other> &other, FunctionObject&& f) {
+__attribute__((flatten)) constexpr auto apply(S<F_self> &self, const S<F_other> &other, FunctionObject&& f) {
     return apply_binary(self, other, std::forward<FunctionObject&&>(f));
 }
 
 template <class Self, class Other, class FunctionObject>
     requires requires { typename Self::Base; typename Other::Base; }
-constexpr auto apply(Self &self, Other &other, FunctionObject&& f) {
+__attribute__((flatten)) constexpr auto apply(Self &self, Other &other, FunctionObject&& f) {
     return apply_binary<typename Self::Base, typename Other::Base>(self, other, std::forward<FunctionObject&&>(f));
 }
 
 template <class Self, class Other, class FunctionObject>
     requires requires { typename Self::Base; typename Other::Base; }
-constexpr auto apply(Self &self, const Other &other, FunctionObject&& f) {
-    static_assert(count_members<typename Self::Base>() == 4);
+__attribute__((flatten)) constexpr auto apply(Self &self, const Other &other, FunctionObject&& f) {
     return apply_binary<typename Self::Base, const typename Other::Base>(self, other, std::forward<FunctionObject&&>(f));
 }
 
