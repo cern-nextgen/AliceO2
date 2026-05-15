@@ -17,7 +17,7 @@ jobs:
         name: [cpu, nvidia-h100, nvidia-l40s, amd-mi300x, amd-w7900]
         include:
           - name: cpu
-            runner: cern-nextgen-mi300x
+            runner: cern-nextgen-cpuintensive
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=0
             profiler_runs: 42
             standalone_runs: 42
