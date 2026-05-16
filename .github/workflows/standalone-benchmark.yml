@@ -9,7 +9,7 @@ on:
 
 jobs:
   benchmark:
-    runs-on: cern-nextgen-cpuintensive
+    runs-on: cern-nextgen-mi300x
     container: registry.cern.ch/ngt-wp1.7/wp1.7-slc9-builder@sha256:e8d7bb29bc65ccb732c465450e8a62eceecf1e765b73826fd59f26eb7e944a0a
     env:
       WORK_DIR: /cvmfs/alice.cern.ch
@@ -74,7 +74,7 @@ jobs:
           export PATH=/opt/gcc/bin:$PATH && export LD_LIBRARY_PATH=/opt/gcc/lib64:/opt/gcc/lib:$LD_LIBRARY_PATH
           cd ${STANDALONE_DIR}
           ${TIMING_CA} --runs 42 --PROCdebugCSV /root/${BENCHMARK_CSV} --debug 1
-          python3 ${GITHUB_WORKSPACE}/.github/scripts/profiler_standalone.py --discard 2 --input /root/${BENCHMARK_CSV} --output /root/summary_${BENCHMARK_CSV}
+          python3 ${GITHUB_WORKSPACE}/.github/scripts/profiler_standalone.py --discard 0 --input /root/${BENCHMARK_CSV} --output /root/summary_${BENCHMARK_CSV}
           rm -rf ${STANDALONE_DIR}/*.out ${STANDALONE_DIR}/events/o2-simple ${STANDALONE_DIR}/build
 
       - name: Upload Artifact
