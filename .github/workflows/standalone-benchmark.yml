@@ -60,7 +60,7 @@ jobs:
           cd ${STANDALONE_DIR}
           ${STANDALONE_DIR}/ca -e o2-simple -c --seed 0 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptConstexpr 1 --RTCoptSpecialCode 1 --debug 6
           cmp ${STANDALONE_DIR}/*.out
-          rm -rf ${STANDALONE_DIR}/*.out ${STANDALONE_DIR}/events/o2-simple ${STANDALONE_DIR}/build
+          rm -rf ${STANDALONE_DIR}/*.out ${STANDALONE_DIR}/build
 
       - name: Build Non-Deterministic
         run: *build
@@ -75,7 +75,7 @@ jobs:
           cd ${STANDALONE_DIR}
           ${TIMING_CA} --runs 42 --PROCdebugCSV /root/${BENCHMARK_CSV} --debug 1
           python3 ${GITHUB_WORKSPACE}/.github/scripts/profiler_standalone.py --discard 0 --input /root/${BENCHMARK_CSV} --output /root/summary_${BENCHMARK_CSV}
-          rm -rf ${STANDALONE_DIR}/*.out ${STANDALONE_DIR}/events/o2-simple ${STANDALONE_DIR}/build
+          rm -rf ${STANDALONE_DIR}/events/o2-simple ${STANDALONE_DIR}/build
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v6
