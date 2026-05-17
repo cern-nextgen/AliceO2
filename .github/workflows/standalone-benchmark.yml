@@ -75,7 +75,7 @@ jobs:
           cd ${STANDALONE_DIR}
           ${TIMING_CA} --runs 42 --PROCdebugCSV /root/${BENCHMARK_CSV} --debug 1
           python3 ${GITHUB_WORKSPACE}/.github/scripts/profiler_standalone.py --discard 0 --input /root/${BENCHMARK_CSV} --output /root/summary_${BENCHMARK_CSV}
-          rm -rf ${STANDALONE_DIR}/events/o2-simple ${STANDALONE_DIR}/build
+          rm -rf ${STANDALONE_DIR}/build
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v6
