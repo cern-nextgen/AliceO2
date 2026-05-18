@@ -26,7 +26,7 @@ set(GPUCA_BUILD_EVENT_DISPLAY_WAYLAND 1)
 set(GPUCA_BUILD_EVENT_DISPLAY_QT 1)
 set(GPUCA_CONFIG_GL3W 0)
 set(GPUCA_CONFIG_O2 1)
-set(GPUCA_BUILD_DEBUG 1)                    # Prevents float point exception at runtime and compiler warning (TODO: fix)
+set(GPUCA_BUILD_DEBUG 0)                    # Prevents float point exception at runtime and compiler warning (TODO: fix)
 set(GPUCA_BUILD_DEBUG_SANITIZE 0)
 set(GPUCA_BUILD_DEBUG_HOSTONLY 0)
 set(GPUCA_DETERMINISTIC_MODE OFF CACHE STRING "GPUCA_DETERMINISTIC_MODE") # OFF / NO_FAST_MATH / OPTO2 / GPU / WHOLEO2
