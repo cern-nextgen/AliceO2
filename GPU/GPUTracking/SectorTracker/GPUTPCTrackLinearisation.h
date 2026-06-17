@@ -68,10 +68,10 @@ class GPUTPCTrackLinearisation
 
 GPUdi() GPUTPCTrackLinearisation::GPUTPCTrackLinearisation(MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::const_reference_restrict> t) : mSinPhi(t.SinPhi()), mCosPhi(0), mDzDs(t.DzDs()), mQPt(t.QPt())
 {
-  if (mSinPhi > GPUCA_MAX_SIN_PHI) {
-    mSinPhi = GPUCA_MAX_SIN_PHI;
-  } else if (mSinPhi < -GPUCA_MAX_SIN_PHI) {
-    mSinPhi = -GPUCA_MAX_SIN_PHI;
+  if (mSinPhi > constants::MAX_SIN_PHI) {
+    mSinPhi = constants::MAX_SIN_PHI;
+  } else if (mSinPhi < -constants::MAX_SIN_PHI) {
+    mSinPhi = -constants::MAX_SIN_PHI;
   }
   mCosPhi = CAMath::Sqrt(1 - mSinPhi * mSinPhi);
   if (t.SignCosPhi() < 0) {

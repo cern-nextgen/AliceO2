@@ -1,4 +1,4 @@
-// Copyright 2019-2020 CERN and copyright holders of ALICE O2.
+// Copyright 2019-2026 CERN and copyright holders of ALICE O2.
 // See https://alice-o2.web.cern.ch/copyright for details of the copyright holders.
 // All rights not expressly granted are reserved.
 //
@@ -10,18 +10,13 @@
 // or submit itself to any jurisdiction.
 
 #include "ITS3Reconstruction/IOUtils.h"
-#include "ITStracking/IOUtils.h"
 #include "ITStracking/TimeFrame.h"
 #include "ITStracking/BoundedAllocator.h"
 #include "DataFormatsITSMFT/CompCluster.h"
 #include "DataFormatsITSMFT/ROFRecord.h"
 #include "ITS3Reconstruction/TopologyDictionary.h"
 #include "ITSBase/GeometryTGeo.h"
-#include "ITS3Base/SpecsV2.h"
 #include "ITStracking/TrackingConfigParam.h"
-#include "Framework/Logger.h"
-
-#include <limits>
 
 namespace o2::its3::ioutils
 {
@@ -45,16 +40,19 @@ void convertCompactClusters(gsl::span<const itsmft::CompClusterExt> clusters,
   }
 
   for (auto& c : clusters) {
-    float sigmaY2, sigmaZ2, sigmaYZ = 0;
+    float sigmaY2 = NAN, sigmaZ2 = NAN;
     auto locXYZ = extractClusterData(c, pattIt, dict, sigmaY2, sigmaZ2);
     const auto detID = c.getSensorID();
+    // NOTE: this is not consistent with the TRK definition below!
+    // There we put the alpha for everything cluster to its phi
+    // here we extract it from the middle of the tile
     auto& cl3d = output.emplace_back(detID, geom->getMatrixT2L(detID) ^ locXYZ); // local --> tracking
     if (applyMisalignment) {
-      auto lrID = geom->getLayer(detID);
+      const auto lrID = geom->getLayer(detID);
       sigmaY2 += conf.sysErrY2[lrID];
       sigmaZ2 += conf.sysErrZ2[lrID];
     }
-    cl3d.setErrors(sigmaY2, sigmaZ2, sigmaYZ);
+    cl3d.setErrors(sigmaY2, sigmaZ2, 0.f);
   }
 }
 
@@ -63,62 +61,87 @@ int loadROFrameDataITS3(its::TimeFrame<7>* tf,
                         gsl::span<const itsmft::CompClusterExt> clusters,
                         gsl::span<const unsigned char>::iterator& pattIt,
                         const its3::TopologyDictionary* dict,
+                        int layer,
                         const dataformats::MCTruthContainer<MCCompLabel>* mcLabels)
 {
   auto geom = its::GeometryTGeo::Instance();
   geom->fillMatrixCache(o2::math_utils::bit2Mask(o2::math_utils::TransformType::T2L, o2::math_utils::TransformType::L2G));
 
-  tf->resetROFrameData(rofs.size());
-  tf->prepareROFrameData(rofs, clusters);
+  tf->resetROFrameData(layer);
+  tf->prepareROFrameData(clusters, layer);
 
-  its::bounded_vector<uint8_t> clusterSizeVec(clusters.size(), tf->getMemoryPool().get());
+  // check for missing/empty/unset rofs
+  // the code requires consistent monotonically increasing input without gaps
+  const auto& timing = tf->getROFOverlapTableView().getLayer(layer >= 0 ? layer : 0);
+  if (timing.mNROFsTF != rofs.size()) {
+    LOGP(fatal, "Received inconsistent number of rofs on layer:{} expected:{} received:{}", layer, timing.mNROFsTF, rofs.size());
+  }
+
+  its::bounded_vector<uint8_t> clusterSizeVec(clusters.size(), 0, tf->getMemoryPool().get());
 
   for (size_t iRof{0}; iRof < rofs.size(); ++iRof) {
     const auto& rof = rofs[iRof];
     for (int clusterId{rof.getFirstEntry()}; clusterId < rof.getFirstEntry() + rof.getNEntries(); ++clusterId) {
-      auto& c = clusters[clusterId];
-      auto sensorID = c.getSensorID();
-      auto layer = geom->getLayer(sensorID);
+      const auto& c = clusters[clusterId];
+      const auto sensorID = c.getSensorID();
+      const auto lay = geom->getLayer(sensorID);
 
       float sigmaY2{0}, sigmaZ2{0}, sigmaYZ{0};
       uint8_t clusterSize{0};
-      auto locXYZ = extractClusterData(c, pattIt, dict, sigmaY2, sigmaZ2, clusterSize);
-      clusterSizeVec.push_back(clusterSize);
+      const auto locXYZ = extractClusterData(c, pattIt, dict, sigmaY2, sigmaZ2, clusterSize);
+      clusterSizeVec[clusterId] = clusterSize;
 
       // Transformation to the local --> global
-      auto gloXYZ = geom->getMatrixL2G(sensorID) * locXYZ;
+      const auto gloXYZ = geom->getMatrixL2G(sensorID) * locXYZ;
 
       // Inverse transformation to the local --> tracking
-      o2::math_utils::Point3D<float> trkXYZ = geom->getMatrixT2L(sensorID) ^ locXYZ;
+      const o2::math_utils::Point3D<float> trkXYZ = geom->getMatrixT2L(sensorID) ^ locXYZ;
 
       // Tracking alpha angle
+      // We want that each cluster rotates its tracking frame to the clusters phi
+      // that way the track linearization around the measurement is less biases to the arc
+      // this means automatically that the measurement on the arc is at 0 for the curved layers
       float alpha = geom->getSensorRefAlpha(sensorID);
+      float x = trkXYZ.x(), y = trkXYZ.y();
+      if (constants::detID::isDetITS3(sensorID)) {
+        y = 0.f;
+        x = std::hypot(gloXYZ.x(), gloXYZ.y());
+        alpha = std::atan2(gloXYZ.y(), gloXYZ.x());
+      }
+      math_utils::detail::bringToPMPi(alpha); // alpha is defined on -Pi,Pi
 
-      tf->addTrackingFrameInfoToLayer(layer, gloXYZ.x(), gloXYZ.y(), gloXYZ.z(), trkXYZ.x(), alpha,
-                                      std::array<float, 2>{trkXYZ.y(), trkXYZ.z()},
+      tf->addTrackingFrameInfoToLayer(lay, gloXYZ.x(), gloXYZ.y(), gloXYZ.z(), x, alpha,
+                                      std::array<float, 2>{y, trkXYZ.z()},
                                       std::array<float, 3>{sigmaY2, sigmaYZ, sigmaZ2});
 
       /// Rotate to the global frame
-      tf->addClusterToLayer(layer, gloXYZ.x(), gloXYZ.y(), gloXYZ.z(), tf->getUnsortedClusters()[layer].size());
-      tf->addClusterExternalIndexToLayer(layer, clusterId);
+      tf->addClusterToLayer(lay, gloXYZ.x(), gloXYZ.y(), gloXYZ.z(), tf->getUnsortedClusters()[lay].size());
+      tf->addClusterExternalIndexToLayer(lay, clusterId);
     }
-    for (unsigned int iL{0}; iL < tf->getUnsortedClusters().size(); ++iL) {
-      tf->mROFramesClusters[iL][iRof + 1] = tf->getUnsortedClusters()[iL].size();
+    // effectively calculating an exclusive sum
+    if (layer >= 0) {
+      tf->mROFramesClusters[layer][iRof + 1] = tf->mUnsortedClusters[layer].size();
+    } else {
+      for (unsigned int iL{0}; iL < tf->mUnsortedClusters.size(); ++iL) {
+        tf->mROFramesClusters[iL][iRof + 1] = tf->mUnsortedClusters[iL].size();
+      }
     }
   }
 
-  tf->setClusterSize(clusterSizeVec);
+  tf->setClusterSize(layer >= 0 ? layer : 0, clusterSizeVec);
 
-  for (auto& v : tf->mNTrackletsPerCluster) {
-    v.resize(tf->getUnsortedClusters()[1].size());
-  }
-  for (auto& v : tf->mNTrackletsPerClusterSum) {
-    v.resize(tf->getUnsortedClusters()[1].size() + 1);
+  if (layer == 1 || layer == -1) {
+    for (auto i = 0; i < tf->mNTrackletsPerCluster.size(); ++i) {
+      tf->mNTrackletsPerCluster[i].resize(tf->mUnsortedClusters[1].size());
+      tf->mNTrackletsPerClusterSum[i].resize(tf->mUnsortedClusters[1].size() + 1);
+    }
   }
 
   if (mcLabels != nullptr) {
-    tf->mClusterLabels = mcLabels;
+    tf->mClusterLabels[layer >= 0 ? layer : 0] = mcLabels;
+  } else {
+    tf->mClusterLabels[layer >= 0 ? layer : 0] = nullptr;
   }
-  return tf->mNrof;
+  return 0;
 }
 } // namespace o2::its3::ioutils

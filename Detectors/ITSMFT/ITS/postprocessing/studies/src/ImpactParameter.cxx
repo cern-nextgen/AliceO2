@@ -29,7 +29,7 @@
 #include "CommonUtils/TreeStreamRedirector.h"
 #include "DetectorsBase/GRPGeomHelper.h"
 #include "DataFormatsParameters/GRPECSObject.h"
-#include "ITSMFTBase/DPLAlpideParam.h"
+#include "DataFormatsITSMFT/DPLAlpideParam.h"
 #include "DetectorsCommonDataFormats/DetID.h"
 #include "Framework/DeviceSpec.h"
 #include "CommonUtils/ConfigurableParam.h"
@@ -60,7 +60,7 @@ using DetID = o2::detectors::DetID;
 using PVertex = o2::dataformats::PrimaryVertex;
 using GTrackID = o2::dataformats::GlobalTrackID;
 
-class ImpactParameterStudy : public Task
+class ImpactParameterStudy final : public Task
 {
  public:
   ImpactParameterStudy(std::shared_ptr<DataRequest> dr,

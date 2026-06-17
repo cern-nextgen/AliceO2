@@ -19,6 +19,7 @@
 #include <cstring>
 #include <map>
 #include <queue>
+#include <fstream>
 
 using namespace o2::gpu;
 
@@ -106,7 +107,7 @@ void GenerateCodes(const INode* node, const HuffCode& prefix, HuffCodeMap& outCo
 } // anonymous namespace
 } // namespace o2::gpu
 
-void GPUTPCClusterStatistics::RunStatistics(const o2::tpc::ClusterNativeAccess* clustersNative, const o2::tpc::CompressedClusters* clustersCompressed, const GPUParam& param)
+void GPUTPCClusterStatistics::RunStatistics(const o2::tpc::ClusterNativeAccess* clustersNative, const o2::tpc::CompressedClusters* clustersCompressed, const GPUParam& param, bool dumpCSV)
 {
   uint32_t decodingErrors = 0;
   o2::tpc::ClusterNativeAccess clustersNativeDecoded;
@@ -117,7 +118,7 @@ void GPUTPCClusterStatistics::RunStatistics(const o2::tpc::ClusterNativeAccess* 
   std::vector<o2::tpc::ClusterNative> tmpClusters;
   if (param.rec.tpc.rejectionStrategy == GPUSettings::RejectionNone) { // verification does not make sense if we reject clusters during compression
     for (uint32_t i = 0; i < NSECTORS; i++) {
-      for (uint32_t j = 0; j < GPUCA_ROW_COUNT; j++) {
+      for (uint32_t j = 0; j < GPUTPCGeometry::NROWS; j++) {
         if (clustersNative->nClusters[i][j] != clustersNativeDecoded.nClusters[i][j]) {
           GPUError("Number of clusters mismatch sector %u row %u: expected %d v.s. decoded %d", i, j, clustersNative->nClusters[i][j], clustersNativeDecoded.nClusters[i][j]);
           decodingErrors++;
@@ -128,9 +129,11 @@ void GPUTPCClusterStatistics::RunStatistics(const o2::tpc::ClusterNativeAccess* 
           tmpClusters[k] = clustersNative->clusters[i][j][k];
           if (param.rec.tpc.compressionTypeMask & GPUSettings::CompressionTruncate) {
             GPUTPCCompression::truncateSignificantBitsChargeMax(tmpClusters[k].qMax, param);
-            GPUTPCCompression::truncateSignificantBitsCharge(tmpClusters[k].qTot, param);
             GPUTPCCompression::truncateSignificantBitsWidth(tmpClusters[k].sigmaPadPacked, param);
-            GPUTPCCompression::truncateSignificantBitsWidth(tmpClusters[k].sigmaTimePacked, param);
+            if (!tmpClusters[k].isSaturated()) [[likely]] {
+              GPUTPCCompression::truncateSignificantBitsCharge(tmpClusters[k].qTot, param);
+              GPUTPCCompression::truncateSignificantBitsWidth(tmpClusters[k].sigmaTimePacked, param);
+            }
           }
         }
         std::sort(tmpClusters.begin(), tmpClusters.end());
@@ -181,8 +184,51 @@ void GPUTPCClusterStatistics::RunStatistics(const o2::tpc::ClusterNativeAccess* 
   FillStatisticCombined(mPsigmaU, clustersCompressed->sigmaPadU, clustersCompressed->sigmaTimeU, clustersCompressed->nUnattachedClusters, P_MAX_SIGMA);
   FillStatisticCombined(mPQA, clustersCompressed->qMaxA, clustersCompressed->qTotA, clustersCompressed->nAttachedClusters, P_MAX_QMAX);
   FillStatisticCombined(mPQU, clustersCompressed->qMaxU, clustersCompressed->qTotU, clustersCompressed->nUnattachedClusters, P_MAX_QMAX);
-  FillStatisticCombined(mProwSectorA, clustersCompressed->rowDiffA, clustersCompressed->sliceLegDiffA, clustersCompressed->nAttachedClustersReduced, GPUCA_ROW_COUNT);
+  FillStatisticCombined(mProwSectorA, clustersCompressed->rowDiffA, clustersCompressed->sliceLegDiffA, clustersCompressed->nAttachedClustersReduced, GPUTPCGeometry::NROWS);
   mNTotalClusters += clustersCompressed->nAttachedClusters + clustersCompressed->nUnattachedClusters;
+
+  if (dumpCSV) {
+    std::ofstream csv("clusters_raw.csv");
+    csv << "sector,row,time,pad,flags,qtot,qmax,sigmatime,sigmapad\n";
+    for (uint32_t i = 0; i < NSECTORS; i++) {
+      for (uint32_t j = 0; j < GPUTPCGeometry::NROWS; j++) {
+        for (uint32_t k = 0; k < clustersNativeDecoded.nClusters[i][j]; k++) {
+          const auto& cl = clustersNativeDecoded.clusters[i][j][k];
+          csv << i << ',' << j << ',' << cl.getTimePacked() << ',' << cl.padPacked << ',' << (uint32_t)cl.getFlags() << ',' << cl.qTot << ',' << cl.qMax << ',' << (uint32_t)cl.sigmaTimePacked << ',' << (uint32_t)cl.sigmaPadPacked << '\n';
+        }
+      }
+    }
+
+    csv = std::ofstream("attachedCl.csv");
+    csv << "qTotA,qMaxA,flagsA,sigmaPadA,sigmaTimeA\n";
+    for (uint32_t i = 0; i < clustersCompressed->nAttachedClusters; i++) {
+      csv << clustersCompressed->qTotA[i] << ',' << clustersCompressed->qMaxA[i] << ',' << (uint32_t)clustersCompressed->flagsA[i] << ',' << (uint32_t)clustersCompressed->sigmaPadA[i] << ',' << (uint32_t)clustersCompressed->sigmaTimeA[i] << "\n";
+    }
+
+    csv = std::ofstream("attachedClred.csv");
+    csv << "rodDiffA,legDiffA,padResA,timeResA\n";
+    for (uint32_t i = 0; i < clustersCompressed->nAttachedClustersReduced; i++) {
+      csv << (uint32_t)clustersCompressed->rowDiffA[i] << ',' << (uint32_t)clustersCompressed->sliceLegDiffA[i] << ',' << clustersCompressed->padResA[i] << ',' << clustersCompressed->timeResA[i] << "\n";
+    }
+
+    csv = std::ofstream("nClU.csv");
+    csv << "sliceRowCl\n";
+    for (uint32_t i = 0; i < clustersCompressed->nSliceRows; i++) {
+      csv << clustersCompressed->nSliceRowClusters[i] << "\n";
+    }
+
+    csv = std::ofstream("trk.csv");
+    csv << "qPtA,rowA,sliceA,timeA,padA,nCl\n";
+    for (uint32_t i = 0; i < clustersCompressed->nTracks; i++) {
+      csv << (uint32_t)clustersCompressed->qPtA[i] << ',' << (uint32_t)clustersCompressed->rowA[i] << ',' << (uint32_t)clustersCompressed->sliceA[i] << ',' << clustersCompressed->timeA[i] << ',' << clustersCompressed->padA[i] << ',' << clustersCompressed->nTrackClusters[i] << "\n";
+    }
+
+    csv = std::ofstream("unattachedCl.csv");
+    csv << "qTotU,qMaxU,flagsU,padDiffU,timeDiffU,sigmaPadU,sigmaTimeU\n";
+    for (uint32_t i = 0; i < clustersCompressed->nUnattachedClusters; i++) {
+      csv << clustersCompressed->qTotU[i] << ',' << clustersCompressed->qMaxU[i] << ',' << (uint32_t)clustersCompressed->flagsU[i] << ',' << clustersCompressed->padDiffU[i] << ',' << clustersCompressed->timeDiffU[i] << ',' << (uint32_t)clustersCompressed->sigmaPadU[i] << ',' << (uint32_t)clustersCompressed->sigmaTimeU[i] << "\n";
+    }
+  }
 }
 
 void GPUTPCClusterStatistics::Finish()
@@ -228,7 +274,7 @@ void GPUTPCClusterStatistics::Finish()
   GPUInfo("Combined Sigma: %6.4f --> %6.4f (%6.4f%%)", eSigma, eSigmaCombined, eSigma > 1e-3 ? (100. * (eSigma - eSigmaCombined) / eSigma) : 0.f);
   GPUInfo("Combined Q: %6.4f --> %6.4f (%6.4f%%)", eQ, eQCombined, eQ > 1e-3 ? (100. * (eQ - eQCombined) / eQ) : 0.f);
 
-  printf("\nCombined Entropy: %7.4f   (Size %'13.0f, %'zu clusters)\nCombined Huffman: %7.4f   (Size %'13.0f, %f%%)\n\n", mEntropy / mNTotalClusters, mEntropy, mNTotalClusters, mHuffman / mNTotalClusters, mHuffman, 100. * (mHuffman - mEntropy) / mHuffman);
+  printf("\nCombined Entropy: %7.4f   (Size %'13.0f, %'zu clusters)\nCombined Huffman: %7.4f   (Size %'13.0f, %f%%)\n\n", mEntropy / mNTotalClusters, mEntropy / 8., mNTotalClusters, mHuffman / mNTotalClusters, mHuffman / 8., 100. * (mHuffman - mEntropy) / mHuffman);
 }
 
 float GPUTPCClusterStatistics::Analyze(std::vector<int32_t>& p, const char* name, bool count)

@@ -714,7 +714,7 @@ GPUd() bool GPUTPCTrackParamSkeleton<F>::CheckNumericalQuality() const
     ok = 0;
   }
 
-  if (CAMath::Abs(SinPhi()) > GPUCA_MAX_SIN_PHI) {
+  if (CAMath::Abs(SinPhi()) > constants::MAX_SIN_PHI) {
     ok = 0;
   }
   if (CAMath::Abs(QPt()) > 1.f / 0.05f) {
@@ -728,9 +728,9 @@ GPUd() bool GPUTPCTrackParamSkeleton<F>::CheckNumericalQuality() const
 }
 
 template <template <class> class F>
-GPUd() void GPUTPCTrackParamSkeleton<F>::ConstrainZ(float& z, int32_t sector, float& z0, float& lastZ)
+GPUd() void GPUTPCTrackParamSkeleton<F>::ConstrainZ(float& z, uint32_t sector, float& z0, float& lastZ)
 {
-  if (sector < GPUCA_NSECTORS / 2) {
+  if (sector < GPUTPCGeometry::NSECTORS / 2) {
     if (z < 0) {
       mParam.mZOffset += z;
       mParam.mP[1] -= z;
@@ -850,7 +850,7 @@ GPUd() int32_t GPUTPCTrackParamSkeleton<F>::GetPropagatedYZ(float bz, float x, f
     ex = -ex;
   }
   float ey1 = ey - k * dx;
-  if (CAMath::Abs(ey1) > GPUCA_MAX_SIN_PHI) {
+  if (CAMath::Abs(ey1) > constants::MAX_SIN_PHI) {
     return 0;
   }
   float ss = ey + ey1;

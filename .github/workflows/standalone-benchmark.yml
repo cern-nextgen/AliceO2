@@ -54,7 +54,6 @@ jobs:
       BENCHMARK_CSV: standalone_${{ matrix.name }}.csv
       PROFILER_CSV: profiler_${{ matrix.name }}.csv
       TIMING_CA: ./ca -e 50kHz ${{ matrix.cpu_gpu }} --seed 0 --sync --runsInit 0 --PROCresetTimers 1 --PROCdebugMarkdown 1 --debug 1 # Add --runs 42 for benchmark runs
-      LD_LIBRARY_PATH: /usr/local/cuda-13.0/compat
 
     name: ${{ matrix.name }}
     steps:
@@ -80,7 +79,7 @@ jobs:
           module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
 
           mkdir -p ${STANDALONE_DIR}
-          cmake -B ${STANDALONE_DIR}/build ${{ matrix.cmake_args }} -DENABLE_OPENCL=0 -DGPUCA_BUILD_EVENT_DISPLAY=0 -DGPUCA_DETERMINISTIC_MODE=${DETERMINISTIC_MODE} -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
+          cmake -B ${STANDALONE_DIR}/build ${{ matrix.cmake_args }} -DGPUCA_DETERMINISTIC_MODE=${DETERMINISTIC_MODE} -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
           cmake --build ${STANDALONE_DIR}/build --target install -j 8
         env:
           DETERMINISTIC_MODE: GPU

@@ -40,7 +40,6 @@ int32_t GPURecoWorkflowSpec::runITSTracking(o2::framework::ProcessingContext& pc
   if (mNTFs == 1 && pc.services().get<const o2::framework::DeviceSpec>().inputTimesliceId == 0) {
     o2::conf::ConfigurableParam::write(o2::base::NameConf::getConfigOutputFileName(pc.services().get<const o2::framework::DeviceSpec>().name, o2::its::VertexerParamConfig::Instance().getName()), o2::its::VertexerParamConfig::Instance().getName());
     o2::conf::ConfigurableParam::write(o2::base::NameConf::getConfigOutputFileName(pc.services().get<const o2::framework::DeviceSpec>().name, o2::its::TrackerParamConfig::Instance().getName()), o2::its::TrackerParamConfig::Instance().getName());
-    o2::conf::ConfigurableParam::write(o2::base::NameConf::getConfigOutputFileName(pc.services().get<const o2::framework::DeviceSpec>().name, o2::its::ITSGpuTrackingParamConfig::Instance().getName()), o2::its::ITSGpuTrackingParamConfig::Instance().getName());
   }
   return 0;
 }
@@ -52,18 +51,21 @@ void GPURecoWorkflowSpec::initFunctionITS(o2::framework::InitContext& ic)
 #ifdef ENABLE_UPGRADES
   if (mSpecConfig.isITS3) {
     mITSTrackingInterface = std::make_unique<o2::its3::ITS3TrackingInterface>(mSpecConfig.processMC,
+                                                                              mSpecConfig.itsStaggered,
                                                                               mSpecConfig.itsTriggerType,
                                                                               mSpecConfig.itsOverrBeamEst);
-  } else
-#endif
-  {
+  } else {
     mITSTrackingInterface = std::make_unique<o2::its::ITSTrackingInterface>(mSpecConfig.processMC,
+                                                                            mSpecConfig.itsStaggered,
                                                                             mSpecConfig.itsTriggerType,
                                                                             mSpecConfig.itsOverrBeamEst);
   }
+#else
   mITSTrackingInterface = std::make_unique<o2::its::ITSTrackingInterface>(mSpecConfig.processMC,
+                                                                          mSpecConfig.itsStaggered,
                                                                           mSpecConfig.itsTriggerType,
                                                                           mSpecConfig.itsOverrBeamEst);
+#endif
   mGPUReco->GetITSTraits(trkTraits, vtxTraits, mITSTimeFrame);
   mITSTrackingInterface->setTraitsFromProvider(vtxTraits, trkTraits, mITSTimeFrame);
 }

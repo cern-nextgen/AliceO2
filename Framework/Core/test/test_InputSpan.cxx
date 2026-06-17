@@ -30,14 +30,18 @@ TEST_CASE("TestInputSpan")
     routeNo++;
   }
 
-  auto getter = [&inputs](size_t i, size_t part) {
-    return DataRef{nullptr, inputs[i].at(part * 2).data(), inputs[i].at(part * 2 + 1).data()};
-  };
   auto nPartsGetter = [&inputs](size_t i) {
     return inputs[i].size() / 2;
   };
+  auto indicesGetter = [&inputs](size_t i, DataRefIndices indices) {
+    return DataRef{nullptr, inputs[i].at(indices.headerIdx).data(), inputs[i].at(indices.payloadIdx).data()};
+  };
+  auto nextIndicesGetter = [&inputs](size_t i, DataRefIndices current) -> DataRefIndices {
+    size_t next = current.headerIdx + 2;
+    return next < inputs[i].size() ? DataRefIndices{next, next + 1} : DataRefIndices{size_t(-1), size_t(-1)};
+  };
 
-  InputSpan span{getter, nPartsGetter, nullptr, inputs.size()};
+  InputSpan span{nPartsGetter, nullptr, indicesGetter, nextIndicesGetter, inputs.size()};
   REQUIRE(span.size() == inputs.size());
   routeNo = 0;
   for (; routeNo < span.size(); ++routeNo) {
@@ -57,8 +61,8 @@ TEST_CASE("TestInputSpan")
   routeNo = 0;
   for (auto it = span.begin(), end = span.end(); it != end; ++it) {
     size_t partNo = 0;
-    REQUIRE(it.size() * 2 == inputs[routeNo].size());
-    for (auto const& ref : it) {
+    REQUIRE(it.parts().size() * 2 == inputs[routeNo].size());
+    for (auto const& ref : it.parts()) {
       REQUIRE(inputs[routeNo].at(partNo++) == ref.header);
       REQUIRE(inputs[routeNo].at(partNo++) == ref.payload);
       INFO(ref.header << " " << ref.payload);

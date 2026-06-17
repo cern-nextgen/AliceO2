@@ -32,7 +32,7 @@ void GPUTPCCFMCLabelFlattener::setGlobalOffsetsAndAllocate(
   cls.mPlabelsHeaderGlobalOffset = headerOffset;
   cls.mPlabelsDataGlobalOffset = dataOffset;
 
-  for (Row row = 0; row < GPUCA_ROW_COUNT; row++) {
+  for (Row row = 0; row < GPUTPCGeometry::NROWS; row++) {
     headerOffset += cls.mPclusterInRow[row];
     dataOffset += cls.mPlabelsInRow[row];
   }
@@ -46,13 +46,15 @@ template <>
 GPUd() void GPUTPCCFMCLabelFlattener::Thread<GPUTPCCFMCLabelFlattener::setRowOffsets>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUSharedMemory&, processorType& clusterer)
 {
 #if !defined(GPUCA_GPUCODE)
-  Row row = get_global_id(0);
+  const Row row = get_global_id(0);
+  const size_t clusterInRow = clusterer.mPclusterInRow[row];
 
-  uint32_t clusterInRow = clusterer.mPclusterInRow[row];
+  auto& labels = clusterer.mPlabelsByRow[row].data;
+
   uint32_t labelCount = 0;
 
-  for (uint32_t i = 0; i < clusterInRow; i++) {
-    auto& interim = clusterer.mPlabelsByRow[row].data[i];
+  for (size_t i = 0; i < clusterInRow; i++) {
+    auto& interim = labels[i];
     labelCount += interim.labels.size();
   }
 

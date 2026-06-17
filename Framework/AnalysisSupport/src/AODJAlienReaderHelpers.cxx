@@ -10,7 +10,10 @@
 // or submit itself to any jurisdiction.
 
 #include "AODJAlienReaderHelpers.h"
+#include <charconv>
 #include <memory>
+#include <ranges>
+#include <vector>
 #include "Framework/TableTreeHelpers.h"
 #include "Framework/AnalysisHelpers.h"
 #include "Framework/DataProcessingStats.h"
@@ -111,10 +114,31 @@ AlgorithmSpec AODJAlienReaderHelpers::rootFileReaderCallback(ConfigContext const
   if (ctx.options().isSet("aod-parent-access-level")) {
     parentAccessLevel = ctx.options().get<int>("aod-parent-access-level");
   }
-  auto callback = AlgorithmSpec{adaptStateful([parentFileReplacement, parentAccessLevel](ConfigParamRegistry const& options,
-                                                                                         DeviceSpec const& spec,
-                                                                                         Monitoring& monitoring,
-                                                                                         DataProcessingStats& stats) {
+  std::vector<std::pair<std::string, int>> originLevelMapping;
+  if (ctx.options().isSet("aod-origin-level-mapping")) {
+    auto originLevelMappingStr = ctx.options().get<std::string>("aod-origin-level-mapping");
+    for (auto pairRange : originLevelMappingStr | std::views::split(',')) {
+      std::string_view pair{pairRange.begin(), pairRange.end()};
+      auto colonPos = pair.find(':');
+      if (colonPos == std::string_view::npos) {
+        LOGP(fatal, "Badly formatted aod-origin-level-mapping entry: \"{}\"", pair);
+        continue;
+      }
+      std::string key(pair.substr(0, colonPos));
+      std::string_view valueStr = pair.substr(colonPos + 1);
+      int value{};
+      auto [ptr, ec] = std::from_chars(valueStr.data(), valueStr.data() + valueStr.size(), value);
+      if (ec == std::errc{}) {
+        originLevelMapping.emplace_back(std::move(key), value);
+      } else {
+        LOGP(fatal, "Unable to parse level in aod-origin-level-mapping entry: \"{}\"", pair);
+      }
+    }
+  }
+  auto callback = AlgorithmSpec{adaptStateful([parentFileReplacement, parentAccessLevel, originLevelMapping](ConfigParamRegistry const& options,
+                                                                                                             DeviceSpec const& spec,
+                                                                                                             Monitoring& monitoring,
+                                                                                                             DataProcessingStats& stats) {
     // FIXME: not actually needed, since data processing stats can specify that we should
     // send the initial value.
     stats.updateStats({static_cast<short>(ProcessingStatsId::ARROW_BYTES_CREATED), DataProcessingStats::Op::Set, 0});
@@ -134,7 +158,7 @@ AlgorithmSpec AODJAlienReaderHelpers::rootFileReaderCallback(ConfigContext const
     auto maxRate = options.get<float>("aod-max-io-rate");
 
     // create a DataInputDirector
-    auto didir = std::make_shared<DataInputDirector>(std::vector<std::string>{filename}, DataInputDirectorContext{&monitoring, parentAccessLevel, parentFileReplacement});
+    auto didir = std::make_shared<DataInputDirector>(std::vector<std::string>{filename}, DataInputDirectorContext{&monitoring, parentAccessLevel, parentFileReplacement, originLevelMapping});
     if (options.isSet("aod-reader-json")) {
       auto jsonFile = options.get<std::string>("aod-reader-json");
       if (!didir->readJson(jsonFile)) {
@@ -166,7 +190,7 @@ AlgorithmSpec AODJAlienReaderHelpers::rootFileReaderCallback(ConfigContext const
         requestedTables.emplace_back(route);
       }
     }
-
+    int level = originLevelMapping.empty() ? -1 : 0;
     auto fileCounter = std::make_shared<int>(0);
     auto numTF = std::make_shared<int>(-1);
     return adaptStateless([TFNumberHeader,
@@ -176,7 +200,7 @@ AlgorithmSpec AODJAlienReaderHelpers::rootFileReaderCallback(ConfigContext const
                            numTF,
                            watchdog,
                            maxRate,
-                           didir, reportTFN, reportTFFileName](Monitoring& monitoring, DataAllocator& outputs, ControlService& control, DeviceSpec const& device, DataProcessingStats& dpstats) {
+                           didir, reportTFN, reportTFFileName, level](Monitoring& monitoring, DataAllocator& outputs, ControlService& control, DeviceSpec const& device, DataProcessingStats& dpstats) {
       // Each parallel reader device.inputTimesliceId reads the files fileCounter*device.maxInputTimeslices+device.inputTimesliceId
       // the TF to read is numTF
       assert(device.inputTimesliceId < device.maxInputTimeslices);
@@ -216,8 +240,9 @@ AlgorithmSpec AODJAlienReaderHelpers::rootFileReaderCallback(ConfigContext const
         // create header
         auto concrete = DataSpecUtils::asConcreteDataMatcher(route.matcher);
         auto dh = header::DataHeader(concrete.description, concrete.origin, concrete.subSpec);
+        bool wasAOD = std::ranges::any_of(route.matcher.metadata, [](ConfigParamSpec const& p) { return p.name.starts_with("aod-origin-replaced"); });
 
-        if (!didir->readTree(outputs, dh, fcnt, ntf, totalSizeCompressed, totalSizeUncompressed)) {
+        if (!didir->readTree(outputs, dh, fcnt, ntf, totalSizeCompressed, totalSizeUncompressed, wasAOD)) {
           if (first) {
             // check if there is a next file to read
             fcnt += device.maxInputTimeslices;
@@ -231,7 +256,7 @@ AlgorithmSpec AODJAlienReaderHelpers::rootFileReaderCallback(ConfigContext const
             }
             // get first folder of next file
             ntf = 0;
-            if (!didir->readTree(outputs, dh, fcnt, ntf, totalSizeCompressed, totalSizeUncompressed)) {
+            if (!didir->readTree(outputs, dh, fcnt, ntf, totalSizeCompressed, totalSizeUncompressed, wasAOD)) {
               LOGP(fatal, "Can not retrieve tree for table {}: fileCounter {}, timeFrame {}", concrete.origin.as<std::string>(), fcnt, ntf);
               throw std::runtime_error("Processing is stopped!");
             }
@@ -293,15 +318,18 @@ AlgorithmSpec AODJAlienReaderHelpers::rootFileReaderCallback(ConfigContext const
 
       // Check if the next timeframe is available or
       // if there are more files to be processed. If not, simply exit.
-      fcnt = (*fileCounter * device.maxInputTimeslices) + device.inputTimesliceId;
       ntf = *numTF + 1;
-      auto& firstRoute = requestedTables.front();
-      auto concrete = DataSpecUtils::asConcreteDataMatcher(firstRoute.matcher);
+      // first route with level 0 or -1 if no mapping requested
+      auto firstRoute = std::ranges::find_if(requestedTables, [&didir, level](auto const& route) {
+        auto concrete = DataSpecUtils::asConcreteDataMatcher(route.matcher);
+        return didir->getLevelForOrigin(concrete.origin) == level;
+      });
+      auto concrete = DataSpecUtils::asConcreteDataMatcher(firstRoute->matcher);
       auto dh = header::DataHeader(concrete.description, concrete.origin, concrete.subSpec);
       auto fileAndFolder = didir->getFileFolder(dh, fcnt, ntf);
 
       // In case the filesource is empty, move to the next one.
-      if (fileAndFolder.path().empty()) {
+      if (fileAndFolder.filesystem() == nullptr) {
         fcnt += 1;
         ntf = 0;
         if (didir->atEnd(fcnt)) {

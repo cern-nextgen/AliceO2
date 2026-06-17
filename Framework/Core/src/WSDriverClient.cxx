@@ -188,48 +188,42 @@ void on_connect(uv_connect_t* connection, int status)
     state.tracingFlags = tracingFlags;
   });
 
-  client->observe("/log-streams", [ref = context->ref](std::string_view cmd) {
-    auto& state = ref.get<DeviceState>();
-    static constexpr int prefixSize = std::string_view{"/log-streams "}.size();
-    if (prefixSize > cmd.size()) {
-      LOG(error) << "Malformed log-streams request";
+  client->observe("/signpost:enable", [](std::string_view cmd) {
+    static constexpr int prefixSize = std::string_view{"/signpost:enable "}.size();
+    if (cmd.size() <= prefixSize) {
+      LOG(error) << "Malformed /signpost:enable request";
       return;
     }
-    cmd.remove_prefix(prefixSize);
-    int logStreams = 0;
+    std::string name(cmd.substr(prefixSize));
+    o2_walk_logs([](char const* logName, void* l, void* context) -> bool {
+      auto* log = static_cast<_o2_log_t*>(l);
+      auto* target = static_cast<std::string*>(context);
+      if (*target == logName) {
+        _o2_log_set_stacktrace(log, log->defaultStacktrace);
+        return false;
+      }
+      return true;
+    },
+                 &name);
+  });
 
-    auto error = std::from_chars(cmd.data(), cmd.data() + cmd.size(), logStreams);
-    if (error.ec != std::errc()) {
-      LOG(error) << "Malformed log-streams mask";
+  client->observe("/signpost:disable", [](std::string_view cmd) {
+    static constexpr int prefixSize = std::string_view{"/signpost:disable "}.size();
+    if (cmd.size() <= prefixSize) {
+      LOG(error) << "Malformed /signpost:disable request";
       return;
     }
-    LOGP(info, "Logstreams flags set to {}", logStreams);
-    state.logStreams = logStreams;
-    if ((state.logStreams & DeviceState::LogStreams::DEVICE_LOG) != 0) {
-      O2_LOG_ENABLE(device);
-    } else {
-      O2_LOG_DISABLE(device);
-    }
-    if ((state.logStreams & DeviceState::LogStreams::COMPLETION_LOG) != 0) {
-      O2_LOG_ENABLE(completion);
-    } else {
-      O2_LOG_DISABLE(completion);
-    }
-    if ((state.logStreams & DeviceState::LogStreams::MONITORING_SERVICE_LOG) != 0) {
-      O2_LOG_ENABLE(monitoring_service);
-    } else {
-      O2_LOG_DISABLE(monitoring_service);
-    }
-    if ((state.logStreams & DeviceState::LogStreams::DATA_PROCESSOR_CONTEXT_LOG) != 0) {
-      O2_LOG_ENABLE(data_processor_context);
-    } else {
-      O2_LOG_DISABLE(data_processor_context);
-    }
-    if ((state.logStreams & DeviceState::LogStreams::STREAM_CONTEXT_LOG) != 0) {
-      O2_LOG_ENABLE(stream_context);
-    } else {
-      O2_LOG_DISABLE(stream_context);
-    }
+    std::string name(cmd.substr(prefixSize));
+    o2_walk_logs([](char const* logName, void* l, void* context) -> bool {
+      auto* log = static_cast<_o2_log_t*>(l);
+      auto* target = static_cast<std::string*>(context);
+      if (*target == logName) {
+        _o2_log_set_stacktrace(log, 0);
+        return false;
+      }
+      return true;
+    },
+                 &name);
   });
 
   // Client will be filled in the line after. I can probably have a single
@@ -271,6 +265,12 @@ WSDriverClient::WSDriverClient(ServiceRegistryRef registry, char const* ip, unsi
 
 WSDriverClient::~WSDriverClient()
 {
+  for (auto& buf : mBacklog) {
+    free(buf.base);
+  }
+  for (auto* chunk : mFreeChunks) {
+    free(chunk);
+  }
   free(this->mAwakeMainThread);
 }
 
@@ -337,8 +337,24 @@ void WSDriverClient::flushPending(ServiceRegistryRef mainThreadRef)
     printed1 = false;
     printed2 = false;
   }
-  mClient->write(mBacklog);
-  mBacklog.resize(0);
+  // Return any pre-seeded but unused (zero-length) buffers to the free list
+  // so we don't send pointless zero-byte writes to the kernel.
+  while (!mBacklog.empty() && mBacklog.back().len == 0) {
+    mFreeChunks.push_back(mBacklog.back().base);
+    mBacklog.pop_back();
+  }
+  mClient->write(mBacklog, mFreeChunks);
+  // Pre-seed mBacklog with one recycled chunk from the previous write's callback
+  // so that the next encode_websocket_frames reuses memory instead of malloc-ing.
+  // Only one chunk (64 KB) since encode_websocket_frames appends to outputs.back().
+  if (!mFreeChunks.empty()) {
+    mBacklog.push_back(uv_buf_init(mFreeChunks.back(), 0));
+    mFreeChunks.pop_back();
+  }
+  for (auto* chunk : mFreeChunks) {
+    free(chunk);
+  }
+  mFreeChunks.clear();
 }
 
 } // namespace o2::framework

@@ -13,6 +13,7 @@
 
 #include "Framework/DataRef.h"
 #include "Framework/DataRefUtils.h"
+#include "Framework/InputSpan.h"
 #include "Framework/InputRoute.h"
 #include "Framework/TypeTraits.h"
 #include "Framework/TableConsumer.h"
@@ -34,6 +35,7 @@
 #include <memory>
 #include <type_traits>
 #include <concepts>
+#include <span>
 
 #include <fairmq/FwdDecls.h>
 
@@ -42,6 +44,12 @@ namespace o2::framework
 
 // Wrapper class to get CCDB metadata
 struct CCDBMetadataExtractor {
+};
+
+/// Tag type to retrieve the raw binary payload of a CCDB entry without ROOT
+/// deserialization. The returned span is valid for the duration of the
+/// processing callback. Use as: inputs.get<CCDBBlob>("binding")
+struct CCDBBlob {
 };
 
 struct InputSpec;
@@ -201,6 +209,15 @@ class InputRecord
   [[nodiscard]] DataRef getFirstValid(bool throwOnFailure = false) const;
 
   [[nodiscard]] size_t getNofParts(int pos) const;
+
+  /// O(1) access to the part described by @a indices in slot @a pos.
+  [[nodiscard]] DataRef getAtIndices(int pos, DataRefIndices indices) const;
+
+  /// O(1) advance from @a current to the next part's indices in slot @a pos.
+  [[nodiscard]] DataRefIndices nextIndices(int pos, DataRefIndices current) const
+  {
+    return mSpan.nextIndices(pos, current);
+  }
 
   // Given a binding by string, return the associated DataRef
   DataRef getDataRefByString(const char* bindingName, int part = 0) const
@@ -405,37 +422,35 @@ class InputRecord
         auto id = ObjectCache::Id::fromRef(ref);
         ConcreteDataMatcher matcher{header->dataOrigin, header->dataDescription, header->subSpecification};
         // If the matcher does not have an entry in the cache, deserialise it
-        // and cache the deserialised object at the given id.
+        // and cache the deserialised object alongside its id, keyed by path.
         auto path = fmt::format("{}", DataSpecUtils::describe(matcher));
         LOGP(debug, "{}", path);
         auto& cache = mRegistry.get<ObjectCache>();
         auto& callbacks = mRegistry.get<CallbackService>();
-        auto cacheEntry = cache.matcherToId.find(path);
-        if (cacheEntry == cache.matcherToId.end()) {
-          cache.matcherToId.insert(std::make_pair(path, id));
+        auto cacheEntry = cache.matcherToEntry.find(path);
+        if (cacheEntry == cache.matcherToEntry.end()) {
           std::unique_ptr<ValueT const, Deleter<ValueT const>> result(DataRefUtils::as<CCDBSerialized<ValueT>>(ref).release(), false);
           void* obj = (void*)result.get();
           callbacks.call<CallbackService::Id::CCDBDeserialised>((ConcreteDataMatcher&)matcher, (void*)obj);
-          cache.idToObject[id] = obj;
+          cache.matcherToEntry.emplace(path, ObjectCache::Entry{id, obj});
           LOGP(info, "Caching in {} ptr to {} ({})", id.value, path, obj);
           return result;
         }
-        auto& oldId = cacheEntry->second;
+        auto& entry = cacheEntry->second;
         // The id in the cache is the same, let's simply return it.
-        if (oldId.value == id.value) {
-          std::unique_ptr<ValueT const, Deleter<ValueT const>> result((ValueT const*)cache.idToObject[id], false);
+        if (entry.id.value == id.value) {
+          std::unique_ptr<ValueT const, Deleter<ValueT const>> result((ValueT const*)entry.obj, false);
           LOGP(debug, "Returning cached entry {} for {} ({})", id.value, path, (void*)result.get());
           return result;
         }
-        // The id in the cache is different. Let's destroy the old cached entry
-        // and create a new one.
-        delete reinterpret_cast<ValueT*>(cache.idToObject[oldId]);
+        // The id in the cache is different. Destroy this path's previously cached object and replace it.
+        delete reinterpret_cast<ValueT*>(entry.obj);
         std::unique_ptr<ValueT const, Deleter<ValueT const>> result(DataRefUtils::as<CCDBSerialized<ValueT>>(ref).release(), false);
         void* obj = (void*)result.get();
         callbacks.call<CallbackService::Id::CCDBDeserialised>((ConcreteDataMatcher&)matcher, (void*)obj);
-        cache.idToObject[id] = obj;
-        LOGP(info, "Replacing cached entry {} with {} for {} ({})", oldId.value, id.value, path, obj);
-        oldId.value = id.value;
+        LOGP(info, "Replacing cached entry {} with {} for {} ({})", entry.id.value, id.value, path, obj);
+        entry.id = id;
+        entry.obj = obj;
         return result;
       } else {
         throw runtime_error("Attempt to extract object from message with unsupported serialization type");
@@ -486,30 +501,40 @@ class InputRecord
     // it's updated.
     auto id = ObjectCache::Id::fromRef(ref);
     ConcreteDataMatcher matcher{header->dataOrigin, header->dataDescription, header->subSpecification};
-    // If the matcher does not have an entry in the cache, deserialise it
-    // and cache the deserialised object at the given id.
+    // If the matcher does not have an entry in the cache, deserialise it and cache it per path.
     auto path = fmt::format("{}", DataSpecUtils::describe(matcher));
     LOGP(debug, "{}", path);
     auto& cache = mRegistry.get<ObjectCache>();
-    auto cacheEntry = cache.matcherToMetadataId.find(path);
-    if (cacheEntry == cache.matcherToMetadataId.end()) {
-      cache.matcherToMetadataId.insert(std::make_pair(path, id));
-      cache.idToMetadata[id] = DataRefUtils::extractCCDBHeaders(ref);
+    auto cacheEntry = cache.matcherToMetadata.find(path);
+    if (cacheEntry == cache.matcherToMetadata.end()) {
+      auto [it, inserted] = cache.matcherToMetadata.emplace(
+        path, ObjectCache::MetadataEntry{id, DataRefUtils::extractCCDBHeaders(ref)});
       LOGP(info, "Caching CCDB metadata {}: {}", id.value, path);
-      return cache.idToMetadata[id];
+      return it->second.metadata;
     }
-    auto& oldId = cacheEntry->second;
+    auto& entry = cacheEntry->second;
     // The id in the cache is the same, let's simply return it.
-    if (oldId.value == id.value) {
+    if (entry.id.value == id.value) {
       LOGP(debug, "Returning cached CCDB metatada {}: {}", id.value, path);
-      return cache.idToMetadata[id];
+      return entry.metadata;
     }
-    // The id in the cache is different. Let's destroy the old cached entry
-    // and create a new one.
-    LOGP(info, "Replacing cached entry {} with {} for {}", oldId.value, id.value, path);
-    cache.idToMetadata[id] = DataRefUtils::extractCCDBHeaders(ref);
-    oldId.value = id.value;
-    return cache.idToMetadata[id];
+    // The id in the cache is different. Replace this path's metadata.
+    LOGP(info, "Replacing cached entry {} with {} for {}", entry.id.value, id.value, path);
+    entry.id = id;
+    entry.metadata = DataRefUtils::extractCCDBHeaders(ref);
+    return entry.metadata;
+  }
+
+  template <typename T = DataRef, typename R>
+  std::span<const char> get(R binding, int part = 0) const
+    requires std::same_as<T, CCDBBlob>
+  {
+    auto ref = getRef(binding, part);
+    auto header = DataRefUtils::getHeader<header::DataHeader*>(ref);
+    if (header->payloadSerializationMethod != header::gSerializationMethodCCDB) {
+      throw runtime_error("Attempt to extract CCDBBlob from a non-CCDB-serialized message");
+    }
+    return DataRefUtils::getCCDBPayloadBlob(ref);
   }
 
   template <typename T>
@@ -519,7 +544,7 @@ class InputRecord
     auto pos = getPos(matcher);
     if (pos < 0) {
       auto msg = describeAvailableInputs();
-      throw runtime_error_f("InputRecord::get: no input with binding %s found. %s", DataSpecUtils::describe(matcher).c_str(), msg.c_str());
+      throw runtime_error_f("InputRecord::get: no input %s found. %s", DataSpecUtils::describe(matcher).c_str(), msg.c_str());
     }
     return getByPos(pos, part);
   }
@@ -568,8 +593,8 @@ class InputRecord
 
     Iterator() = delete;
 
-    Iterator(ParentType const* parent, size_t position = 0, size_t size = 0)
-      : mPosition(position), mSize(size > position ? size : position), mParent(parent), mElement{nullptr, nullptr, nullptr}
+    Iterator(ParentType const* parent, bool isEnd = false)
+      : mPosition(isEnd ? parent->size() : 0), mSize(parent->size()), mParent(parent), mElement{nullptr, nullptr, nullptr}
     {
       if (mPosition < mSize) {
         if (mParent->isValid(mPosition)) {
@@ -658,6 +683,11 @@ class InputRecord
       return mPosition;
     }
 
+    [[nodiscard]] auto parts() const
+    {
+      return mParent->parts(mPosition);
+    }
+
    private:
     size_t mPosition;
     size_t mSize;
@@ -678,43 +708,19 @@ class InputRecord
     using reference = typename BaseType::reference;
     using pointer = typename BaseType::pointer;
     using ElementType = typename std::remove_const<value_type>::type;
-    using iterator = Iterator<SelfType, T>;
-    using const_iterator = Iterator<SelfType, const T>;
 
-    InputRecordIterator(InputRecord const* parent, size_t position = 0, size_t size = 0)
-      : BaseType(parent, position, size)
+    InputRecordIterator(InputRecord const* parent, bool isEnd = false)
+      : BaseType(parent, isEnd)
     {
     }
 
-    /// Get element at {slotindex, partindex}
-    [[nodiscard]] ElementType getByPos(size_t pos) const
-    {
-      return this->parent()->getByPos(this->position(), pos);
-    }
-
-    /// Check if slot is valid, index of part is not used
+    /// Check if slot is valid
     [[nodiscard]] bool isValid(size_t = 0) const
     {
       if (this->position() < this->parent()->size()) {
         return this->parent()->isValid(this->position());
       }
       return false;
-    }
-
-    /// Get number of parts in input slot
-    [[nodiscard]] size_t size() const
-    {
-      return this->parent()->getNofParts(this->position());
-    }
-
-    [[nodiscard]] const_iterator begin() const
-    {
-      return const_iterator(this, 0, size());
-    }
-
-    [[nodiscard]] const_iterator end() const
-    {
-      return const_iterator(this, size());
     }
   };
 
@@ -723,13 +729,31 @@ class InputRecord
 
   [[nodiscard]] const_iterator begin() const
   {
-    return {this, 0, size()};
+    return {this, false};
   }
 
   [[nodiscard]] const_iterator end() const
   {
-    return {this, size()};
+    return {this, true};
   }
+
+  /// A range over the parts of a single slot that sets ref.spec on each DataRef.
+  struct PartRange {
+    InputRecord const* record;
+    size_t slot;
+
+    [[nodiscard]] DataRefIndices initialIndices() const { return {0, 1}; }
+    [[nodiscard]] DataRefIndices endIndices() const { return {size_t(-1), size_t(-1)}; }
+    [[nodiscard]] DataRef getAtIndices(DataRefIndices idx) const { return record->getAtIndices((int)slot, idx); }
+    [[nodiscard]] DataRefIndices nextIndices(DataRefIndices idx) const { return record->nextIndices((int)slot, idx); }
+    [[nodiscard]] size_t size() const { return record->getNofParts((int)slot); }
+
+    [[nodiscard]] InputSpan::Iterator<PartRange, const DataRef> begin() const { return {this, size() == 0}; }
+    [[nodiscard]] InputSpan::Iterator<PartRange, const DataRef> end() const { return {this, true}; }
+  };
+
+  /// Return an iterable range over all parts in slot @a pos (DataRef objects have spec set).
+  [[nodiscard]] PartRange parts(size_t pos) const { return {this, pos}; }
 
   InputSpan& span()
   {

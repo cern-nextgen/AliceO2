@@ -122,6 +122,9 @@ class Pdg(Enum):
     kJPsi = 443
     kLambdaB0 = 5122
     kLambdaCPlus = 4122
+    kLambdaCPlus2860 = 24124
+    kLambdaCPlus2880 = 24126
+    kLambdaCPlus2940 = 4125
     kOmegaC0 = 4332
     kK0Star892 = 313
     kKPlusStar892 = 323
@@ -151,6 +154,9 @@ class Pdg(Enum):
     kHyperHelium5 = 1010020050
     kHyperHelium4Sigma = 1110020040
     kLambda1520_Py = 102134  # PYTHIA code different from PDG
+    kK1_1270_0 = 10313
+    kK1_1270Plus = 10323
+    kCDeuteron = 2010010020
 
 
 dbPdg = o2.O2DatabasePDG

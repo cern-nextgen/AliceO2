@@ -16,7 +16,7 @@
 #include "Framework/DataAllocator.h"
 #include "Framework/IndexBuilderHelpers.h"
 #include "Framework/InputSpec.h"
-#include "Framework/Output.h"
+#include "Framework/Logger.h"
 #include "Framework/OutputObjHeader.h"
 #include "Framework/OutputRef.h"
 #include "Framework/OutputSpec.h"
@@ -26,6 +26,18 @@
 #include "Framework/Traits.h"
 
 #include <string>
+namespace o2::framework
+{
+/// Structure to contain mapping between matchers and process functions.
+/// Process function is identified by hash, each matcher has associated
+/// argument position for that process function; single argument can have
+/// many matchers associated due to complicated joins
+struct InputInfo {
+  uint32_t hash;
+  std::vector<std::pair<int, ConcreteDataMatcher>> matchers;
+};
+} // namespace o2::framework
+
 namespace o2::soa
 {
 struct IndexRecord {
@@ -69,6 +81,7 @@ struct IndexBuilder {
 
 namespace o2::framework
 {
+void wrongOriginReplacement(std::string_view replacement);
 std::shared_ptr<arrow::Table> makeEmptyTableImpl(const char* name, std::shared_ptr<arrow::Schema>& schema);
 
 template <soa::is_table T>
@@ -79,6 +92,7 @@ auto makeEmptyTable(const char* name)
 }
 
 template <soa::TableRef R>
+  requires(soa::not_void<typename aod::MetadataTrait<aod::Hash<R.desc_hash>>::metadata>)
 auto makeEmptyTable()
 {
   auto schema = std::make_shared<arrow::Schema>(soa::createFieldsFromColumns(typename aod::MetadataTrait<aod::Hash<R.desc_hash>>::metadata::persistent_columns_t{}));
@@ -93,6 +107,7 @@ auto makeEmptyTable(const char* name, framework::pack<Cs...> p)
 }
 
 template <aod::is_aod_hash D>
+  requires(soa::not_void<typename aod::MetadataTrait<D>::metadata>)
 auto makeEmptyTable(const char* name)
 {
   auto schema = std::make_shared<arrow::Schema>(soa::createFieldsFromColumns(typename aod::MetadataTrait<D>::metadata::persistent_columns_t{}));
@@ -170,7 +185,10 @@ struct Builder {
 
   std::shared_ptr<arrow::Table> materialize(ProcessingContext& pc);
 };
-}  // namespace o2::framework
+
+ConfigParamSpec replaceOrigin(ConfigParamSpec& source, std::string const& originStr);
+ConcreteDataMatcher replaceOrigin(ConcreteDataMatcher& matcher, const header::DataOrigin& newOrigin);
+} // namespace o2::framework
 
 namespace o2::soa
 {
@@ -216,6 +234,26 @@ inline constexpr auto getSourceSchemas()
   }.template operator()<T::sources.size(), T::sources>();
 }
 
+template <soa::with_sources_generator T, aod::is_origin_hash O = o2::aod::Hash<"AOD"_h>>
+inline constexpr auto getSources()
+{
+  return []<size_t N, std::array<soa::TableRef, N> refs>() {
+    return []<size_t... Is>(std::index_sequence<Is...>) {
+      return std::vector{soa::tableRef2ConfigParamSpec<refs[Is]>()...};
+    }(std::make_index_sequence<N>());
+  }.template operator()<T::N, T::template generateSources<O>()>();
+}
+
+template <soa::with_sources_generator T, aod::is_origin_hash O = o2::aod::Hash<"AOD"_h>>
+inline constexpr auto getSourceSchemas()
+{
+  return []<size_t N, std::array<soa::TableRef, N> refs>() {
+    return []<size_t... Is>(std::index_sequence<Is...>) {
+      return std::vector{soa::tableRef2Schema<refs[Is]>()...};
+    }(std::make_index_sequence<N>());
+  }.template operator()<T::N, T::template generateSources<O>()>();
+}
+
 template <soa::with_ccdb_urls T>
 inline constexpr auto getCCDBUrls()
 {
@@ -251,25 +289,49 @@ consteval IndexKind getIndexKind()
 }
 
 template <soa::with_index_pack T>
-inline constexpr auto getIndexMapping()
+inline constexpr auto getIndexMapping(header::DataOrigin newOrigin = header::DataOrigin{"AOD"})
 {
   std::vector<IndexRecord> idx;
   using indices = T::index_pack_t;
   using Key = T::Key;
-  [&idx]<size_t... Is>(std::index_sequence<Is...>) mutable {
-    constexpr auto refs = T::sources;
-    ([&idx]<TableRef ref, typename C>() mutable {
+  [&idx, &newOrigin]<size_t... Is>(std::index_sequence<Is...>) mutable {
+    constexpr auto refs = T::generateSources();
+    ([&idx, &newOrigin]<TableRef ref, typename C>() mutable {
       constexpr auto pos = o2::aod::MetadataTrait<o2::aod::Hash<ref.desc_hash>>::metadata::template getIndexPosToKey<Key>();
+      auto matcher = o2::aod::matcher<ref>();
+      if ((ref.origin_hash == "AOD"_h) && (newOrigin != header::DataOrigin{"AOD"})) {
+        matcher = replaceOrigin(matcher, newOrigin);
+      }
       if constexpr (pos == -1) {
-        idx.emplace_back(o2::aod::label<ref>(), o2::aod::matcher<ref>(), C::columnLabel(), IndexKind::IdxSelf, pos);
+        idx.emplace_back(o2::aod::label<ref>(), matcher, C::columnLabel(), IndexKind::IdxSelf, pos);
       } else {
-        idx.emplace_back(o2::aod::label<ref>(), o2::aod::matcher<ref>(), C::columnLabel(), getIndexKind<typename C::type>(), pos);
+        idx.emplace_back(o2::aod::label<ref>(), matcher, C::columnLabel(), getIndexKind<typename C::type>(), pos);
       }
     }.template operator()<refs[Is], typename framework::pack_element_t<Is, indices>>(),
      ...);
   }(std::make_index_sequence<framework::pack_size(indices{})>());
   ;
   return idx;
+}
+
+template <soa::with_sources_generator T, aod::is_origin_hash O = o2::aod::Hash<"AOD"_h>>
+constexpr auto getInputMetadata() -> std::vector<framework::ConfigParamSpec>
+{
+  std::vector<framework::ConfigParamSpec> inputMetadata;
+
+  auto inputSources = getSources<T, O>();
+  std::sort(inputSources.begin(), inputSources.end(), [](framework::ConfigParamSpec const& a, framework::ConfigParamSpec const& b) { return a.name < b.name; });
+  auto last = std::unique(inputSources.begin(), inputSources.end(), [](framework::ConfigParamSpec const& a, framework::ConfigParamSpec const& b) { return a.name == b.name; });
+  inputSources.erase(last, inputSources.end());
+  inputMetadata.insert(inputMetadata.end(), inputSources.begin(), inputSources.end());
+
+  auto inputSchemas = getSourceSchemas<T, O>();
+  std::sort(inputSchemas.begin(), inputSchemas.end(), [](framework::ConfigParamSpec const& a, framework::ConfigParamSpec const& b) { return a.name < b.name; });
+  last = std::unique(inputSchemas.begin(), inputSchemas.end(), [](framework::ConfigParamSpec const& a, framework::ConfigParamSpec const& b) { return a.name == b.name; });
+  inputSchemas.erase(last, inputSchemas.end());
+  inputMetadata.insert(inputMetadata.end(), inputSchemas.begin(), inputSchemas.end());
+
+  return inputMetadata;
 }
 
 template <soa::with_sources T>
@@ -293,7 +355,7 @@ constexpr auto getInputMetadata() -> std::vector<framework::ConfigParamSpec>
 }
 
 template <typename T>
-  requires(!soa::with_sources<T>)
+  requires(!(soa::with_sources<T> || soa::with_sources_generator<T>))
 constexpr auto getInputMetadata() -> std::vector<framework::ConfigParamSpec>
 {
   return {};
@@ -338,41 +400,52 @@ constexpr auto getExpressionMetadata() -> std::vector<framework::ConfigParamSpec
 }
 
 template <soa::with_index_pack T>
-constexpr auto getIndexMetadata() -> std::vector<framework::ConfigParamSpec>
+constexpr auto getIndexMetadata(header::DataOrigin newOrigin = header::DataOrigin{"AOD"}) -> std::vector<framework::ConfigParamSpec>
 {
-  auto map = getIndexMapping<T>();
+  auto map = getIndexMapping<T>(newOrigin);
   return {framework::ConfigParamSpec{"index-records", framework::VariantType::String, framework::serializeIndexRecords(map), {"\"\""}},
           {framework::ConfigParamSpec{"index-exclusive", framework::VariantType::Bool, T::exclusive, {"\"\""}}}};
 }
 
 template <typename T>
   requires(!soa::with_index_pack<T>)
-constexpr auto getIndexMetadata() -> std::vector<framework::ConfigParamSpec>
+constexpr auto getIndexMetadata(header::DataOrigin) -> std::vector<framework::ConfigParamSpec>
 {
   return {};
 }
 
-}  // namespace
+} // namespace
 
 template <TableRef R>
-constexpr auto tableRef2InputSpec()
+constexpr auto tableRef2InputSpec(header::DataOrigin newOrigin = header::DataOrigin{"AOD"})
 {
   std::vector<framework::ConfigParamSpec> metadata;
-  auto m = getInputMetadata<typename o2::aod::MetadataTrait<o2::aod::Hash<R.desc_hash>>::metadata>();
-  metadata.insert(metadata.end(), m.begin(), m.end());
-  auto ccdbMetadata = getCCDBMetadata<typename o2::aod::MetadataTrait<o2::aod::Hash<R.desc_hash>>::metadata>();
-  metadata.insert(metadata.end(), ccdbMetadata.begin(), ccdbMetadata.end());
-  auto p = getExpressionMetadata<typename o2::aod::MetadataTrait<o2::aod::Hash<R.desc_hash>>::metadata>();
-  metadata.insert(metadata.end(), p.begin(), p.end());
-  auto idx = getIndexMetadata<typename o2::aod::MetadataTrait<o2::aod::Hash<R.desc_hash>>::metadata>();
-  metadata.insert(metadata.end(), idx.begin(), idx.end());
+  std::vector<framework::ConfigParamSpec> sources;
+  if constexpr (soa::with_sources<typename o2::aod::MetadataTrait<o2::aod::Hash<R.desc_hash>>::metadata>) {
+    sources = getInputMetadata<typename o2::aod::MetadataTrait<o2::aod::Hash<R.desc_hash>>::metadata>();
+  } else if constexpr (soa::with_sources_generator<typename o2::aod::MetadataTrait<o2::aod::Hash<R.desc_hash>>::metadata>) {
+    sources = getInputMetadata<typename o2::aod::MetadataTrait<o2::aod::Hash<R.desc_hash>>::metadata, o2::aod::Hash<R.origin_hash>>();
+  }
+  if ((R.origin_hash == "AOD"_h) && (newOrigin != header::DataOrigin{"AOD"})) {
+    std::ranges::transform(sources, sources.begin(), [originStr = newOrigin.as<std::string>()](framework::ConfigParamSpec& source) {
+      return replaceOrigin(source, originStr);
+    });
+    metadata.emplace_back(framework::ConfigParamSpec{"aod-origin-replaced", framework::VariantType::Bool, true, {"\"\""}});
+  }
+  metadata.insert(metadata.end(), sources.begin(), sources.end());
+  auto ccdbURLs = getCCDBMetadata<typename o2::aod::MetadataTrait<o2::aod::Hash<R.desc_hash>>::metadata>();
+  metadata.insert(metadata.end(), ccdbURLs.begin(), ccdbURLs.end());
+  auto expressions = getExpressionMetadata<typename o2::aod::MetadataTrait<o2::aod::Hash<R.desc_hash>>::metadata>();
+  metadata.insert(metadata.end(), expressions.begin(), expressions.end());
+  auto indices = getIndexMetadata<typename o2::aod::MetadataTrait<o2::aod::Hash<R.desc_hash>>::metadata>(newOrigin);
+  metadata.insert(metadata.end(), indices.begin(), indices.end());
   if constexpr (!soa::with_ccdb_urls<typename o2::aod::MetadataTrait<o2::aod::Hash<R.desc_hash>>::metadata>) {
     metadata.emplace_back(framework::ConfigParamSpec{"schema", framework::VariantType::String, framework::serializeSchema(o2::aod::MetadataTrait<o2::aod::Hash<R.desc_hash>>::metadata::getSchema()), {"\"\""}});
   }
 
   return framework::InputSpec{
     o2::aod::label<R>(),
-    o2::aod::origin<R>(),
+    ((R.origin_hash == "AOD"_h) && (newOrigin != header::DataOrigin{"AOD"})) ? newOrigin : o2::aod::origin<R>(),
     o2::aod::description(o2::aod::signature<R>()),
     R.version,
     framework::Lifetime::Timeframe,
@@ -380,22 +453,27 @@ constexpr auto tableRef2InputSpec()
 }
 
 template <TableRef R>
-constexpr auto tableRef2OutputSpec()
+constexpr auto tableRef2OutputSpec(header::DataOrigin newOrigin = header::DataOrigin{"AOD"})
 {
+  std::vector<framework::ConfigParamSpec> metadata;
+  using md = typename o2::aod::MetadataTrait<o2::aod::Hash<R.desc_hash>>::metadata;
+  if constexpr (soa::with_ccdb_urls<md>) {
+    metadata.emplace_back("ccdb:", framework::VariantType::Bool, true, framework::ConfigParamSpec::HelpString{"\"\""});
+  } else if constexpr (soa::with_expression_pack<md>) {
+    metadata.emplace_back("projectors", framework::VariantType::Bool, true, framework::ConfigParamSpec::HelpString{"\"\""});
+  } else if constexpr (soa::with_index_pack<md>) {
+    metadata.emplace_back("index-records", framework::VariantType::Bool, true, framework::ConfigParamSpec::HelpString{"\"\""});
+  }
+  if ((R.origin_hash == "AOD"_h) && (newOrigin != header::DataOrigin{"AOD"})) {
+    metadata.push_back(framework::ConfigParamSpec{"aod-origin-replaced", framework::VariantType::Bool, true, {"\"\""}});
+  }
   return framework::OutputSpec{
     framework::OutputLabel{o2::aod::label<R>()},
-    o2::aod::origin<R>(),
+    ((R.origin_hash == "AOD"_h) && (newOrigin != header::DataOrigin{"AOD"})) ? newOrigin : o2::aod::origin<R>(),
     o2::aod::description(o2::aod::signature<R>()),
-    R.version};
-}
-
-template <TableRef R>
-constexpr auto tableRef2Output()
-{
-  return framework::Output{
-    o2::aod::origin<R>(),
-    o2::aod::description(o2::aod::signature<R>()),
-    R.version};
+    R.version,
+    framework::Lifetime::Timeframe,
+    metadata};
 }
 
 template <TableRef R>
@@ -405,7 +483,7 @@ constexpr auto tableRef2OutputRef()
     o2::aod::label<R>(),
     R.version};
 }
-}  // namespace o2::soa
+} // namespace o2::soa
 
 namespace o2::framework
 {
@@ -425,12 +503,25 @@ struct WritingCursor {
  public:
   using persistent_table_t = decltype([]() { if constexpr (soa::is_iterator<T>) { return typename T::parent_t{nullptr}; } else { return T{nullptr}; } }());
   using cursor_t = decltype(std::declval<TableBuilder>().cursor<persistent_table_t>());
+  OutputSpec outputSpec{soa::tableRef2OutputSpec<persistent_table_t::ref>()};
+  static OutputSpec updateOutputSpec(header::DataOrigin const& newOrigin = header::DataOrigin{"AOD"})
+  {
+    return soa::tableRef2OutputSpec<persistent_table_t::ref>(newOrigin);
+  }
 
   template <typename... Ts>
   void operator()(Ts&&... args)
     requires(sizeof...(Ts) == framework::pack_size(typename persistent_table_t::persistent_columns_t{}))
   {
     ++mCount;
+    if (mReserved >= 0 && mCount >= mReserved) [[unlikely]] {
+      // reserve() switched this cursor to UnsafeAppend, which does not grow its
+      // buffers. Writing row mCount (>= the reserved count) would overrun them and
+      // silently corrupt the heap, so fail here, naming the offending table and
+      // row, rather than crashing later somewhere unrelated.
+      LOG(fatal) << "Table '" << outputSpec.binding.value << "': writing row " << mCount
+                 << " exceeds reserve(" << mReserved << ").";
+    }
     cursor(0, extract(args)...);
   }
 
@@ -445,6 +536,9 @@ struct WritingCursor {
     mBuilder = std::move(builder);
     cursor = std::move(FFL(mBuilder->cursor<persistent_table_t>()));
     mCount = -1;
+    // Back to the safe, bounds-checked cursor: no reservation to validate until
+    // reserve() is called again for this timeframe.
+    mReserved = -1;
     return true;
   }
 
@@ -455,13 +549,30 @@ struct WritingCursor {
 
   /// reserve @a size rows when filling, so that we do not
   /// spend time reallocating the buffers.
+  /// Switches the internal cursor to UnsafeAppend (no capacity check),
+  /// which is safe because we just reserved enough space.
   void reserve(int64_t size)
   {
     mBuilder->reserve(typename persistent_table_t::column_types{}, size);
+    mReserved = size;
+    cursor = std::move(FFL(mBuilder->template unsafeCursor<persistent_table_t>()));
   }
 
   void release()
   {
+    // Called once per timeframe, when the table is finalized. If reserve() was
+    // used (switching to UnsafeAppend, which skips per-row bounds checks), make
+    // sure we did not write past what we reserved: mCount + 1 is the number of
+    // rows actually filled, mReserved the capacity we requested. Overrunning it
+    // is silent memory corruption of the arrow buffers, so we fail hard here,
+    // before the (corrupt) table is serialized downstream. mReserved < 0 means
+    // reserve() was not called and the safe cursor was used: nothing to check.
+    if (mReserved >= 0 && mCount + 1 > mReserved) {
+      LOG(fatal) << "Table '" << outputSpec.binding.value << "': filled " << (mCount + 1)
+                 << " rows after reserve(" << mReserved
+                 << "). UnsafeAppend overran the reserved buffer — reserve() must request "
+                    "at least as many rows as are filled.";
+    }
     mBuilder.release();
   }
 
@@ -485,6 +596,10 @@ struct WritingCursor {
   /// able to do all-columns methods like reserve.
   LifetimeHolder<TableBuilder> mBuilder = nullptr;
   int64_t mCount = -1;
+  /// Number of rows reserved via reserve() (which switches to UnsafeAppend);
+  /// -1 when reserve() was never called. Used by the destructor to detect an
+  /// UnsafeAppend overrun.
+  int64_t mReserved = -1;
 };
 
 /// Helper to define output for a Table
@@ -504,16 +619,20 @@ struct OutputForTable {
   using table_t = decltype(typeWithRef<T>());
   using metadata = aod::MetadataTrait<o2::aod::Hash<table_t::ref.desc_hash>>::metadata;
 
-  static OutputSpec const spec()
+  static constexpr auto spec()
   {
-    return OutputSpec{OutputLabel{aod::label<table_t::ref>()}, o2::aod::origin<table_t::ref>(), o2::aod::description(o2::aod::signature<table_t::ref>()), table_t::ref.version};
+    return soa::tableRef2OutputSpec<table_t::ref>();
   }
 
-  static OutputRef ref()
+  static constexpr auto ref()
   {
-    return OutputRef{aod::label<table_t::ref>(), table_t::ref.version};
+    return soa::tableRef2OutputRef<table_t::ref>();
   }
 };
+
+/// For the table-producing category of templates
+/// * In a multi-origin case the origin is provided by the type
+/// * In a rewritten origin case, we need to modify the output designation
 
 /// This helper class allows you to declare things which will be created by a
 /// given analysis task. Notice how the actual cursor is implemented by the
@@ -544,57 +663,47 @@ concept is_produces_group = std::derived_from<T, ProducesGroup>;
 template <soa::is_metadata M, soa::TableRef Ref>
 struct TableTransform {
   using metadata = M;
-  constexpr static auto sources = M::sources;
+  constexpr static auto sources = M::template generateSources<o2::aod::Hash<Ref.origin_hash>>();
 
-  template <soa::TableRef R>
-  static auto base_spec()
+  OutputSpec outputSpec{soa::tableRef2OutputSpec<Ref>()};
+  static OutputSpec updateOutputSpec(header::DataOrigin const& newOrigin = header::DataOrigin{"AOD"})
   {
-    return soa::tableRef2InputSpec<R>();
+    return soa::tableRef2OutputSpec<Ref>(newOrigin);
   }
 
-  static auto base_specs()
+  std::array<InputSpec, sources.size()> requiredInputs = getRequiredInputs();
+  static constexpr auto getRequiredInputs(header::DataOrigin const& newOrigin = header::DataOrigin{"AOD"})
   {
-    return []<size_t... Is>(std::index_sequence<Is...>) {
-      return std::array{base_spec<sources[Is]>()...};
-    }(std::make_index_sequence<sources.size()>{});
-  }
-
-  static constexpr auto spec()
-  {
-    return soa::tableRef2OutputSpec<Ref>();
-  }
-
-  static constexpr auto output()
-  {
-    return soa::tableRef2Output<Ref>();
-  }
-
-  static constexpr auto ref()
-  {
-    return soa::tableRef2OutputRef<Ref>();
+    return [&newOrigin]<size_t... Is>(std::index_sequence<Is...>) {
+      return std::array{soa::tableRef2InputSpec<sources[Is]>(newOrigin)...};
+    }(std::make_index_sequence<sources.size()>());
   }
 };
 
 /// This helper struct allows you to declare extended tables which should be
 /// created by the task (as opposed to those pre-defined by data model)
 template <typename T>
-concept is_spawnable = soa::has_metadata<aod::MetadataTrait<o2::aod::Hash<T::ref.desc_hash>>> && soa::has_extension<typename aod::MetadataTrait<o2::aod::Hash<T::ref.desc_hash>>::metadata>;
+concept is_spawnable = soa::has_metadata<aod::MetadataTrait<o2::aod::Hash<T::originals[T::originals.size() - 1].desc_hash>>> && soa::has_extension<typename aod::MetadataTrait<o2::aod::Hash<T::originals[T::originals.size() - 1].desc_hash>>::metadata>;
 
 template <typename T>
-concept is_dynamically_spawnable = soa::has_metadata<aod::MetadataTrait<o2::aod::Hash<T::ref.desc_hash>>> && soa::has_configurable_extension<typename aod::MetadataTrait<o2::aod::Hash<T::ref.desc_hash>>::metadata>;
+concept is_dynamically_spawnable = soa::has_metadata<aod::MetadataTrait<o2::aod::Hash<T::originals[T::originals.size() - 1].desc_hash>>> && soa::has_configurable_extension<typename aod::MetadataTrait<o2::aod::Hash<T::originals[T::originals.size() - 1].desc_hash>>::metadata>;
 
 template <is_spawnable T>
-constexpr auto transformBase()
+consteval auto transformBase()
 {
-  using metadata = typename aod::MetadataTrait<o2::aod::Hash<T::ref.desc_hash>>::metadata;
-  return TableTransform<metadata, metadata::extension_table_t::ref>{};
+  using metadata = typename aod::MetadataTrait<o2::aod::Hash<T::originals[T::originals.size() - 1].desc_hash>>::metadata;
+  return TableTransform<metadata, metadata::template extension_table_t_from<o2::aod::Hash<T::originals[T::originals.size() - 1].origin_hash>>::ref>{};
 }
 
+/// for the automatic table templates
+/// * In a multi-origin case the origin is provided by the type
+/// * In a rewritten origin case the output designation needs to be changed through base class
+/// * The extraction of the elements happens in AnalysisManagers using the origin information from the base class
 template <is_spawnable T>
 struct Spawns : decltype(transformBase<T>()) {
   using spawnable_t = T;
   using metadata = decltype(transformBase<T>())::metadata;
-  using extension_t = typename metadata::extension_table_t;
+  using extension_t = typename metadata::template extension_table_t_from<o2::aod::Hash<T::originals[T::originals.size() - 1].origin_hash>>;
   using expression_pack_t = typename metadata::expression_pack_t;
   static constexpr size_t N = framework::pack_size(expression_pack_t{});
 
@@ -614,7 +723,7 @@ struct Spawns : decltype(transformBase<T>()) {
 
   std::shared_ptr<typename T::table_t> table = nullptr;
   std::shared_ptr<extension_t> extension = nullptr;
-  std::array<o2::framework::expressions::Projector, N> projectors = []<typename... C>(framework::pack<C...>) -> std::array<expressions::Projector, sizeof...(C)>
+  std::array<o2::framework::expressions::Projector, N> projectors = []<typename... C>(framework::pack<C...>)->std::array<expressions::Projector, sizeof...(C)>
   {
     return {{std::move(C::Projector())...}};
   }
@@ -638,13 +747,12 @@ concept is_spawns = requires(T t) {
 /// expressions to be created by the task
 /// The actual expressions have to be set in init() for the configurable expression
 /// columns, used to define the table
-
 template <is_dynamically_spawnable T, bool DELAYED = false>
 struct Defines : decltype(transformBase<T>()) {
   static constexpr bool delayed = DELAYED;
   using spawnable_t = T;
   using metadata = decltype(transformBase<T>())::metadata;
-  using extension_t = typename metadata::extension_table_t;
+  using extension_t = typename metadata::template extension_table_t_from<o2::aod::Hash<T::originals[T::originals.size() - 1].origin_hash>>;
   using placeholders_pack_t = typename metadata::placeholders_pack_t;
   static constexpr size_t N = framework::pack_size(placeholders_pack_t{});
 
@@ -695,17 +803,15 @@ concept is_defines = requires(T t) {
 
 /// Policy to control index building
 /// Exclusive index: each entry in a row has a valid index
-/// Sparse index: values in a row can be (-1), index table is isomorphic (joinable)
-/// to T1
+/// Sparse index: values in a row can be (-1), index table is isomorphic (joinable) to T1
 struct Exclusive {
 };
 struct Sparse {
 };
 
 /// This helper struct allows you to declare index tables to be created in a task
-
 template <soa::is_index_table T>
-constexpr auto transformBase()
+consteval auto transformBase()
 {
   using metadata = typename aod::MetadataTrait<o2::aod::Hash<T::ref.desc_hash>>::metadata;
   return TableTransform<metadata, T::ref>{};
@@ -741,7 +847,7 @@ struct Builds : decltype(transformBase<T>()) {
   }
   std::shared_ptr<T> table = nullptr;
 
-  constexpr auto pack()
+  static consteval auto pack()
   {
     return index_pack_t{};
   }
@@ -759,6 +865,9 @@ concept is_builds = requires(T t) {
   typename T::Key;
   requires std::same_as<decltype(t.map), std::vector<soa::IndexRecord>>;
 };
+
+/// a task with rewritten origin, if running together with a task with the default, will
+/// have a different name and thus its output would be routed separately
 
 /// This helper class allows you to declare things which will be created by a
 /// given analysis task. Currently wrapped objects are limited to be TNamed
@@ -900,6 +1009,13 @@ auto getTableFromFilter(soa::is_not_filtered_table auto const& table, soa::Selec
 
 void initializePartitionCaches(std::set<uint32_t> const& hashes, std::shared_ptr<arrow::Schema> const& schema, expressions::Filter const& filter, gandiva::NodePtr& tree, gandiva::FilterPtr& gfilter);
 
+/// Partition ties directly to the argument type
+/// in a case with several origins in subscriptions it will get the correct input, as the type contains the origin
+/// in a case with rewritten origin the type stays the same, so the association stays correct
+/// FIXME: currently partition has to rerun the selection each time the invokeProcess is called
+///        the real reason is to provide grouped parts for the process functions that request it
+///        better solution would be to "slice" the selection, as is already done in GroupSlicer
+///        for the same purpose, instead of reapplying the filtering
 template <typename T>
 struct Partition {
   using content_t = T;
@@ -1019,7 +1135,7 @@ concept is_partition = requires(T t) {
   requires std::same_as<decltype(t.filter), expressions::Filter>;
   requires std::same_as<decltype(t.mFiltered), std::unique_ptr<o2::soa::Filtered<typename T::content_t>>>;
 };
-}  // namespace o2::framework
+} // namespace o2::framework
 
 namespace o2::soa
 {
@@ -1042,6 +1158,6 @@ auto Attach(T const& table)
   using output_t = Join<T, o2::soa::Table<o2::aod::Hash<"JOIN"_h>, o2::aod::Hash<"JOIN/0"_h>, o2::aod::Hash<"JOIN"_h>, Cs...>>;
   return output_t{{table.asArrowTable()}, table.offset()};
 }
-}  // namespace o2::soa
+} // namespace o2::soa
 
-#endif  // o2_framework_AnalysisHelpers_H_DEFINED
+#endif // o2_framework_AnalysisHelpers_H_DEFINED
