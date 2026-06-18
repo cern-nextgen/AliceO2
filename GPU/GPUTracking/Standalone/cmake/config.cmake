@@ -17,7 +17,7 @@ set(ENABLE_HIP AUTO CACHE STRING "ENABLE_HIP")
 set(ENABLE_OPENCL 0)
 set(GPUCA_CONFIG_VC 1)
 set(GPUCA_CONFIG_FMT 1)
-set(GPUCA_CONFIG_ROOT 1)
+set(GPUCA_CONFIG_ROOT 0)
 set(GPUCA_CONFIG_ONNX 0)
 set(GPUCA_BUILD_EVENT_DISPLAY 0)              # Enable compilation of event display
 set(GPUCA_BUILD_EVENT_DISPLAY_FREETYPE 1)     # Use FreeType library to render fonts for event display
