@@ -33,14 +33,22 @@ struct GPUTPCCovariance
   constexpr const float& operator[](int32_t i) const { return data[i]; }
 };
 
-struct GPUTPCParameter
+template <template <class> class F>
+struct GPUTPCParameterSkeleton
 {
-  float data[5]; // mY, mZ, mSinPhi, mDzDs, mQPt
-  constexpr operator float*() { return data; }
-  constexpr operator const float*() const { return data; }
-  constexpr float& operator[](int32_t i) { return data[i]; }
-  constexpr const float& operator[](int32_t i) const { return data[i]; }
+  MEMLAYOUT_APPLY_UNARY(mY, mZ, mSinPhi, mDzDs, mQPt)
+  MEMLAYOUT_APPLY_BINARY(GPUTPCParameterSkeleton, MEMLAYOUT_EXPAND(mY), MEMLAYOUT_EXPAND(mZ), MEMLAYOUT_EXPAND(mSinPhi), MEMLAYOUT_EXPAND(mDzDs), MEMLAYOUT_EXPAND(mQPt))
+  F<float> mY, mZ, mSinPhi, mDzDs, mQPt;
 };
+
+// Needed for sorting
+constexpr void swap(GPUTPCParameterSkeleton<MemLayout::reference> a, GPUTPCParameterSkeleton<MemLayout::reference> b) {
+    std::swap(a.mY, b.mY);
+    std::swap(a.mZ, b.mZ);
+    std::swap(a.mSinPhi, b.mSinPhi);
+    std::swap(a.mDzDs, b.mDzDs);
+    std::swap(a.mQPt, b.mQPt);
+}
 
 }
 
@@ -58,11 +66,11 @@ struct GPUTPCBaseTrackParamSkeleton
   MEMLAYOUT_APPLY_BINARY(GPUTPCBaseTrackParamSkeleton, MEMLAYOUT_EXPAND(mX), MEMLAYOUT_EXPAND(mC), MEMLAYOUT_EXPAND(mZOffset), MEMLAYOUT_EXPAND(mP))
 
   GPUd() float X() const { return mX; }
-  GPUd() float Y() const { return mP[0]; }
-  GPUd() float Z() const { return mP[1]; }
-  GPUd() float SinPhi() const { return mP[2]; }
-  GPUd() float DzDs() const { return mP[3]; }
-  GPUd() float QPt() const { return mP[4]; }
+  GPUd() float Y() const { return mP.mY; }
+  GPUd() float Z() const { return mP.mZ; }
+  GPUd() float SinPhi() const { return mP.mSinPhi; }
+  GPUd() float DzDs() const { return mP.mDzDs; }
+  GPUd() float QPt() const { return mP.mQPt; }
   GPUd() float ZOffset() const { return mZOffset; }
 
   GPUd() float Err2Y() const { return mC[0]; }
@@ -75,27 +83,21 @@ struct GPUTPCBaseTrackParamSkeleton
   GPUhd() void SetCov(int32_t i, float v) { mC[i] = v; }
 
   GPUhd() float GetX() const { return mX; }
-  GPUhd() float GetY() const { return mP[0]; }
-  GPUhd() float GetZ() const { return mP[1]; }
-  GPUhd() float GetSinPhi() const { return mP[2]; }
-  GPUhd() float GetDzDs() const { return mP[3]; }
-  GPUhd() float GetQPt() const { return mP[4]; }
+  GPUhd() float GetY() const { return mP.mY; }
+  GPUhd() float GetZ() const { return mP.mZ; }
+  GPUhd() float GetSinPhi() const { return mP.mSinPhi; }
+  GPUhd() float GetDzDs() const { return mP.mDzDs; }
+  GPUhd() float GetQPt() const { return mP.mQPt; }
   GPUhd() float GetZOffset() const { return mZOffset; }
 
-  GPUd() float GetKappa(float Bz) const { return -mP[4] * Bz; }
-
-  GPUhd() const float* Par() const { return mP; }
-  GPUd() const float* GetPar() const { return mP; }
-  GPUd() float GetPar(int32_t i) const { return (mP[i]); }
-
-  GPUhd() void SetPar(int32_t i, float v) { mP[i] = v; }
+  GPUd() float GetKappa(float Bz) const { return -mP.mQPt * Bz; }
 
   GPUd() void SetX(float v) { mX = v; }
-  GPUd() void SetY(float v) { mP[0] = v; }
-  GPUd() void SetZ(float v) { mP[1] = v; }
-  GPUd() void SetSinPhi(float v) { mP[2] = v; }
-  GPUd() void SetDzDs(float v) { mP[3] = v; }
-  GPUd() void SetQPt(float v) { mP[4] = v; }
+  GPUd() void SetY(float v) { mP.mY = v; }
+  GPUd() void SetZ(float v) { mP.mZ = v; }
+  GPUd() void SetSinPhi(float v) { mP.mSinPhi = v; }
+  GPUd() void SetDzDs(float v) { mP.mDzDs = v; }
+  GPUd() void SetQPt(float v) { mP.mQPt = v; }
   GPUd() void SetZOffset(float v) { mZOffset = v; }
 
   // WARNING, Track Param Data is copied in the GPU Tracklet Constructor element by element instead of using copy constructor!!!
@@ -104,7 +106,7 @@ struct GPUTPCBaseTrackParamSkeleton
   F<float> mX;       // x position
   F<detail::GPUTPCCovariance> mC;  // the covariance matrix for Y,Z,SinPhi,..
   F<float> mZOffset; // z offset
-  F<detail::GPUTPCParameter> mP;  // 'active' track parameters: Y, Z, SinPhi, DzDs, q/Pt
+  MemLayout::wrapper<detail::GPUTPCParameterSkeleton, F> mP;  // 'active' track parameters: Y, Z, SinPhi, DzDs, q/Pt
 };
 
 // Needed for sorting
@@ -112,7 +114,7 @@ constexpr void swap(GPUTPCBaseTrackParamSkeleton<MemLayout::reference> a, GPUTPC
     std::swap(a.mX, b.mX);
     std::swap(a.mC, b.mC);
     std::swap(a.mZOffset, b.mZOffset);
-    std::swap(a.mP, b.mP);
+    swap(a.mP, b.mP);
 }
 
 using GPUTPCBaseTrackParam = MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::value>;

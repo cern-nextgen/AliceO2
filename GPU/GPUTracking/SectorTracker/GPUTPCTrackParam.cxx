@@ -160,7 +160,7 @@ GPUd() bool GPUTPCTrackParamSkeleton<F>::TransportToX(float x, GPUTPCTrackLinear
   float exi = 1.f / ex;
   float ex1i = 1.f / ex1;
 
-  float d[5] = {0, 0, GetPar(2) - t0.SinPhi(), GetPar(3) - t0.DzDs(), GetPar(4) - t0.QPt()};
+  float d[5] = {0, 0, GetSinPhi() - t0.SinPhi(), GetDzDs() - t0.DzDs(), GetQPt() - t0.QPt()};
 
   // float H0[5] = { 1,0, h2,  0, h4 };
   // float H1[5] = { 0, 1, 0, dS,  0 };
@@ -176,9 +176,9 @@ GPUd() bool GPUTPCTrackParamSkeleton<F>::TransportToX(float x, GPUTPCTrackLinear
   t0.SetSinPhi(ey1);
 
   SetX(X() + dx);
-  SetPar(0, Y() + dy + h2 * d[2] + h4 * d[4]);
-  SetPar(1, Z() + dz + dS * d[3]);
-  SetPar(2, t0.SinPhi() + d[2] + dxBz * d[4]);
+  SetY(Y() + dy + h2 * d[2] + h4 * d[4]);
+  SetZ(Z() + dz + dS * d[3]);
+  SetSinPhi(t0.SinPhi() + d[2] + dxBz * d[4]);
 
   float c00 = mParam.mC[0];
   float c10 = mParam.mC[1];
@@ -255,9 +255,9 @@ GPUd() bool GPUTPCTrackParamSkeleton<F>::TransportToX(float x, float sinPhi0, fl
   }
 
   SetX(X() + dx);
-  SetPar(0, GetPar(0) + dS * ey + h2 * (SinPhi() - ey) + h4 * QPt());
-  SetPar(1, GetPar(1) + dS * DzDs());
-  SetPar(2, sinPhi);
+  SetY(GetY() + dS * ey + h2 * (SinPhi() - ey) + h4 * QPt());
+  SetZ(GetZ() + dS * DzDs());
+  SetSinPhi(sinPhi);
 
   float c00 = mParam.mC[0];
   float c10 = mParam.mC[1];
@@ -443,12 +443,12 @@ GPUd() void GPUTPCTrackParamSkeleton<F>::CalculateFitParameters(detail::GPUTPCTr
 {
   //*!
 
-  float qpt = GetPar(4);
+  float qpt = GetQPt();
   if (mParam.mC[14] >= 1.f) {
     qpt = 1.f / 0.35f;
   }
 
-  float p2 = (1.f + GetPar(3) * GetPar(3));
+  float p2 = (1.f + GetDzDs() * GetDzDs());
   float k2 = qpt * qpt;
   float mass2 = mass * mass;
   float beta2 = p2 / (p2 + mass2 * k2);
@@ -467,10 +467,10 @@ GPUd() void GPUTPCTrackParamSkeleton<F>::CalculateFitParameters(detail::GPUTPCTr
   par.sigmadE2 = knst * par.EP2 * qpt;
   par.sigmadE2 = par.sigmadE2 * par.sigmadE2;
 
-  par.k22 = (1.f + GetPar(3) * GetPar(3));
+  par.k22 = (1.f + GetDzDs() * GetDzDs());
   par.k33 = par.k22 * par.k22;
   par.k43 = 0;
-  par.k44 = GetPar(3) * GetPar(3) * k2;
+  par.k44 = GetDzDs() * GetDzDs() * k2;
 }
 
 template <template <class> class F>
@@ -501,7 +501,7 @@ GPUd() bool GPUTPCTrackParamSkeleton<F>::CorrectForMeanMaterial(float xOverX0, f
     return 0;
   }
 
-  SetPar(4, GetPar(4) * corr);
+  SetQPt(GetQPt() * corr);
   mC40 *= corr;
   mC41 *= corr;
   mC42 *= corr;
@@ -512,7 +512,7 @@ GPUd() bool GPUTPCTrackParamSkeleton<F>::CorrectForMeanMaterial(float xOverX0, f
   // Multiple scattering******************
 
   float theta2 = par.theta2 * CAMath::Abs(xOverX0);
-  mC22 += theta2 * par.k22 * (1.f - GetPar(2)) * (1.f + GetPar(2));
+  mC22 += theta2 * par.k22 * (1.f - GetSinPhi()) * (1.f + GetSinPhi());
   mC33 += theta2 * par.k33;
   mC43 += theta2 * par.k43;
   mC44 += theta2 * par.k44;
@@ -638,7 +638,7 @@ GPUd() bool GPUTPCTrackParamSkeleton<F>::Filter(float y, float z, float err2Y, f
   err2Y += c00;
   err2Z += c11;
 
-  float z0 = y - GetPar(0), z1 = z - GetPar(1);
+  float z0 = y - GetY(), z1 = z - GetZ();
 
   if (err2Y < 1.e-8f || err2Z < 1.e-8f) {
     return 0;
@@ -658,17 +658,17 @@ GPUd() bool GPUTPCTrackParamSkeleton<F>::Filter(float y, float z, float err2Y, f
   k11 = c11 * mS2;
   k31 = c31 * mS2;
 
-  float sinPhi = GetPar(2) + k20 * z0;
+  float sinPhi = GetSinPhi() + k20 * z0;
 
   if (maxSinPhi > 0 && CAMath::Abs(sinPhi) >= maxSinPhi) {
     return 0;
   }
 
-  SetPar(0, GetPar(0) + k00 * z0);
-  SetPar(1, GetPar(1) + k11 * z1);
-  SetPar(2, sinPhi);
-  SetPar(3, GetPar(3) + k31 * z1);
-  SetPar(4, GetPar(4) + k40 * z0);
+  SetY(GetY() + k00 * z0);
+  SetZ(GetZ() + k11 * z1);
+  SetSinPhi(sinPhi);
+  SetDzDs(GetDzDs() + k31 * z1);
+  SetQPt(GetQPt() + k40 * z0);
   if (paramOnly) {
     return true;
   }
@@ -701,9 +701,7 @@ GPUd() bool GPUTPCTrackParamSkeleton<F>::CheckNumericalQuality() const
   for (int32_t i = 0; i < 15; i++) {
     ok = ok && CAMath::Finite(c[i]);
   }
-  for (int32_t i = 0; i < 5; i++) {
-    ok = ok && CAMath::Finite(Par()[i]);
-  }
+  ok = ok && CAMath::Finite(GetY()) && CAMath::Finite(GetZ()) && CAMath::Finite(GetSinPhi()) && CAMath::Finite(GetDzDs()) && CAMath::Finite(GetQPt());
 
   if (c[0] <= 0 || c[2] <= 0 || c[5] <= 0 || c[9] <= 0 || c[14] <= 0) {
     ok = 0;
@@ -733,14 +731,14 @@ GPUd() void GPUTPCTrackParamSkeleton<F>::ConstrainZ(float& z, uint32_t sector, f
   if (sector < GPUTPCGeometry::NSECTORS / 2) {
     if (z < 0) {
       mParam.mZOffset += z;
-      mParam.mP[1] -= z;
+      mParam.mP.mZ -= z;
       z0 -= z;
       lastZ -= z;
       z = 0;
     } else if (z > GPUTPCGeometry::TPCLength()) {
       float shift = z - GPUTPCGeometry::TPCLength();
       mParam.mZOffset += shift;
-      mParam.mP[1] -= shift;
+      mParam.mP.mZ -= shift;
       z0 -= shift;
       lastZ -= shift;
       z = GPUTPCGeometry::TPCLength();
@@ -748,14 +746,14 @@ GPUd() void GPUTPCTrackParamSkeleton<F>::ConstrainZ(float& z, uint32_t sector, f
   } else {
     if (z > 0) {
       mParam.mZOffset += z;
-      mParam.mP[1] -= z;
+      mParam.mP.mZ -= z;
       z0 -= z;
       lastZ -= z;
       z = 0;
     } else if (z < -GPUTPCGeometry::TPCLength()) {
       float shift = -GPUTPCGeometry::TPCLength() - z;
       mParam.mZOffset -= shift;
-      mParam.mP[1] += shift;
+      mParam.mP.mZ += shift;
       z0 += shift;
       lastZ += shift;
       z = -GPUTPCGeometry::TPCLength();
@@ -766,28 +764,28 @@ GPUd() void GPUTPCTrackParamSkeleton<F>::ConstrainZ(float& z, uint32_t sector, f
 template <template <class> class F>
 GPUd() void GPUTPCTrackParamSkeleton<F>::ShiftZ(float z1, float z2, float x1, float x2, float bz, float defaultZOffsetOverR)
 {
-  const float r1 = CAMath::Max(0.0001f, CAMath::Abs(mParam.mP[4] * bz));
+  const float r1 = CAMath::Max(0.0001f, CAMath::Abs(mParam.mP.mQPt * bz));
   float deltaZ = 0.f;
   bool beamlineReached = false;
 
   if (r1 < 0.01501) { // 100 MeV @ 0.5T ~ 0.66m cutof
-    const float dist2 = mParam.mX * mParam.mX + mParam.mP[0] * mParam.mP[0];
+    const float dist2 = mParam.mX * mParam.mX + mParam.mP.mY * mParam.mP.mY;
     const float dist1r2 = dist2 * r1 * r1;
     if (dist1r2 < 4) {
       const float alpha = CAMath::ACos(1 - 0.5f * dist1r2); // Angle of a circle, such that |(cosa, sina) - (1,0)| == dist
-      const float beta = CAMath::ATan2(mParam.mP[0], mParam.mX);
-      const int32_t comp = mParam.mP[2] > CAMath::Sin(beta);
+      const float beta = CAMath::ATan2(mParam.mP.mY, mParam.mX);
+      const int32_t comp = mParam.mP.mSinPhi > CAMath::Sin(beta);
       const float sinab = CAMath::Sin((comp ? 0.5f : -0.5f) * alpha + beta); // Angle of circle through origin and track position, to be compared to Snp
-      const float res = CAMath::Abs(sinab - mParam.mP[2]);
+      const float res = CAMath::Abs(sinab - mParam.mP.mSinPhi);
 
       if (res < 0.2f) {
         const float r = 1.f / r1;
         const float dS = alpha * r;
-        float z0 = dS * mParam.mP[3];
+        float z0 = dS * mParam.mP.mDzDs;
         if (CAMath::Abs(z0) > GPUTPCGeometry::TPCLength()) {
           z0 = z0 > 0 ? GPUTPCGeometry::TPCLength() : -GPUTPCGeometry::TPCLength();
         }
-        deltaZ = mParam.mP[1] - z0;
+        deltaZ = mParam.mP.mZ - z0;
         beamlineReached = true;
       }
     }
@@ -806,7 +804,7 @@ GPUd() void GPUTPCTrackParamSkeleton<F>::ShiftZ(float z1, float z2, float x1, fl
     deltaZ = basez - refZ - mParam.mZOffset;
   }
   mParam.mZOffset += deltaZ;
-  mParam.mP[1] -= deltaZ;
+  mParam.mP.mZ -= deltaZ;
   deltaZ = 0;
   float zMax = CAMath::Max(z1, z2);
   float zMin = CAMath::Min(z1, z2);
@@ -821,7 +819,7 @@ GPUd() void GPUTPCTrackParamSkeleton<F>::ShiftZ(float z1, float z2, float x1, fl
     deltaZ = zMin - mParam.mZOffset;
   }
   mParam.mZOffset += deltaZ;
-  mParam.mP[1] -= deltaZ;
+  mParam.mP.mZ -= deltaZ;
 }
 
 #if !defined(GPUCA_GPUCODE)
@@ -842,9 +840,9 @@ GPUd() void GPUTPCTrackParamSkeleton<F>::Print() const
 template <template <class> class F>
 GPUd() int32_t GPUTPCTrackParamSkeleton<F>::GetPropagatedYZ(float bz, float x, float& projY, float& projZ) const
 {
-  float k = mParam.mP[4] * bz;
+  float k = mParam.mP.mQPt * bz;
   float dx = x - mParam.mX;
-  float ey = mParam.mP[2];
+  float ey = mParam.mP.mSinPhi;
   float ex = CAMath::Sqrt(1 - ey * ey);
   if (SignCosPhi() < 0) {
     ex = -ex;
@@ -871,9 +869,9 @@ GPUd() int32_t GPUTPCTrackParamSkeleton<F>::GetPropagatedYZ(float bz, float x, f
     const float k4 = 3.f / 40.f;
     dS = dl + dl * a * (k2 + a * (k4));
   }
-  float dz = dS * mParam.mP[3];
-  projY = mParam.mP[0] + dy;
-  projZ = mParam.mP[1] + dz;
+  float dz = dS * mParam.mP.mDzDs;
+  projY = mParam.mP.mY + dy;
+  projZ = mParam.mP.mZ + dz;
   return 1;
 }
 

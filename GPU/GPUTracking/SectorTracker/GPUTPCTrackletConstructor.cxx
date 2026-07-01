@@ -43,9 +43,7 @@ GPUd() bool GPUTPCTrackletConstructor::CheckCov(MemLayout::wrapper<GPUTPCTrackPa
   for (int32_t i = 0; i < 15; i++) {
     ok = ok && CAMath::Finite(c[i]);
   }
-  for (int32_t i = 0; i < 5; i++) {
-    ok = ok && CAMath::Finite(tParam.Par()[i]);
-  }
+  ok = ok && CAMath::Finite(tParam.GetY()) && CAMath::Finite(tParam.GetZ()) && CAMath::Finite(tParam.GetSinPhi()) && CAMath::Finite(tParam.GetDzDs()) && CAMath::Finite(tParam.GetQPt());
   ok = ok && (tParam.X() > 50);
   if (c[0] <= 0 || c[2] <= 0 || c[5] <= 0 || c[9] <= 0 || c[14] <= 0) {
     ok = 0;
