@@ -24,14 +24,106 @@ namespace o2::gpu
 namespace detail
 {
 
-struct GPUTPCCovariance
+template <template <class> class F>
+struct GPUTPCCovarianceSkeleton
 {
-  float data[15];
-  constexpr operator float*() { return data; }
-  constexpr operator const float*() const { return data; }
-  constexpr float& operator[](int32_t i) { return data[i]; }
-  constexpr const float& operator[](int32_t i) const { return data[i]; }
+  MEMLAYOUT_APPLY_UNARY(c00, c10, c11, c20, c21, c22, c30, c31, c32, c33, c40, c41, c42, c43, c44)
+  MEMLAYOUT_APPLY_BINARY(GPUTPCCovarianceSkeleton, MEMLAYOUT_EXPAND(c00), MEMLAYOUT_EXPAND(c10), MEMLAYOUT_EXPAND(c11), MEMLAYOUT_EXPAND(c20), MEMLAYOUT_EXPAND(c21), MEMLAYOUT_EXPAND(c22), MEMLAYOUT_EXPAND(c30), MEMLAYOUT_EXPAND(c31), MEMLAYOUT_EXPAND(c32), MEMLAYOUT_EXPAND(c33), MEMLAYOUT_EXPAND(c40), MEMLAYOUT_EXPAND(c41), MEMLAYOUT_EXPAND(c42), MEMLAYOUT_EXPAND(c43), MEMLAYOUT_EXPAND(c44))
+  F<float> c00, c10, c11, c20, c21, c22, c30, c31, c32, c33, c40, c41, c42, c43, c44;
+  constexpr float& operator[](int32_t i) {
+    switch (i) {
+      case 0: return c00;
+      case 1: return c10;
+      case 2: return c11;
+      case 3: return c20;
+      case 4: return c21;
+      case 5: return c22;
+      case 6: return c30;
+      case 7: return c31;
+      case 8: return c32;
+      case 9: return c33;
+      case 10: return c40;
+      case 11: return c41;
+      case 12: return c42;
+      case 13: return c43;
+    }
+    return c44;
+  }
+  constexpr const float& operator[](int32_t i) const {
+    switch (i) {
+      case 0: return c00;
+      case 1: return c10;
+      case 2: return c11;
+      case 3: return c20;
+      case 4: return c21;
+      case 5: return c22;
+      case 6: return c30;
+      case 7: return c31;
+      case 8: return c32;
+      case 9: return c33;
+      case 10: return c40;
+      case 11: return c41;
+      case 12: return c42;
+      case 13: return c43;
+    }
+    return c44;
+  }
 };
+
+template <>
+struct GPUTPCCovarianceSkeleton<MemLayout::const_reference>
+{
+  MEMLAYOUT_APPLY_UNARY(c00, c10, c11, c20, c21, c22, c30, c31, c32, c33, c40, c41, c42, c43, c44)
+  MEMLAYOUT_APPLY_BINARY(GPUTPCCovarianceSkeleton, MEMLAYOUT_EXPAND(c00), MEMLAYOUT_EXPAND(c10), MEMLAYOUT_EXPAND(c11), MEMLAYOUT_EXPAND(c20), MEMLAYOUT_EXPAND(c21), MEMLAYOUT_EXPAND(c22), MEMLAYOUT_EXPAND(c30), MEMLAYOUT_EXPAND(c31), MEMLAYOUT_EXPAND(c32), MEMLAYOUT_EXPAND(c33), MEMLAYOUT_EXPAND(c40), MEMLAYOUT_EXPAND(c41), MEMLAYOUT_EXPAND(c42), MEMLAYOUT_EXPAND(c43), MEMLAYOUT_EXPAND(c44))
+  MemLayout::const_reference<float> c00, c10, c11, c20, c21, c22, c30, c31, c32, c33, c40, c41, c42, c43, c44;
+  constexpr const float& operator[](int32_t i) const {
+    switch (i) {
+      case 0: return c00;
+      case 1: return c10;
+      case 2: return c11;
+      case 3: return c20;
+      case 4: return c21;
+      case 5: return c22;
+      case 6: return c30;
+      case 7: return c31;
+      case 8: return c32;
+      case 9: return c33;
+      case 10: return c40;
+      case 11: return c41;
+      case 12: return c42;
+      case 13: return c43;
+    }
+    return c44;
+  }
+};
+
+template <>
+struct GPUTPCCovarianceSkeleton<MemLayout::const_reference_restrict>
+{
+  MEMLAYOUT_APPLY_UNARY(c00, c10, c11, c20, c21, c22, c30, c31, c32, c33, c40, c41, c42, c43, c44)
+  MEMLAYOUT_APPLY_BINARY(GPUTPCCovarianceSkeleton, MEMLAYOUT_EXPAND(c00), MEMLAYOUT_EXPAND(c10), MEMLAYOUT_EXPAND(c11), MEMLAYOUT_EXPAND(c20), MEMLAYOUT_EXPAND(c21), MEMLAYOUT_EXPAND(c22), MEMLAYOUT_EXPAND(c30), MEMLAYOUT_EXPAND(c31), MEMLAYOUT_EXPAND(c32), MEMLAYOUT_EXPAND(c33), MEMLAYOUT_EXPAND(c40), MEMLAYOUT_EXPAND(c41), MEMLAYOUT_EXPAND(c42), MEMLAYOUT_EXPAND(c43), MEMLAYOUT_EXPAND(c44))
+  MemLayout::const_reference_restrict<float> c00, c10, c11, c20, c21, c22, c30, c31, c32, c33, c40, c41, c42, c43, c44;
+  constexpr const float& operator[](int32_t i) const { return *(&c00 + i); }
+};
+
+// Needed for sorting
+constexpr void swap(GPUTPCCovarianceSkeleton<MemLayout::reference> a, GPUTPCCovarianceSkeleton<MemLayout::reference> b) {
+  std::swap(a.c00, b.c00);
+  std::swap(a.c10, b.c10);
+  std::swap(a.c11, b.c11);
+  std::swap(a.c20, b.c20);
+  std::swap(a.c21, b.c21);
+  std::swap(a.c22, b.c22);
+  std::swap(a.c30, b.c30);
+  std::swap(a.c31, b.c31);
+  std::swap(a.c32, b.c32);
+  std::swap(a.c33, b.c33);
+  std::swap(a.c40, b.c40);
+  std::swap(a.c41, b.c41);
+  std::swap(a.c42, b.c42);
+  std::swap(a.c43, b.c43);
+  std::swap(a.c44, b.c44);
+}
 
 template <template <class> class F>
 struct GPUTPCParameterSkeleton
@@ -104,7 +196,7 @@ struct GPUTPCBaseTrackParamSkeleton
   // This is neccessary for performance reasons!!!
   // Changes to Elements of this class therefore must also be applied to TrackletConstructor!!!
   F<float> mX;       // x position
-  F<detail::GPUTPCCovariance> mC;  // the covariance matrix for Y,Z,SinPhi,..
+  MemLayout::wrapper<detail::GPUTPCCovarianceSkeleton, F> mC;  // the covariance matrix for Y,Z,SinPhi,..
   F<float> mZOffset; // z offset
   MemLayout::wrapper<detail::GPUTPCParameterSkeleton, F> mP;  // 'active' track parameters: Y, Z, SinPhi, DzDs, q/Pt
 };
@@ -112,7 +204,7 @@ struct GPUTPCBaseTrackParamSkeleton
 // Needed for sorting
 constexpr void swap(GPUTPCBaseTrackParamSkeleton<MemLayout::reference> a, GPUTPCBaseTrackParamSkeleton<MemLayout::reference> b) {
     std::swap(a.mX, b.mX);
-    std::swap(a.mC, b.mC);
+    swap(a.mC, b.mC);
     std::swap(a.mZOffset, b.mZOffset);
     swap(a.mP, b.mP);
 }

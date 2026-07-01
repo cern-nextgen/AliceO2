@@ -82,7 +82,8 @@ class GPUTPCTrackParamSkeleton
   GPUd() float GetKappa(float Bz) const { return mParam.GetKappa(Bz); }
   GPUd() float GetCosPhi() const { return mSignCosPhi * CAMath::Sqrt(1 - SinPhi() * SinPhi()); }
 
-  GPUhd() const float* Cov() const { return mParam.Cov(); }
+  GPUhd() MemLayout::wrapper<detail::GPUTPCCovarianceSkeleton, MemLayout::const_reference> Cov() const { return mParam.mC; }
+  //GPUhd() const float* Cov() const { return mParam.Cov(); }
   GPUd() float GetCov(int32_t i) const { return mParam.GetCov(i); }
   GPUhd() void SetCov(int32_t i, float v) { mParam.SetCov(i, v); }
 
