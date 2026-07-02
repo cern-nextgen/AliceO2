@@ -14,8 +14,8 @@
 #include "Framework/DataRef.h"
 #include <functional>
 
-extern template class std::function<o2::framework::DataRef(size_t)>;
-extern template class std::function<o2::framework::DataRef(size_t, size_t)>;
+extern template class std::function<o2::framework::DataRef(size_t, o2::framework::DataRefIndices)>;
+extern template class std::function<o2::framework::DataRefIndices(size_t, o2::framework::DataRefIndices)>;
 
 namespace o2::framework
 {
@@ -32,36 +32,47 @@ class InputSpan
   InputSpan(InputSpan const&) = delete;
   InputSpan(InputSpan&&) = default;
 
-  /// @a getter is the mapping between an element of the span referred by
-  /// index and the buffer associated.
-  /// @a size is the number of elements in the span.
-  InputSpan(std::function<DataRef(size_t)> getter, size_t size);
+  /// Navigate the message store via the DataRefIndices protocol.
+  /// get_next_pair (DataModelViews.h) provides O(1) sequential advancement for nextIndicesGetter.
+  InputSpan(std::function<size_t(size_t)> nofPartsGetter,
+            std::function<int(size_t)> refCountGetter,
+            std::function<DataRef(size_t, DataRefIndices)> indicesGetter,
+            std::function<DataRefIndices(size_t, DataRefIndices)> nextIndicesGetter,
+            size_t size);
 
-  /// @a getter is the mapping between an element of the span referred by
-  /// index and the buffer associated.
-  /// @a size is the number of elements in the span.
-  InputSpan(std::function<DataRef(size_t, size_t)> getter, size_t size);
-
-  /// @a getter is the mapping between an element of the span referred by
-  /// index and the buffer associated.
-  /// @nofPartsGetter is the getter for the number of parts associated with an index
-  /// @a size is the number of elements in the span.
-  InputSpan(std::function<DataRef(size_t, size_t)> getter, std::function<size_t(size_t)> nofPartsGetter, std::function<int(size_t)> refCountGetter, size_t size);
-
-  /// @a i-th element of the InputSpan
+  /// @a i-th element of the InputSpan (O(partidx) sequential scan via indices protocol)
   [[nodiscard]] DataRef get(size_t i, size_t partidx = 0) const
   {
-    return mGetter(i, partidx);
+    DataRefIndices idx{0, 1};
+    for (size_t p = 0; p < partidx; ++p) {
+      idx = mNextIndicesGetter(i, idx);
+    }
+    return mIndicesGetter(i, idx);
   }
+
+  /// Return the DataRef for the part described by @a indices in slot @a slotIdx in O(1).
+  [[nodiscard]] DataRef getAtIndices(size_t slotIdx, DataRefIndices indices) const
+  {
+    return mIndicesGetter(slotIdx, indices);
+  }
+
+  /// Advance from @a current to the indices of the next part in slot @a slotIdx in O(1).
+  [[nodiscard]] DataRefIndices nextIndices(size_t slotIdx, DataRefIndices current) const
+  {
+    return mNextIndicesGetter(slotIdx, current);
+  }
+
+  // --- slot-level Iterator protocol (headerIdx doubles as slot position) ---
+  [[nodiscard]] DataRefIndices initialIndices() const { return {0, 0}; }
+  [[nodiscard]] DataRefIndices endIndices() const { return {mSize, 0}; }
+  [[nodiscard]] DataRef getAtIndices(DataRefIndices indices) const { return mIndicesGetter(indices.headerIdx, {0, 1}); }
+  [[nodiscard]] DataRefIndices nextIndices(DataRefIndices current) const { return {current.headerIdx + 1, 0}; }
 
   /// @a number of parts in the i-th element of the InputSpan
   [[nodiscard]] size_t getNofParts(size_t i) const
   {
     if (i >= mSize) {
       return 0;
-    }
-    if (!mNofPartsGetter) {
-      return 1;
     }
     return mNofPartsGetter(i);
   }
@@ -94,7 +105,8 @@ class InputSpan
     return get(i).payload;
   }
 
-  /// an iterator class working on position within the a parent class
+  /// An iterator over the elements of a parent container using the DataRefIndices protocol.
+  /// ParentT must provide: initialIndices(), getAtIndices(DataRefIndices), nextIndices(DataRefIndices).
   template <typename ParentT, typename T>
   class Iterator
   {
@@ -110,23 +122,23 @@ class InputSpan
 
     Iterator() = delete;
 
-    Iterator(ParentType const* parent, size_t position = 0, size_t size = 0)
-      : mPosition(position), mSize(size > position ? size : position), mParent(parent), mElement{}
+    Iterator(ParentType const* parent, bool isEnd = false)
+      : mParent(parent),
+        mCurrentIndices(isEnd ? parent->endIndices() : parent->initialIndices()),
+        mElement{}
     {
-      if (mPosition < mSize) {
-        mElement = mParent->get(mPosition);
+      if (mCurrentIndices != mParent->endIndices()) {
+        mElement = mParent->getAtIndices(mCurrentIndices);
       }
     }
-
-    ~Iterator() = default;
 
     // prefix increment
     SelfType& operator++()
     {
-      if (mPosition < mSize && ++mPosition < mSize) {
-        mElement = mParent->get(mPosition);
+      mCurrentIndices = mParent->nextIndices(mCurrentIndices);
+      if (mCurrentIndices != mParent->endIndices()) {
+        mElement = mParent->getAtIndices(mCurrentIndices);
       } else {
-        // reset the element to the default value of the type
         mElement = ElementType{};
       }
       return *this;
@@ -145,16 +157,14 @@ class InputSpan
       return mElement;
     }
 
-    // comparison
     bool operator==(const SelfType& rh) const
     {
-      return mPosition == rh.mPosition;
+      return mCurrentIndices == rh.mCurrentIndices;
     }
 
-    // comparison
-    bool operator!=(const SelfType& rh) const
+    auto operator<=>(const SelfType& rh) const
     {
-      return mPosition != rh.mPosition;
+      return mCurrentIndices <=> rh.mCurrentIndices;
     }
 
     // return pointer to parent instance
@@ -163,92 +173,63 @@ class InputSpan
       return mParent;
     }
 
-    // return current position
+    // return current position (headerIdx serves as the slot index for slot-level iteration)
     [[nodiscard]] size_t position() const
     {
-      return mPosition;
+      return mCurrentIndices.headerIdx;
+    }
+
+    // return an iterable range over all parts in the current slot
+    // only available for slot-level iterators whose parent has parts(size_t)
+    [[nodiscard]] auto parts() const
+      requires requires(ParentType const* p, size_t i) { p->parts(i); }
+    {
+      return mParent->parts(mCurrentIndices.headerIdx);
     }
 
    private:
-    size_t mPosition;
-    size_t mSize;
     ParentType const* mParent;
+    DataRefIndices mCurrentIndices;
     ElementType mElement;
   };
 
-  /// @class InputSpanIterator
-  /// An iterator over the input slots
-  /// It supports an iterator interface to access the parts in the slot
-  template <typename T>
-  class InputSpanIterator : public Iterator<InputSpan, T>
-  {
-   public:
-    using SelfType = InputSpanIterator;
-    using BaseType = Iterator<InputSpan, T>;
-    using value_type = typename BaseType::value_type;
-    using reference = typename BaseType::reference;
-    using pointer = typename BaseType::pointer;
-    using ElementType = typename std::remove_const<value_type>::type;
-    using iterator = Iterator<SelfType, T>;
-    using const_iterator = Iterator<SelfType, const T>;
+  /// A range over the parts of a single slot, supporting range-based for.
+  struct PartRange {
+    InputSpan const* span;
+    size_t slot;
 
-    InputSpanIterator(InputSpan const* parent, size_t position = 0, size_t size = 0)
-      : BaseType(parent, position, size)
-    {
-    }
+    [[nodiscard]] DataRefIndices initialIndices() const { return {0, 1}; }
+    [[nodiscard]] DataRefIndices endIndices() const { return {size_t(-1), size_t(-1)}; }
+    [[nodiscard]] DataRef getAtIndices(DataRefIndices idx) const { return span->getAtIndices(slot, idx); }
+    [[nodiscard]] DataRefIndices nextIndices(DataRefIndices idx) const { return span->nextIndices(slot, idx); }
+    [[nodiscard]] size_t size() const { return span->getNofParts(slot); }
 
-    /// Get element at {slotindex, partindex}
-    [[nodiscard]] ElementType get(size_t pos) const
-    {
-      return this->parent()->get(this->position(), pos);
-    }
-
-    /// Check if slot is valid, index of part is not used
-    [[nodiscard]] bool isValid(size_t = 0) const
-    {
-      if (this->position() < this->parent()->size()) {
-        return this->parent()->isValid(this->position());
-      }
-      return false;
-    }
-
-    /// Get number of parts in input slot
-    [[nodiscard]] size_t size() const
-    {
-      return this->parent()->getNofParts(this->position());
-    }
-
-    // iterator for the part access
-    [[nodiscard]] const_iterator begin() const
-    {
-      return const_iterator(this, 0, size());
-    }
-
-    [[nodiscard]] const_iterator end() const
-    {
-      return const_iterator(this, size());
-    }
+    [[nodiscard]] Iterator<PartRange, const DataRef> begin() const { return {this, size() == 0}; }
+    [[nodiscard]] Iterator<PartRange, const DataRef> end() const { return {this, true}; }
   };
 
-  using iterator = InputSpanIterator<DataRef>;
-  using const_iterator = InputSpanIterator<const DataRef>;
+  /// Return an iterable range over all parts in slot @a i.
+  [[nodiscard]] PartRange parts(size_t i) const { return {this, i}; }
+
+  using const_iterator = Iterator<InputSpan, const DataRef>;
+  using iterator = const_iterator;
 
   // supporting read-only access and returning const_iterator
   [[nodiscard]] const_iterator begin() const
   {
-    return {this, 0, size()};
+    return {this, false};
   }
 
-  // supporting read-only access and returning const_iterator
   [[nodiscard]] const_iterator end() const
   {
-    return {this, size()};
+    return {this, true};
   }
 
  private:
-  std::function<DataRef(size_t, size_t)> mGetter;
   std::function<size_t(size_t)> mNofPartsGetter;
   std::function<int(size_t)> mRefCountGetter;
+  std::function<DataRef(size_t, DataRefIndices)> mIndicesGetter;
+  std::function<DataRefIndices(size_t, DataRefIndices)> mNextIndicesGetter;
   size_t mSize;
 };
 

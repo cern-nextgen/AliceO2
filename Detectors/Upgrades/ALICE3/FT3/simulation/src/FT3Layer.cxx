@@ -17,6 +17,7 @@
 #include "FT3Simulation/FT3Layer.h"
 #include "FT3Base/GeometryTGeo.h"
 #include "FT3Base/FT3BaseParam.h"
+#include "FT3Simulation/FT3ModuleConstants.h"
 
 #include <TGeoManager.h>        // for TGeoManager, gGeoManager
 #include <TGeoMatrix.h>         // for TGeoCombiTrans, TGeoRotation, etc
@@ -226,6 +227,29 @@ void FT3Layer::createSeparationLayer(TGeoVolume* motherVolume, const std::string
   motherVolume->AddNode(carbonFiberLayerVol2, 1, new TGeoTranslation(0, 0, 0 + zSeparation));
 }
 
+void FT3Layer::createReferenceCircles(TGeoVolume* motherVolume, const std::string& name)
+{
+
+  // create reference circles at the inner and outer radius of the layer, for visualization purposes
+  TGeoTube* innerCircle = new TGeoTube(mInnerRadius - 0.1, mInnerRadius + 0.1, 0.01);
+  TGeoTube* outerCircle = new TGeoTube(mOuterRadius - 0.1, mOuterRadius + 0.1, 0.01);
+  TGeoTube* outerCircleEdge = new TGeoTube(mOuterRadius + 3.3, mOuterRadius + 3.5, 0.01);
+
+  TGeoVolume* innerCircleVol = new TGeoVolume((mLayerName + "_InnerCircle").c_str(), innerCircle, gGeoManager->GetMedium("FT3_AIR$"));
+  TGeoVolume* outerCircleVol = new TGeoVolume((mLayerName + "_OuterCircle").c_str(), outerCircle, gGeoManager->GetMedium("FT3_AIR$"));
+  TGeoVolume* outerCircleEdgeVol = new TGeoVolume((mLayerName + "_OuterCircleEdge").c_str(), outerCircleEdge, gGeoManager->GetMedium("FT3_AIR$"));
+
+  innerCircleVol->SetLineColor(kRed);
+  outerCircleVol->SetLineColor(kBlue);
+  outerCircleEdgeVol->SetLineColor(kBlack);
+
+  double z_position = mDirection ? 0.5 : -0.5;
+
+  motherVolume->AddNode(innerCircleVol, 1, new TGeoTranslation(0, 0, z_position));
+  motherVolume->AddNode(outerCircleVol, 1, new TGeoTranslation(0, 0, z_position));
+  motherVolume->AddNode(outerCircleEdgeVol, 1, new TGeoTranslation(0, 0, z_position));
+}
+
 void FT3Layer::createLayer(TGeoVolume* motherVolume)
 {
   auto& ft3Params = FT3BaseParam::Instance();
@@ -234,10 +258,12 @@ void FT3Layer::createLayer(TGeoVolume* motherVolume)
     LOG(fatal) << "Invalid layer number " << mLayerNumber << " for FT3 layer.";
   }
 
-  LOG(info) << "FT3: ft3Params.layoutFT3 = " << ft3Params.layoutFT3;
+  LOG(info) << "FT3: ft3Params.layoutFT3 = " << ft3Params.layoutFT3
+            << " Creating Layer " << mLayerNumber << " at z=" << mZ
+            << " with direction " << mDirection;
 
   // ### options for ML and OT disk layout
-  if (ft3Params.layoutFT3 == kTrapezoidal || (mIsMiddleLayer && ft3Params.layoutFT3 == kSegmented)) {
+  if (ft3Params.layoutFT3 == kTrapezoidal /*|| (mIsMiddleLayer && ft3Params.layoutFT3 == kSegmented)*/) {
     // trapezoidal ML+OT disks
     // (disks with TGeoTubes doesn'n work properly in ACTS, due to polar coordinates on TGeoTube sides)
 
@@ -381,7 +407,8 @@ void FT3Layer::createLayer(TGeoVolume* motherVolume)
 
     LOG(info) << "Inserting " << layerVol->GetName() << " inside " << motherVolume->GetName();
     motherVolume->AddNode(layerVol, 1, FwdDiskCombiTrans);
-  } else if (ft3Params.layoutFT3 == kSegmented) {
+  } else if (ft3Params.layoutFT3 == kSegmented ||
+             (ft3Params.layoutFT3 == kSegmentedStaveOTOnly && mIsMiddleLayer)) {
     FT3Module module;
 
     // layer structure
@@ -390,22 +417,73 @@ void FT3Layer::createLayer(TGeoVolume* motherVolume)
     std::string separationLayerName = "FT3SeparationLayer" + std::to_string(mDirection) + std::to_string(mLayerNumber);
 
     TGeoMedium* medAir = gGeoManager->GetMedium("FT3_AIR$");
-    TGeoTube* layer = new TGeoTube(mInnerRadius, mOuterRadius, 12 * mChipThickness / 2); // additional "thickness factor" is to avoid sub-volumes crossing the mother layer
-    TGeoVolume* layerVol = new TGeoVolume(mLayerName.c_str(), layer, medAir);
+    TGeoVolume* layerVol = nullptr;
+    // Add a little additional room in radius
+    TGeoTube* layer = new TGeoTube(mInnerRadius - 0.1, mOuterRadius + 0.1, 1.5);
+    layerVol = new TGeoVolume(mLayerName.c_str(), layer, medAir);
     layerVol->SetLineColor(kYellow + 2);
-
     // createSeparationLayer_waterCooling(motherVolume, separationLayerName);
     createSeparationLayer(layerVol, separationLayerName);
-
-    // create disk faces
     module.createModule(0, mLayerNumber, mDirection, mInnerRadius, mOuterRadius, 0., "front", "rectangular", layerVol);
     module.createModule(0, mLayerNumber, mDirection, mInnerRadius, mOuterRadius, 0., "back", "rectangular", layerVol);
 
     // Finally put everything in the mother volume
     auto* FwdDiskRotation = new TGeoRotation("FwdDiskRotation", 0, 0, 180);
-    auto* FwdDiskCombiTrans = new TGeoCombiTrans(0, 0, mZ, FwdDiskRotation);
+    // need to shift outwards always, so + forwards and - backwards
+    auto* FwdDiskCombiTrans = new TGeoCombiTrans(0, 0, mZ + 0, FwdDiskRotation);
 
-    LOG(info) << "Inserting " << layerVol->GetName() << " inside " << motherVolume->GetName();
+    LOG(info) << "Inserting " << layerVol->GetName() << " (Rmin=" << mInnerRadius << ", Rmax=" << mOuterRadius << ", z=" << mZ << "cm) inside " << motherVolume->GetName();
+    motherVolume->AddNode(layerVol, 1, FwdDiskCombiTrans);
+  } else if (ft3Params.layoutFT3 == kSegmentedStave ||
+             ft3Params.layoutFT3 == kSegmentedStaveOTOnly) {
+    FT3Module module;
+
+    // layer structure
+    std::string frontLayerName = o2::ft3::GeometryTGeo::getFT3LayerPattern() + std::to_string(mDirection) + std::to_string(mLayerNumber) + "_Front";
+    std::string backLayerName = o2::ft3::GeometryTGeo::getFT3LayerPattern() + std::to_string(mDirection) + std::to_string(mLayerNumber) + "_Back";
+    std::string separationLayerName = "FT3SeparationLayer" + std::to_string(mDirection) + std::to_string(mLayerNumber);
+
+    TGeoMedium* medAir = gGeoManager->GetMedium("FT3_AIR$");
+    TGeoVolume* layerVol = nullptr;
+
+    // set up stave config, differs between ML and OT disks
+    const Constants::StaveConfig& staveConfig = Constants::getStaveConfig(mIsMiddleLayer);
+
+    // need a thicker air layer to encompass the staves (4.5cm high, 1.2cm offsets)
+    // stave face is at z=0 (or +-z_offset_stave), meaning that volumes are at
+    // ~-+1cm < z < ~+-6cm, the +- referring forward/backward discs
+    double z_layer_thickness = // need to shift internally with this
+      o2::ft3::ModuleConstants::staveTriangleHeight +
+      o2::ft3::ModuleConstants::z_offsetStave(staveConfig.x_midpoint_spacing) +
+      o2::ft3::ModuleConstants::siliconThickness +
+      o2::ft3::ModuleConstants::copperThickness +
+      o2::ft3::ModuleConstants::kaptonThickness +
+      o2::ft3::ModuleConstants::epoxyThickness * 2 +
+      0.5; // add some extra room to ensure all volumes are encapsulated
+
+    // shift stave volumes into layer volume, since nominal z_{stave face} = 0
+    double z_local_offset = z_layer_thickness / 2.0;
+    // ensure staves fully encapsulated in the layer volume,
+    // but don't cross out of max nominal radii of 38.5cm & 71.5cm respectively (3.5cm tolerance)
+    TGeoTube* layer = new TGeoTube(mInnerRadius - 0.2, mOuterRadius + 3.49, z_layer_thickness / 2);
+    layerVol = new TGeoVolume(mLayerName.c_str(), layer, medAir);
+
+    if (ft3Params.drawReferenceCircles) {
+      std::string referenceCirclesName = "ReferenceCircles_Dir" + std::to_string(mDirection) + "_Layer" + std::to_string(mLayerNumber);
+      createReferenceCircles(layerVol, referenceCirclesName); // for visualization purposes
+    }
+
+    // need the -0.5 added to local offset to ensure all sensor modules are inside the layer
+    module.createModule_staveGeo(0., mLayerNumber, mDirection, mInnerRadius,
+                                 mOuterRadius, z_local_offset, staveConfig, layerVol);
+    // Finally put everything in the mother volume
+    auto* FwdDiskRotation = new TGeoRotation("FwdDiskRotation", 0, 0, 180);
+    // need to shift outwards always, so + forwards and - backwards
+    double z_offset_directional = mDirection ? z_local_offset : -z_local_offset;
+    auto* FwdDiskCombiTrans = new TGeoCombiTrans(0, 0, mZ + z_offset_directional, FwdDiskRotation);
+
+    LOG(info) << "Inserting " << layerVol->GetName() << " (Rmin=" << mInnerRadius << ", Rmax=" << mOuterRadius << ", z=" << mZ << "cm, segmented disk with staves) inside " << motherVolume->GetName();
+
     motherVolume->AddNode(layerVol, 1, FwdDiskCombiTrans);
   } else {
     LOG(fatal) << "Unknown FT3 layout option: " << static_cast<int>(ft3Params.layoutFT3);

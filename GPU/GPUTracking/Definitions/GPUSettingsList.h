@@ -112,6 +112,10 @@ AddOptionRTC(trackletMinSharedNormFactor, float, 0.f, "", 0, "Max shared defined
 AddOptionRTC(maxTimeBinAboveThresholdIn1000Bin, uint16_t, 500, "", 0, "Except pad from cluster finding if total number of charges in a fragment is above this baseline (disable = 0)")
 AddOptionRTC(maxConsecTimeBinAboveThreshold, uint16_t, 200, "", 0, "Except pad from cluster finding if number of consecutive charges in a fragment is above this baseline (disable = 0)")
 AddOptionRTC(noisyPadSaturationThreshold, uint16_t, 700, "", 0, "Threshold where a timebin is considered saturated, disabling the noisy pad check for that pad")
+AddOptionRTC(hipTailFilter, uint8_t, 0, "", 0, "Enable Highly Ionising Particle tail filter in CheckPadBaseline (0 = disable, 1 = filter tails)")
+AddOptionRTC(hipTailFilterMinimum, uint16_t, 1024, "", 0, "Thread signal above this minimum as saturated")
+AddOptionRTC(hipTailFilterThreshold, uint16_t, 100, "", 0, "Threshold that must be exceeded for a timebin to be counted towards Highly Ionising Particle tail")
+AddOptionRTC(hipTailFilterAlpha, float, 0.5f, "", 0, "Smoothing factor for the exponential Highly Ionising Particle tail filter")
 AddOptionRTC(occupancyMapTimeBins, uint16_t, 16, "", 0, "Number of timebins per histogram bin of occupancy map (0 = disable occupancy map)")
 AddOptionRTC(occupancyMapTimeBinsAverage, uint16_t, 0, "", 0, "Number of timebins +/- to use for the averaging")
 AddOptionRTC(trackFitCovLimit, uint16_t, 1000, "", 0, "Abort fit when y/z cov exceed the limit")
@@ -233,7 +237,7 @@ BeginSubConfig(GPUSettingsProcessingRTCtechnical, rtctech, configStandalone.proc
 AddOption(runTest, int32_t, 0, "", 0, "Do not run the actual benchmark, but just test RTC compilation (1 full test, 2 test only compilation)")
 AddOption(cacheMutex, bool, true, "", 0, "Use a file lock to serialize access to the cache folder")
 AddOption(ignoreCacheValid, bool, false, "", 0, "If set, allows to use RTC cached code files even if they are not valid for the current source code / parameters")
-AddOption(printLaunchBounds, bool, false, "", 0, "Print launch bounds used for RTC code as debugging option")
+AddOption(printLaunchBounds, int32_t, false, "", 0, "Print launch bounds used for RTC code as debugging option, 2 for exit after printing", def(1))
 AddOption(allowOptimizedSlaveReconstruction, bool, false, "", 0, "Allow RTC with slave GPUReconstruction instances with optConstexpr and optSpecialcode")
 AddOption(cacheFolder, std::string, "./rtccache/", "", 0, "Folder in which the cache file is stored")
 AddOption(prependCommand, std::string, "", "", 0, "Prepend RTC compilation commands by this string")
@@ -297,7 +301,7 @@ AddOption(nnCCDBInteractionRate, std::string, "500", "", 0, "Distinguishes betwe
 AddHelp("help", 'h')
 EndConfig()
 
-// Settings steering the processing of NN Clusterization
+// Scaling factors for gpu buffer size estimation
 BeginSubConfig(GPUSettingsProcessingScaling, scaling, configStandalone.proc, "SCALING", 0, "Processing settings for neural network clusterizer", proc_scaling)
 AddOption(offset, float, 1000., "", 0, "Scaling Factor: offset")
 AddOption(hitOffset, float, 20000, "", 0, "Scaling Factor: hitOffset")
@@ -315,6 +319,9 @@ AddOption(tpcMergedTrackPerSectorTrack, float, 1.0, "", 0, "Scaling Factor: tpcM
 AddOption(tpcMergedTrackHitPerSectorHit, float, 1.1, "", 0, "Scaling Factor: tpcMergedTrackHitPerSectorHit")
 AddOptionArray(tpcCompressedUnattachedHitsBase1024, int32_t, 3, (900, 900, 500), "", 0, "Scaling Factor: tpcCompressedUnattachedHitsBase1024")
 AddOption(conservativeMemoryEstimate, bool, false, "", 0, "Use some more conservative defaults for larger buffers during TPC processing")
+AddOption(tpcDecodingClusterRatioFactor1, float, 1.5, "", 0, "Scaling Factor: for first margin of dynamic buffer allocation for attached clusters in TPC Decoding")
+AddOption(tpcDecodingClusterRatioFactor2, float, 3.5, "", 0, "Scaling Factor: for second margin of dynamic buffer allocation for attached clusters in TPC Decoding")
+AddOption(tpcDecodingSafetyBuffer, uint16_t, 1000, "", 0, "Scaling Factor: safety cluster buffer to add to dynamic buffer allocation for attached clusters in TPC Decoding")
 AddHelp("help", 'h')
 EndConfig()
 
@@ -329,13 +336,14 @@ AddOption(debugLevel, int32_t, -1, "debug", 'd', "Set debug level (-2 = silent, 
 AddOption(allocDebugLevel, int32_t, 0, "allocDebug", 0, "Some debug output for memory allocations (without messing with normal debug level)")
 AddOption(debugMask, uint32_t, (1 << 18) - 1, "debugMask", 0, "Mask for debug output dumps to file")
 AddOption(debugLogSuffix, std::string, "", "debugSuffix", 0, "Suffix for debug log files with --debug 6")
+AddOption(debugFileHexFloat, int32_t, -1, "", 0, "Use hex format to print floats to debug dump file")
 AddOption(debugCSV, std::string, "", "", 0, "CSV filename to append the benchmark results. Verbosity determined by parameter --debug.")
 AddOption(debugMarkdown, bool, false, "", 0, "Print the results of standlaone benchmarks in markdown format")
 AddOption(serializeGPU, int8_t, 0, "", 0, "Synchronize after each kernel call (bit 1) and DMA transfer (bit 2) and identify failures")
 AddOption(recoTaskTiming, bool, 0, "", 0, "Perform summary timing after whole reconstruction tasks")
 AddOption(deterministicGPUReconstruction, int32_t, -1, "", 0, "Make CPU and GPU debug output comparable (sort / skip concurrent parts), -1 = automatic if debugLevel >= 6 or deterministic compile flag set", def(1))
 AddOption(showOutputStat, bool, false, "", 0, "Print some track output statistics")
-AddOption(runCompressionStatistics, bool, false, "compressionStat", 0, "Run statistics and verification for cluster compression")
+AddOption(runCompressionStatistics, int8_t, 0, "compressionStat", 0, "Run statistics and verification for cluster compression, 2 to dump clusters and entropy-reduced clusters to CSV", def(1))
 AddOption(resetTimers, int8_t, 1, "", 0, "Reset timers every event")
 AddOption(deviceTimers, bool, true, "", 0, "Use device timers instead of host-based time measurement")
 AddOption(keepAllMemory, bool, false, "", 0, "Allocate all memory on both device and host, and do not reuse")
@@ -406,6 +414,7 @@ AddOption(debugOnFailureMaxN, uint32_t, 1, "", 0, "Max number of times to run th
 AddOption(debugOnFailureMaxFiles, uint32_t, 0, "", 0, "Max number of files to have in the target folder")
 AddOption(debugOnFailureMaxSize, uint32_t, 0, "", 0, "Max size of existing dumps in the target folder in GB")
 AddOption(debugOnFailureDirectory, std::string, ".", "", 0, "Target folder for debug / dump")
+AddOption(ROOTDumpFile, std::string, "gpudebug.root", "", 0, "File name for ROOT dump (default gpudebug.root)")
 AddOption(memoryStat, bool, false, "", 0, "Print memory statistics")
 AddVariable(eventDisplay, o2::gpu::GPUDisplayFrontendInterface*, nullptr)
 AddSubConfig(GPUSettingsProcessingRTC, rtc)
@@ -538,7 +547,7 @@ AddOption(filterCharge, int32_t, 0, "", 0, "Filter for positive (+1) or negative
 AddOption(filterPID, int32_t, -1, "", 0, "Filter for Particle Type (0 Electron, 1 Muon, 2 Pion, 3 Kaon, 4 Proton)")
 AddOption(nativeFitResolutions, bool, false, "", 0, "Create resolution histograms in the native fit units (sin(phi), tan(lambda), Q/Pt)")
 AddOption(enableLocalOutput, bool, true, "", 0, "Enable normal output to local PDF files / console")
-AddOption(dumpToROOT, int32_t, 0, "", 0, "Dump all clusters and tracks to a ROOT file, 1 = combined TNTUple dump, 2 = also individual cluster / track branch dump")
+AddOption(dumpToROOTLevel, int32_t, -1, "", 0, "Dump all clusters and tracks to a ROOT file, 1 = combined TNTUple dump, 2 = also individual cluster / track branch dump", def(1))
 AddOption(writeFileExt, std::string, "", "", 0, "Write extra output file with given extension (default ROOT Canvas)", def("root"))
 AddOption(writeMCLabels, bool, false, "", 0, "Store mc labels to file for later matching")
 AddOptionVec(matchMCLabels, std::string, "", 0, "Read labels from files and match them, only process tracks where labels differ")
@@ -613,7 +622,7 @@ AddOption(inputcontrolmem, uint64_t, 0, "inputMemory", 0, "Use predefined input 
 AddOption(cpuAffinity, int32_t, -1, "", 0, "Pin CPU affinity to this CPU core", min(-1))
 AddOption(fifoScheduler, bool, false, "", 0, "Use FIFO realtime scheduler", message("Setting FIFO scheduler: %s"))
 AddOption(fpe, int8_t, -1, "", 0, "Trap on floating point exceptions (-1 = if no ffast-math)")
-AddOption(flushDenormals, bool, true, "", 0, "Enable FTZ and DAZ (Flush all denormals to zero)")
+AddOption(flushDenormals, int8_t, -1, "", 0, "Enable FTZ and DAZ (Flush all denormals to zero), -1 = enable automatically if not prevented by deterministic mode")
 AddOption(solenoidBzNominalGPU, float, -1e6f, "", 0, "Field strength of solenoid Bz in kGaus")
 AddOption(constBz, bool, false, "", 0, "Force constand Bz")
 AddOption(overrideMaxTimebin, bool, false, "", 0, "Override max time bin setting for continuous data with max time bin in time frame")
@@ -638,6 +647,7 @@ AddOption(runCompression, int32_t, 1, "", 0, "Enable TPC Compression")
 AddOption(runTransformation, int32_t, 1, "", 0, "Enable TPC Transformation")
 AddOption(runRefit, bool, false, "", 0, "Enable final track refit")
 AddOption(setO2Settings, bool, false, "", 0, "Set O2 defaults for output of shared cluster map, referenceX")
+AddOption(recreateTrivialCalibObjects, bool, false, "", 0, "Recreate trivial calibration objects (TPCTransform, dEdxCorrection) from scratch")
 AddHelp("help", 'h')
 AddHelpAll("helpall", 'H')
 AddSubConfig(GPUSettingsRec, rec)
@@ -650,7 +660,7 @@ EndConfig()
 #endif // BeginConfig
 
 //Settings for the O2 workflow
-#if !defined(QCONFIG_PARSER_CXX) && (defined(GPUCA_O2_LIB) || defined(GPUCA_O2_INTERFACE))
+#if !defined(QCONFIG_PARSER_CXX) && !defined(GPUCA_STANDALONE)
 BeginSubConfig(GPUSettingsO2, global, configStandalone, "O2", 0, "O2 workflow settings", global)
 AddOption(solenoidBzNominalGPU, float, -1e6f, "", 0, "Field strength of solenoid Bz in kGaus")
 AddOption(constBz, bool, false, "", 0, "force constant Bz for tests")
@@ -696,7 +706,7 @@ AddOption(zsOnTheFlyDigitsFilter, bool, false, "", 0, "Run on the fly digits fil
 AddOption(dumpBadTFs, int32_t, 0, "", 0, "Number of bad timeframes (with decoding / processing) errors to decode at max")
 AddOption(dumpBadTFMode, int32_t, 0, "", 0, "Type of dump to create: 0 = raw-reader compatible raw file, 1 = buffer-wise dump, 2 = standalone-benchmark compatible dump")
 EndConfig()
-#endif // GPUCA_O2_LIB
+#endif // !GPUCA_STANDALONE
 #endif // !GPUCA_GPUCODE_DEVICE
 
 // Derrived parameters used in GPUParam

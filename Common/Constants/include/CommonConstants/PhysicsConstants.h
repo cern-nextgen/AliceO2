@@ -64,6 +64,9 @@ enum Pdg {
   kJPsi = 443,
   kLambdaB0 = 5122,
   kLambdaCPlus = 4122,
+  kLambdaCPlus2860 = 24124,
+  kLambdaCPlus2880 = 24126,
+  kLambdaCPlus2940 = 4125,
   kOmegaC0 = 4332,
   kK0Star892 = 313,
   kKPlusStar892 = 323,
@@ -92,7 +95,10 @@ enum Pdg {
   kHyperHelium4 = 1010020040,
   kHyperHelium5 = 1010020050,
   kHyperHelium4Sigma = 1110020040,
-  kLambda1520_Py = 102134
+  kLambda1520_Py = 102134,
+  kK1_1270_0 = 10313,
+  kK1_1270Plus = 10323,
+  kCDeuteron = 2010010020
 };
 
 /// \brief Declarations of masses for additional particles
@@ -129,6 +135,9 @@ constexpr double MassChiC1 = 3.51067;
 constexpr double MassJPsi = 3.0969;
 constexpr double MassLambdaB0 = 5.6196;
 constexpr double MassLambdaCPlus = 2.28646;
+constexpr double MassLambdaCPlus2860 = 2.8561;
+constexpr double MassLambdaCPlus2880 = 2.8816;
+constexpr double MassLambdaCPlus2940 = 2.9396;
 constexpr double MassOmegaC0 = 2.6952;
 constexpr double MassK0Star892 = 0.89555;
 constexpr double MassKPlusStar892 = 0.89167;
@@ -158,6 +167,9 @@ constexpr double MassHyperHelium4 = 3.921728;
 constexpr double MassHyperHelium5 = 4.839961;
 constexpr double MassHyperHelium4Sigma = 3.995;
 constexpr double MassLambda1520_Py = 1.5195;
+constexpr double MassK1_1270_0 = 1.253;
+constexpr double MassK1_1270Plus = 1.272;
+constexpr double MassCDeuteron = 3.226;
 
 /// \brief Declarations of masses for particles in ROOT PDG_t
 constexpr double MassDown = 0.00467;

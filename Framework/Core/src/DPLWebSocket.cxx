@@ -18,6 +18,7 @@
 #include "DriverServerContext.h"
 #include "DriverClientContext.h"
 #include "ControlWebSocketHandler.h"
+#include "StatusWebSocketHandler.h"
 #include "HTTPParser.h"
 #include <algorithm>
 #include <atomic>
@@ -193,9 +194,10 @@ void WSDPLHandler::method(std::string_view const& s)
 
 void WSDPLHandler::target(std::string_view const& s)
 {
-  if (s != "/") {
+  if (s != "/" && s != "/status") {
     throw WSError{404, "Unknown"};
   }
+  mTarget = s;
 }
 
 void populateHeader(std::map<std::string, std::string>& headers, std::string_view const& k, std::string_view const& v)
@@ -294,6 +296,12 @@ void WSDPLHandler::endHeaders()
         break;
       }
     }
+  } else if (mTarget == "/status" && mServerContext->isDriver) {
+    LOGP(info, "Status client connected ({} total)", mServerContext->statusHandlers.size() + 1);
+    auto* statusHandler = new StatusWebSocketHandler(*mServerContext, this);
+    mServerContext->statusHandlers.push_back(statusHandler);
+    mHandler = std::unique_ptr<WebSocketHandler>(statusHandler);
+    mHandler->headers(mHeaders);
   } else {
     if ((mServerContext->isDriver && getenv("DPL_DRIVER_REMOTE_GUI")) || ((mServerContext->isDriver == false) && getenv("DPL_DEVICE_REMOTE_GUI"))) {
       LOG(info) << "Connection not bound to a PID";
@@ -508,6 +516,7 @@ struct WriteRequestContext {
 struct BulkWriteRequestContext {
   std::vector<uv_buf_t> buffers;
   ServiceRegistryRef ref;
+  std::vector<char*>* freeList = nullptr; // if non-null, return chunks here instead of freeing
 };
 
 void ws_client_write_callback(uv_write_t* h, int status)
@@ -535,11 +544,14 @@ void ws_client_bulk_write_callback(uv_write_t* h, int status)
   state.loopReason |= (DeviceState::WS_COMMUNICATION | DeviceState::WS_WRITING);
   if (status < 0) {
     LOG(error) << "uv_write error: " << uv_err_name(status);
-    free(h);
-    return;
   }
-  if (context->buffers.size()) {
-    for (auto& b : context->buffers) {
+  // Return chunks to the free list (capped) so flushPending can pre-seed
+  // the backlog for the next cycle without malloc-ing.
+  constexpr size_t kMaxFreeChunks = 4;
+  for (auto& b : context->buffers) {
+    if (context->freeList && b.base && context->freeList->size() < kMaxFreeChunks) {
+      context->freeList->push_back(b.base);
+    } else {
       free(b.base);
     }
   }
@@ -571,6 +583,20 @@ void WSDPLClient::write(std::vector<uv_buf_t>& outputs)
   auto* write_req = (uv_write_t*)malloc(sizeof(uv_write_t));
   auto* context = new BulkWriteRequestContext{.ref = mContext->ref};
   context->buffers.swap(outputs);
+  write_req->data = context;
+  uv_write(write_req, (uv_stream_t*)mStream, &context->buffers.at(0),
+           context->buffers.size(), ws_client_bulk_write_callback);
+}
+
+void WSDPLClient::write(std::vector<uv_buf_t>& outputs, std::vector<char*>& freeList)
+{
+  if (outputs.empty()) {
+    return;
+  }
+  auto* write_req = (uv_write_t*)malloc(sizeof(uv_write_t));
+  auto* context = new BulkWriteRequestContext{.ref = mContext->ref};
+  context->buffers.swap(outputs);
+  context->freeList = &freeList;
   write_req->data = context;
   uv_write(write_req, (uv_stream_t*)mStream, &context->buffers.at(0),
            context->buffers.size(), ws_client_bulk_write_callback);

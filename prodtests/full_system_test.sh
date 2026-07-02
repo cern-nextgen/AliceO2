@@ -29,7 +29,7 @@ fi
 
 # include jobutils, which notably brings
 # --> the taskwrapper as a simple control and monitoring tool
-#     (look inside the jobutils.sh file for documentation)
+#     (look inside the jobutils2.sh file for documentation)
 # --> utilities to query CPU count
 . ${O2_ROOT}/share/scripts/jobutils2.sh
 
@@ -188,7 +188,7 @@ taskwrapper digi.log o2-sim-digitizer-workflow -n $NEvents ${DIGIQED} ${NOMCLABE
 touch digiTRD.log_done
 
 if [[ "0$GENERATE_ITSMFT_DICTIONARIES" == "01" ]]; then
-  taskwrapper itsmftdict1.log o2-its-reco-workflow --trackerCA --disable-mc --configKeyValues '"fastMultConfig.cutMultClusLow=30000;fastMultConfig.cutMultClusHigh=2000000;fastMultConfig.cutMultVtxHigh=500;"'
+  taskwrapper itsmftdict1.log o2-its-reco-workflow --disable-mc --configKeyValues '"fastMultConfig.cutMultClusLow=30000;fastMultConfig.cutMultClusHigh=2000000;fastMultConfig.cutMultVtxHigh=500;"'
   cp ~/alice/O2/Detectors/ITSMFT/ITS/macros/test/CreateDictionaries.C .
   taskwrapper itsmftdict2.log root -b -q CreateDictionaries.C++
   rm -f CreateDictionaries_C* CreateDictionaries.C
@@ -321,10 +321,6 @@ for STAGE in $STAGES; do
     : ${CUT_MULT_MIN_ITS:=-1}
     : ${CUT_MULT_MAX_ITS:=-1}
     : ${CUT_MULT_VTX_ITS:=-1}
-    : ${CUT_TRACKLETSPERCLUSTER_MAX_ITS:=100}
-    : ${CUT_CELLSPERCLUSTER_MAX_ITS:=100}
-    export CUT_TRACKLETSPERCLUSTER_MAX_ITS
-    export CUT_CELLSPERCLUSTER_MAX_ITS
     export CUT_RANDOM_FRACTION_ITS
     export CUT_MULT_MIN_ITS
     export CUT_MULT_MAX_ITS
@@ -344,6 +340,12 @@ for STAGE in $STAGES; do
       if [[ $aod_size -gt 0 ]]; then
         echo "AO2D file produced: AO2D.root (size: ${aod_size} bytes)"
         echo "aod_size_${STAGE},${TAG} value=${aod_size}" >> ${METRICFILE}
+        # Check that the metadata TMap is present
+        if ! root -b -l -q -e 'auto* f = TFile::Open("AO2D.root"); if (!f || f->IsZombie()) { exit(1); } if (!dynamic_cast<TMap*>(f->Get("metaData"))) { std::cerr << "ERROR: metaData TMap missing from AO2D.root" << std::endl; exit(1); }' 2>&1; then
+          echo "ERROR: metaData TMap missing from AO2D.root"
+          exit 1
+        fi
+        echo "AO2D metaData TMap present"
       else
         echo "ERROR: AO2D file (AO2D.root) exists but is empty"
         echo "aod_size_${STAGE},${TAG} value=0" >> ${METRICFILE}

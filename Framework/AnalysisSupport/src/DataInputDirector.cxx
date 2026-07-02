@@ -49,18 +49,18 @@ namespace o2::framework
 {
 using namespace rapidjson;
 
-FileNameHolder* makeFileNameHolder(std::string fileName)
+FileNameHolder makeFileNameHolder(std::string fileName)
 {
-  auto fileNameHolder = new FileNameHolder();
-  fileNameHolder->fileName = fileName;
 
-  return fileNameHolder;
+  FileNameHolder holder;
+  holder.fileName = fileName;
+  return holder;
 }
 
 DataInputDescriptor::DataInputDescriptor(bool alienSupport, int level, DataInputDirectorContext& context)
   : mAlienSupport(alienSupport),
-    mLevel(level),
-    mContext(context)
+    mContext(context),
+    mLevel(level)
 {
   std::vector<char const*> capabilitiesSpecs = {
     "O2Framework:RNTupleObjectReadingCapability",
@@ -78,7 +78,7 @@ DataInputDescriptor::DataInputDescriptor(bool alienSupport, int level, DataInput
   PluginManager::loadFromPlugin<RootObjectReadingCapability, RootObjectReadingCapabilityPlugin>(plugins, mFactory.capabilities);
 }
 
-void DataInputDescriptor::printOut()
+void DataInputDescriptor::printOut() const
 {
   LOGP(info, "DataInputDescriptor");
   LOGP(info, "  Table name        : {}", tablename);
@@ -86,18 +86,18 @@ void DataInputDescriptor::printOut()
   LOGP(info, "  Input files file  : {}", getInputfilesFilename());
   LOGP(info, "  File name regex   : {}", getFilenamesRegexString());
   LOGP(info, "  Input files       : {}", mfilenames.size());
-  for (auto fn : mfilenames) {
-    LOGP(info, "    {} {}", fn->fileName, fn->numberOfTimeFrames);
+  for (auto& fn : mfilenames) {
+    LOGP(info, "    {} {}", fn.fileName, fn.numberOfTimeFrames);
   }
   LOGP(info, "  Total number of TF: {}", getNumberTimeFrames());
 }
 
-std::string DataInputDescriptor::getInputfilesFilename()
+std::string DataInputDescriptor::getInputfilesFilename() const
 {
   return (minputfilesFile.empty() && minputfilesFilePtr) ? (std::string)*minputfilesFilePtr : minputfilesFile;
 }
 
-std::string DataInputDescriptor::getFilenamesRegexString()
+std::string DataInputDescriptor::getFilenamesRegexString() const
 {
   return (mFilenameRegex.empty() && mFilenameRegexPtr) ? (std::string)*mFilenameRegexPtr : mFilenameRegex;
 }
@@ -107,22 +107,22 @@ std::regex DataInputDescriptor::getFilenamesRegex()
   return std::regex(getFilenamesRegexString());
 }
 
-void DataInputDescriptor::addFileNameHolder(FileNameHolder* fn)
+void DataInputDescriptor::addFileNameHolder(FileNameHolder fn)
 {
   // remove leading file:// from file name
-  if (fn->fileName.rfind("file://", 0) == 0) {
-    fn->fileName.erase(0, 7);
-  } else if (!mAlienSupport && fn->fileName.rfind("alien://", 0) == 0 && !gGrid) {
+  if (fn.fileName.rfind("file://", 0) == 0) {
+    fn.fileName.erase(0, 7);
+  } else if (!mAlienSupport && fn.fileName.rfind("alien://", 0) == 0 && !gGrid) {
     LOGP(debug, "AliEn file requested. Enabling support.");
     TGrid::Connect("alien://");
     mAlienSupport = true;
   }
 
-  mtotalNumberTimeFrames += fn->numberOfTimeFrames;
+  mtotalNumberTimeFrames += fn.numberOfTimeFrames;
   mfilenames.emplace_back(fn);
 }
 
-bool DataInputDescriptor::setFile(int counter, std::string_view origin)
+bool DataInputDescriptor::setFile(int counter, int wantedParentLevel, std::string_view origin)
 {
   // no files left
   if (counter >= getNumberInputfiles()) {
@@ -132,8 +132,10 @@ bool DataInputDescriptor::setFile(int counter, std::string_view origin)
   // In case the origin starts with a anything but AOD, we add the origin as the suffix
   // of the filename. In the future we might expand this for proper rewriting of the
   // filename based on the origin and the original file information.
-  std::string filename = mfilenames[counter]->fileName;
-  if (!origin.starts_with("AOD")) {
+  std::string filename = mfilenames[counter].fileName;
+  // In case we do not need to remap parent levels, the requested origin is what
+  // drives the filename.
+  if (wantedParentLevel == -1 && !origin.starts_with("AOD")) {
     filename = std::regex_replace(filename, std::regex("[.]root$"), fmt::format("_{}.root", origin));
   }
 
@@ -146,7 +148,19 @@ bool DataInputDescriptor::setFile(int counter, std::string_view origin)
     closeInputFile();
   }
 
-  mCurrentFilesystem = std::make_shared<TFileFileSystem>(TFile::Open(filename.c_str()), 50 * 1024 * 1024, mFactory);
+  TFile* tfile = nullptr;
+  bool externalFile = false;
+  for (auto& [name, f] : mContext.openFiles) {
+    if (name == filename) {
+      tfile = f;
+      externalFile = true;
+      break;
+    }
+  }
+  if (tfile == nullptr) {
+    tfile = TFile::Open(filename.c_str());
+  }
+  mCurrentFilesystem = std::make_shared<TFileFileSystem>(tfile, 50 * 1024 * 1024, mFactory, !externalFile);
   if (!mCurrentFilesystem.get()) {
     throw std::runtime_error(fmt::format("Couldn't open file \"{}\"!", filename));
   }
@@ -172,7 +186,7 @@ bool DataInputDescriptor::setFile(int counter, std::string_view origin)
   }
 
   // get the directory names
-  if (mfilenames[counter]->numberOfTimeFrames <= 0) {
+  if (mfilenames[counter].numberOfTimeFrames <= 0) {
     const std::regex TFRegex = std::regex("/?DF_([0-9]+)(|-.*)$");
     TList* keyList = rootFS->GetFile()->GetListOfKeys();
     std::vector<std::string> finalList;
@@ -190,25 +204,25 @@ bool DataInputDescriptor::setFile(int counter, std::string_view origin)
         auto folderNumber = std::stoul(matchResult[1].str());
         if (seen.find(folderNumber) == seen.end()) {
           seen.insert(folderNumber);
-          mfilenames[counter]->listOfTimeFrameNumbers.emplace_back(folderNumber);
+          mfilenames[counter].listOfTimeFrameNumbers.emplace_back(folderNumber);
         }
       }
     }
 
     if (mParentFileMap != nullptr) {
       // If we have a parent map, we should not process in DF alphabetical order but according to parent file to avoid swapping between files
-      std::sort(mfilenames[counter]->listOfTimeFrameNumbers.begin(), mfilenames[counter]->listOfTimeFrameNumbers.end(),
-                [this](long const& l1, long const& l2) -> bool {
-                  auto p1 = (TObjString*)this->mParentFileMap->GetValue(("DF_" + std::to_string(l1)).c_str());
-                  auto p2 = (TObjString*)this->mParentFileMap->GetValue(("DF_" + std::to_string(l2)).c_str());
-                  return p1->GetString().CompareTo(p2->GetString()) < 0;
-                });
+      std::ranges::sort(mfilenames[counter].listOfTimeFrameNumbers,
+                        [this](long const& l1, long const& l2) -> bool {
+                          auto p1 = (TObjString*)this->mParentFileMap->GetValue(("DF_" + std::to_string(l1)).c_str());
+                          auto p2 = (TObjString*)this->mParentFileMap->GetValue(("DF_" + std::to_string(l2)).c_str());
+                          return p1->GetString().CompareTo(p2->GetString()) < 0;
+                        });
     } else {
-      std::sort(mfilenames[counter]->listOfTimeFrameNumbers.begin(), mfilenames[counter]->listOfTimeFrameNumbers.end());
+      std::sort(mfilenames[counter].listOfTimeFrameNumbers.begin(), mfilenames[counter].listOfTimeFrameNumbers.end());
     }
 
-    mfilenames[counter]->alreadyRead.resize(mfilenames[counter]->alreadyRead.size() + mfilenames[counter]->listOfTimeFrameNumbers.size(), false);
-    mfilenames[counter]->numberOfTimeFrames = mfilenames[counter]->listOfTimeFrameNumbers.size();
+    mfilenames[counter].alreadyRead.resize(mfilenames[counter].alreadyRead.size() + mfilenames[counter].listOfTimeFrameNumbers.size(), false);
+    mfilenames[counter].numberOfTimeFrames = mfilenames[counter].listOfTimeFrameNumbers.size();
   }
 
   mCurrentFileID = counter;
@@ -218,46 +232,69 @@ bool DataInputDescriptor::setFile(int counter, std::string_view origin)
   return true;
 }
 
-uint64_t DataInputDescriptor::getTimeFrameNumber(int counter, int numTF, std::string_view origin)
+uint64_t DataInputDescriptor::getTimeFrameNumber(int counter, int numTF, int wantedParentLevel, std::string_view wantedOrigin)
 {
 
   // open file
-  if (!setFile(counter, origin)) {
+  if (!setFile(counter, wantedParentLevel, wantedOrigin)) {
     return 0ul;
   }
 
   // no TF left
-  if (mfilenames[counter]->numberOfTimeFrames > 0 && numTF >= mfilenames[counter]->numberOfTimeFrames) {
+  if (mfilenames[counter].numberOfTimeFrames > 0 && numTF >= mfilenames[counter].numberOfTimeFrames) {
     return 0ul;
   }
 
-  return (mfilenames[counter]->listOfTimeFrameNumbers)[numTF];
+  return (mfilenames[counter].listOfTimeFrameNumbers)[numTF];
 }
 
-arrow::dataset::FileSource DataInputDescriptor::getFileFolder(int counter, int numTF, std::string_view origin)
+std::pair<std::shared_ptr<DataInputDescriptor>, int> DataInputDescriptor::navigateToLevel(int counter, int numTF, int wantedParentLevel, std::string_view wantedOrigin)
 {
+  if (!setFile(counter, wantedParentLevel, wantedOrigin)) {
+    return {nullptr, -1};
+  }
+  auto folderName = fmt::format("DF_{}", mfilenames[counter].listOfTimeFrameNumbers[numTF]);
+  auto parentFile = getParentFile(counter, numTF, "", wantedParentLevel, wantedOrigin);
+  if (parentFile == nullptr) {
+    return {nullptr, -1};
+  }
+  return {parentFile, parentFile->findDFNumber(0, folderName)};
+}
+
+arrow::dataset::FileSource DataInputDescriptor::getFileFolder(int counter, int numTF, int wantedParentLevel, std::string_view wantedOrigin)
+{
+  // If mapped to a parent level deeper than current, skip directly to the right level.
+  if ((wantedParentLevel != -1) && (mLevel < wantedParentLevel)) {
+    auto [parentFile, parentNumTF] = navigateToLevel(counter, numTF, wantedParentLevel, wantedOrigin);
+    if (parentFile == nullptr || parentNumTF == -1) {
+      return {};
+    }
+    return parentFile->getFileFolder(0, parentNumTF, wantedParentLevel, wantedOrigin);
+  }
+
   // open file
-  if (!setFile(counter, origin)) {
+  if (!setFile(counter, wantedParentLevel, wantedOrigin)) {
     return {};
   }
 
   // no TF left
-  if (mfilenames[counter]->numberOfTimeFrames > 0 && numTF >= mfilenames[counter]->numberOfTimeFrames) {
+  if ((mfilenames[counter].numberOfTimeFrames > 0) && (numTF >= mfilenames[counter].numberOfTimeFrames)) {
     return {};
   }
 
-  mfilenames[counter]->alreadyRead[numTF] = true;
+  mfilenames[counter].alreadyRead[numTF] = true;
 
-  return {fmt::format("DF_{}", mfilenames[counter]->listOfTimeFrameNumbers[numTF]), mCurrentFilesystem};
+  return {fmt::format("DF_{}", mfilenames[counter].listOfTimeFrameNumbers[numTF]), mCurrentFilesystem};
 }
 
-DataInputDescriptor* DataInputDescriptor::getParentFile(int counter, int numTF, std::string treename, std::string_view origin)
+std::shared_ptr<DataInputDescriptor> DataInputDescriptor::getParentFile(int counter, int numTF, std::string treename, int wantedParentLevel, std::string_view wantedOrigin)
 {
   if (!mParentFileMap) {
     // This file has no parent map
     return nullptr;
   }
-  auto folderName = fmt::format("DF_{}", mfilenames[counter]->listOfTimeFrameNumbers[numTF]);
+
+  auto folderName = fmt::format("DF_{}", mfilenames[counter].listOfTimeFrameNumbers[numTF]);
   auto parentFileName = (TObjString*)mParentFileMap->GetValue(folderName.c_str());
   // The current DF is not found in the parent map (this should not happen and is a fatal error)
   auto rootFS = std::dynamic_pointer_cast<TFileFileSystem>(mCurrentFilesystem);
@@ -273,8 +310,7 @@ DataInputDescriptor* DataInputDescriptor::getParentFile(int counter, int numTF, 
       return mParentFile;
     } else {
       mParentFile->closeInputFile();
-      delete mParentFile;
-      mParentFile = nullptr;
+      mParentFile.reset();
     }
   }
 
@@ -284,22 +320,21 @@ DataInputDescriptor* DataInputDescriptor::getParentFile(int counter, int numTF, 
   }
 
   LOGP(info, "Opening parent file {} for DF {}", parentFileName->GetString().Data(), folderName.c_str());
-  mParentFile = new DataInputDescriptor(mAlienSupport, mLevel + 1, mContext);
-  mParentFile->mdefaultFilenamesPtr = new std::vector<FileNameHolder*>;
-  mParentFile->mdefaultFilenamesPtr->emplace_back(makeFileNameHolder(parentFileName->GetString().Data()));
+  mParentFile = std::make_shared<DataInputDescriptor>(mAlienSupport, mLevel + 1, mContext);
+  mParentFile->mdefaultFilenamesPtr.emplace_back(makeFileNameHolder(parentFileName->GetString().Data()));
   mParentFile->fillInputfiles();
-  mParentFile->setFile(0, origin);
+  mParentFile->setFile(0, wantedParentLevel, wantedOrigin);
   return mParentFile;
 }
 
 int DataInputDescriptor::getTimeFramesInFile(int counter)
 {
-  return mfilenames.at(counter)->numberOfTimeFrames;
+  return mfilenames.at(counter).numberOfTimeFrames;
 }
 
 int DataInputDescriptor::getReadTimeFramesInFile(int counter)
 {
-  auto& list = mfilenames.at(counter)->alreadyRead;
+  auto& list = mfilenames.at(counter).alreadyRead;
   return std::count(list.begin(), list.end(), true);
 }
 
@@ -348,8 +383,7 @@ void DataInputDescriptor::closeInputFile()
   if (mCurrentFilesystem.get()) {
     if (mParentFile) {
       mParentFile->closeInputFile();
-      delete mParentFile;
-      mParentFile = nullptr;
+      mParentFile.reset();
     }
 
     delete mParentFileMap;
@@ -389,10 +423,10 @@ int DataInputDescriptor::fillInputfiles()
     }
   } else {
     // 3. getFilenamesRegex() @ mdefaultFilenamesPtr
-    if (mdefaultFilenamesPtr) {
-      for (auto fileNameHolder : *mdefaultFilenamesPtr) {
+    if (!mdefaultFilenamesPtr.empty()) {
+      for (auto& fileNameHolder : mdefaultFilenamesPtr) {
         if (getFilenamesRegexString().empty() ||
-            std::regex_match(fileNameHolder->fileName, getFilenamesRegex())) {
+            std::regex_match(fileNameHolder.fileName, getFilenamesRegex())) {
           addFileNameHolder(fileNameHolder);
         }
       }
@@ -404,7 +438,7 @@ int DataInputDescriptor::fillInputfiles()
 
 int DataInputDescriptor::findDFNumber(int file, std::string dfName)
 {
-  auto dfList = mfilenames[file]->listOfTimeFrameNumbers;
+  auto dfList = mfilenames[file].listOfTimeFrameNumbers;
   auto it = std::find_if(dfList.begin(), dfList.end(), [dfName](size_t i) { return fmt::format("DF_{}", i) == dfName; });
   if (it == dfList.end()) {
     return -1;
@@ -450,8 +484,26 @@ struct CalculateDelta {
 bool DataInputDescriptor::readTree(DataAllocator& outputs, header::DataHeader dh, int counter, int numTF, std::string treename, size_t& totalSizeCompressed, size_t& totalSizeUncompressed)
 {
   CalculateDelta t(mIOTime);
-  std::string origin = dh.dataOrigin.as<std::string>();
-  auto folder = getFileFolder(counter, numTF, origin);
+  std::string wantedOrigin = dh.dataOrigin.as<std::string>();
+  int wantedLevel = mContext.levelForOrigin(wantedOrigin);
+
+  // If this origin is mapped to a parent level deeper than current, skip directly without
+  // attempting to read from this level.
+  if (wantedLevel != -1 && mLevel < wantedLevel) {
+    auto [parentFile, parentNumTF] = navigateToLevel(counter, numTF, wantedLevel, wantedOrigin);
+    if (parentFile == nullptr) {
+      auto rootFS = std::dynamic_pointer_cast<TFileFileSystem>(mCurrentFilesystem);
+      throw std::runtime_error(fmt::format(R"(No parent file found for "{}" while looking for level {} in "{}")", treename, wantedLevel, rootFS->GetFile()->GetName()));
+    }
+    if (parentNumTF == -1) {
+      auto parentRootFS = std::dynamic_pointer_cast<TFileFileSystem>(parentFile->mCurrentFilesystem);
+      throw std::runtime_error(fmt::format(R"(DF not found in parent file "{}")", parentRootFS->GetFile()->GetName()));
+    }
+    t.deactivate();
+    return parentFile->readTree(outputs, dh, 0, parentNumTF, treename, totalSizeCompressed, totalSizeUncompressed);
+  }
+
+  auto folder = getFileFolder(counter, numTF, wantedLevel, wantedOrigin);
   if (!folder.filesystem()) {
     t.deactivate();
     return false;
@@ -484,7 +536,7 @@ bool DataInputDescriptor::readTree(DataAllocator& outputs, header::DataHeader dh
   if (!format) {
     t.deactivate();
     LOGP(debug, "Could not find tree {}. Trying in parent file.", fullpath.path());
-    auto parentFile = getParentFile(counter, numTF, treename, origin);
+    auto parentFile = getParentFile(counter, numTF, treename, wantedLevel, wantedOrigin);
     if (parentFile != nullptr) {
       int parentNumTF = parentFile->findDFNumber(0, folder.path());
       if (parentNumTF == -1) {
@@ -542,15 +594,9 @@ DataInputDirector::DataInputDirector(std::vector<std::string> inputFiles, DataIn
 
 DataInputDirector::~DataInputDirector()
 {
-  for (auto fn : mdefaultInputFiles) {
-    delete fn;
-  }
   mdefaultInputFiles.clear();
   mdefaultDataInputDescriptor = nullptr;
 
-  for (auto fn : mdataInputDescriptors) {
-    delete fn;
-  }
   mdataInputDescriptors.clear();
 }
 
@@ -564,13 +610,13 @@ void DataInputDirector::reset()
 void DataInputDirector::createDefaultDataInputDescriptor()
 {
   if (mdefaultDataInputDescriptor) {
-    delete mdefaultDataInputDescriptor;
+    mdefaultDataInputDescriptor.reset();
   }
-  mdefaultDataInputDescriptor = new DataInputDescriptor(mAlienSupport, 0, mContext);
+  mdefaultDataInputDescriptor = std::make_shared<DataInputDescriptor>(mAlienSupport, 0, mContext);
 
   mdefaultDataInputDescriptor->setInputfilesFile(minputfilesFile);
   mdefaultDataInputDescriptor->setFilenamesRegex(mFilenameRegex);
-  mdefaultDataInputDescriptor->setDefaultInputfiles(&mdefaultInputFiles);
+  mdefaultDataInputDescriptor->setDefaultInputfiles(mdefaultInputFiles);
   mdefaultDataInputDescriptor->tablename = "any";
   mdefaultDataInputDescriptor->treename = "any";
   mdefaultDataInputDescriptor->fillInputfiles();
@@ -690,14 +736,14 @@ bool DataInputDirector::readJsonDocument(Document* jsonDoc)
         return false;
       }
       // create a new dataInputDescriptor
-      auto didesc = new DataInputDescriptor(mAlienSupport, 0, mContext);
-      didesc->setDefaultInputfiles(&mdefaultInputFiles);
+      auto didesc = DataInputDescriptor(mAlienSupport, 0, mContext);
+      didesc.setDefaultInputfiles(mdefaultInputFiles);
 
       itemName = "table";
       if (didescItem.HasMember(itemName)) {
         if (didescItem[itemName].IsString()) {
-          didesc->tablename = didescItem[itemName].GetString();
-          didesc->matcher = DataDescriptorQueryBuilder::buildNode(didesc->tablename);
+          didesc.tablename = didescItem[itemName].GetString();
+          didesc.matcher = DataDescriptorQueryBuilder::buildNode(didesc.tablename);
         } else {
           LOGP(error, "Check the JSON document! Item \"{}\" must be a string!", itemName);
           return false;
@@ -710,29 +756,29 @@ bool DataInputDirector::readJsonDocument(Document* jsonDoc)
       itemName = "treename";
       if (didescItem.HasMember(itemName)) {
         if (didescItem[itemName].IsString()) {
-          didesc->treename = didescItem[itemName].GetString();
+          didesc.treename = didescItem[itemName].GetString();
         } else {
           LOGP(error, "Check the JSON document! Item \"{}\" must be a string!", itemName);
           return false;
         }
       } else {
-        auto m = DataDescriptorQueryBuilder::getTokens(didesc->tablename);
-        didesc->treename = m[2];
+        auto m = DataDescriptorQueryBuilder::getTokens(didesc.tablename);
+        didesc.treename = m[2];
       }
 
       itemName = "fileregex";
       if (didescItem.HasMember(itemName)) {
         if (didescItem[itemName].IsString()) {
-          if (didesc->getNumberInputfiles() == 0) {
-            didesc->setFilenamesRegex(didescItem[itemName].GetString());
+          if (didesc.getNumberInputfiles() == 0) {
+            didesc.setFilenamesRegex(didescItem[itemName].GetString());
           }
         } else {
           LOGP(error, "Check the JSON document! Item \"{}\" must be a string!", itemName);
           return false;
         }
       } else {
-        if (didesc->getNumberInputfiles() == 0) {
-          didesc->setFilenamesRegex(mFilenameRegexPtr);
+        if (didesc.getNumberInputfiles() == 0) {
+          didesc.setFilenamesRegex(mFilenameRegexPtr);
         }
       }
 
@@ -741,19 +787,19 @@ bool DataInputDirector::readJsonDocument(Document* jsonDoc)
         if (didescItem[itemName].IsString()) {
           fileName = didescItem[itemName].GetString();
           if (fileName.size() && fileName[0] == '@') {
-            didesc->setInputfilesFile(fileName.erase(0, 1));
+            didesc.setInputfilesFile(fileName.erase(0, 1));
           } else {
-            if (didesc->getFilenamesRegexString().empty() ||
-                std::regex_match(fileName, didesc->getFilenamesRegex())) {
-              didesc->addFileNameHolder(makeFileNameHolder(fileName));
+            if (didesc.getFilenamesRegexString().empty() ||
+                std::regex_match(fileName, didesc.getFilenamesRegex())) {
+              didesc.addFileNameHolder(makeFileNameHolder(fileName));
             }
           }
         } else if (didescItem[itemName].IsArray()) {
           auto fns = didescItem[itemName].GetArray();
           for (auto& fn : fns) {
-            if (didesc->getFilenamesRegexString().empty() ||
-                std::regex_match(fn.GetString(), didesc->getFilenamesRegex())) {
-              didesc->addFileNameHolder(makeFileNameHolder(fn.GetString()));
+            if (didesc.getFilenamesRegexString().empty() ||
+                std::regex_match(fn.GetString(), didesc.getFilenamesRegex())) {
+              didesc.addFileNameHolder(makeFileNameHolder(fn.GetString()));
             }
           }
         } else {
@@ -761,17 +807,17 @@ bool DataInputDirector::readJsonDocument(Document* jsonDoc)
           return false;
         }
       } else {
-        didesc->setInputfilesFile(minputfilesFilePtr);
+        didesc.setInputfilesFile(minputfilesFilePtr);
       }
 
       // fill mfilenames and add InputDescriptor to InputDirector
-      if (didesc->fillInputfiles() > 0) {
+      if (didesc.fillInputfiles() > 0) {
         mdataInputDescriptors.emplace_back(didesc);
       } else {
-        didesc->printOut();
+        didesc.printOut();
         LOGP(info, "This DataInputDescriptor is ignored because its file list is empty!");
       }
-      mAlienSupport &= didesc->isAlienSupportOn();
+      mAlienSupport &= didesc.isAlienSupportOn();
     }
   }
 
@@ -794,19 +840,16 @@ bool DataInputDirector::readJsonDocument(Document* jsonDoc)
 
 DataInputDescriptor* DataInputDirector::getDataInputDescriptor(header::DataHeader dh)
 {
-  DataInputDescriptor* result = nullptr;
-
   // compute list of matching outputs
   data_matcher::VariableContext context;
 
-  for (auto didesc : mdataInputDescriptors) {
-    if (didesc->matcher->match(dh, context)) {
-      result = didesc;
-      break;
+  for (auto& didesc : mdataInputDescriptors) {
+    if (didesc.matcher->match(dh, context)) {
+      return &didesc;
     }
   }
 
-  return result;
+  return nullptr;
 }
 
 arrow::dataset::FileSource DataInputDirector::getFileFolder(header::DataHeader dh, int counter, int numTF)
@@ -814,11 +857,12 @@ arrow::dataset::FileSource DataInputDirector::getFileFolder(header::DataHeader d
   auto didesc = getDataInputDescriptor(dh);
   // if NOT match then use defaultDataInputDescriptor
   if (!didesc) {
-    didesc = mdefaultDataInputDescriptor;
+    didesc = mdefaultDataInputDescriptor.get();
   }
   std::string origin = dh.dataOrigin.as<std::string>();
+  int wantedLevel = mContext.levelForOrigin(origin);
 
-  return didesc->getFileFolder(counter, numTF, origin);
+  return didesc->getFileFolder(counter, numTF, wantedLevel, origin);
 }
 
 int DataInputDirector::getTimeFramesInFile(header::DataHeader dh, int counter)
@@ -826,7 +870,7 @@ int DataInputDirector::getTimeFramesInFile(header::DataHeader dh, int counter)
   auto didesc = getDataInputDescriptor(dh);
   // if NOT match then use defaultDataInputDescriptor
   if (!didesc) {
-    didesc = mdefaultDataInputDescriptor;
+    didesc = mdefaultDataInputDescriptor.get();
   }
 
   return didesc->getTimeFramesInFile(counter);
@@ -837,14 +881,15 @@ uint64_t DataInputDirector::getTimeFrameNumber(header::DataHeader dh, int counte
   auto didesc = getDataInputDescriptor(dh);
   // if NOT match then use defaultDataInputDescriptor
   if (!didesc) {
-    didesc = mdefaultDataInputDescriptor;
+    didesc = mdefaultDataInputDescriptor.get();
   }
   std::string origin = dh.dataOrigin.as<std::string>();
+  int wantedLevel = mContext.levelForOrigin(origin);
 
-  return didesc->getTimeFrameNumber(counter, numTF, origin);
+  return didesc->getTimeFrameNumber(counter, numTF, wantedLevel, origin);
 }
 
-bool DataInputDirector::readTree(DataAllocator& outputs, header::DataHeader dh, int counter, int numTF, size_t& totalSizeCompressed, size_t& totalSizeUncompressed)
+bool DataInputDirector::readTree(DataAllocator& outputs, header::DataHeader dh, int counter, int numTF, size_t& totalSizeCompressed, size_t& totalSizeUncompressed, bool wasAOD)
 {
   std::string treename;
 
@@ -856,8 +901,8 @@ bool DataInputDirector::readTree(DataAllocator& outputs, header::DataHeader dh, 
     // if NOT match then use
     //  . filename from defaultDataInputDescriptor
     //  . treename from DataHeader
-    didesc = mdefaultDataInputDescriptor;
-    treename = aod::datamodel::getTreeName(dh);
+    didesc = mdefaultDataInputDescriptor.get();
+    treename = aod::datamodel::getTreeName(dh, wasAOD);
   }
   std::string origin = dh.dataOrigin.as<std::string>();
 
@@ -868,8 +913,8 @@ bool DataInputDirector::readTree(DataAllocator& outputs, header::DataHeader dh, 
 void DataInputDirector::closeInputFiles()
 {
   mdefaultDataInputDescriptor->closeInputFile();
-  for (auto didesc : mdataInputDescriptors) {
-    didesc->closeInputFile();
+  for (auto& didesc : mdataInputDescriptors) {
+    didesc.closeInputFile();
   }
 }
 
@@ -877,8 +922,8 @@ bool DataInputDirector::isValid()
 {
   bool status = true;
   int numberFiles = mdefaultDataInputDescriptor->getNumberInputfiles();
-  for (auto didesc : mdataInputDescriptors) {
-    status &= didesc->getNumberInputfiles() == numberFiles;
+  for (auto& didesc : mdataInputDescriptors) {
+    status &= didesc.getNumberInputfiles() == numberFiles;
   }
 
   return status;
@@ -887,8 +932,8 @@ bool DataInputDirector::isValid()
 bool DataInputDirector::atEnd(int counter)
 {
   bool status = mdefaultDataInputDescriptor->getNumberInputfiles() <= counter;
-  for (auto didesc : mdataInputDescriptors) {
-    status &= (didesc->getNumberInputfiles() <= counter);
+  for (auto& didesc : mdataInputDescriptors) {
+    status &= (didesc.getNumberInputfiles() <= counter);
   }
 
   return status;
@@ -901,14 +946,19 @@ void DataInputDirector::printOut()
   LOGP(info, "  Default file name regex    : {}", mFilenameRegex);
   LOGP(info, "  Default file names         : {}", mdefaultInputFiles.size());
   for (auto const& fn : mdefaultInputFiles) {
-    LOGP(info, "    {} {}", fn->fileName, fn->numberOfTimeFrames);
+    LOGP(info, "    {} {}", fn.fileName, fn.numberOfTimeFrames);
   }
   LOGP(info, "  Default DataInputDescriptor:");
   mdefaultDataInputDescriptor->printOut();
   LOGP(info, "  DataInputDescriptors       : {}", getNumberInputDescriptors());
   for (auto const& didesc : mdataInputDescriptors) {
-    didesc->printOut();
+    didesc.printOut();
   }
+}
+
+int DataInputDirector::getLevelForOrigin(header::DataOrigin origin) const
+{
+  return mContext.levelForOrigin(origin.as<std::string>());
 }
 
 } // namespace o2::framework

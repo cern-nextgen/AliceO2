@@ -524,6 +524,48 @@ inline void O2DatabasePDG::addALICEParticles(TDatabasePDG* db)
     db->AddParticle("f2_1525", "f2_1525", 1.525, kFALSE, 0.073, 0, "Resonance", ionCode);
   }
 
+  // when using hadronic rescattering in Pythia8
+  ionCode = 9000221;
+  if (!db->GetParticle(ionCode)) {
+    db->AddParticle("f0_500", "f0_500", 0.500, kFALSE, 0.350, 0.0, "Resonance", ionCode);
+  }
+  ionCode = -100313;
+  if (!db->GetParticle(ionCode)) {
+    db->AddParticle("K*(1410)bar0", "K*(1410)bar0", 1.414, kFALSE, 0.232, 0, "Resonance", ionCode);
+  }
+  ionCode = 100313;
+  if (!db->GetParticle(ionCode)) {
+    db->AddParticle("K*(1410)0", "K*(1410)0", 1.414, kFALSE, 0.232, 0, "Resonance", ionCode);
+  }
+  ionCode = 100323;
+  if (!db->GetParticle(ionCode)) {
+    db->AddParticle("K*(1410)+", "K*(1410)+", 1.414, kFALSE, 0.232, +1, "Resonance", ionCode);
+  }
+  ionCode = -100323;
+  if (!db->GetParticle(ionCode)) {
+    db->AddParticle("K*(1410)-", "K*(1410)-", 1.414, kFALSE, 0.232, -1, "Resonance", ionCode);
+  }
+  ionCode = 100211;
+  if (!db->GetParticle(ionCode)) {
+    db->AddParticle("pi(1300)+", "pi(1300)+", 1.165, kFALSE, 0.400, +1, "Resonance", ionCode);
+  }
+  ionCode = -100211;
+  if (!db->GetParticle(ionCode)) {
+    db->AddParticle("pi(1300)-", "pi(1300)-", 1.165, kFALSE, 0.400, -1, "Resonance", ionCode);
+  }
+  ionCode = 202112;
+  if (!db->GetParticle(ionCode)) {
+    db->AddParticle("n(1440)0", "n(1440)0", 1.358, kFALSE, 0.350, 0, "Ion", ionCode);
+  }
+  ionCode = -202212;
+  if (!db->GetParticle(ionCode)) {
+    db->AddParticle("p(1440)bar-", "p(1440)bar-", 1.793, kFALSE, 0.350, -1, "Ion", ionCode);
+  }
+  ionCode = 202212;
+  if (!db->GetParticle(ionCode)) {
+    db->AddParticle("p(1440)+", "p(1440)+", 1.793, kFALSE, 0.350, 1, "Ion", ionCode);
+  }
+
   // Xi-/+ (1820)
   ionCode = 123314;
   if (!db->GetParticle(ionCode)) {
@@ -690,6 +732,21 @@ inline void O2DatabasePDG::addALICEParticles(TDatabasePDG* db)
     db->AddParticle("Xi_c_0_3080", "Xi_c_0_3080", 3.0799, false, 0.0056, 0, "Resonance", ionCode);
   }
   db->AddAntiParticle("Anti-Xi_c_0_3080", -ionCode);
+  ionCode = 24124;
+  if (!db->GetParticle(ionCode)) {
+    db->AddParticle("Lambda_c_Plus_2860", "Lambda_c_Plus_2860", 2.8561, false, 0.0680, 0, "Resonance", ionCode);
+  }
+  db->AddAntiParticle("Anti-Lambda_c_Minus_2860", -ionCode);
+  ionCode = 24126;
+  if (!db->GetParticle(ionCode)) {
+    db->AddParticle("Lambda_c_Plus_2880", "Lambda_c_Plus_2880", 2.8816, false, 0.0056, 0, "Resonance", ionCode);
+  }
+  db->AddAntiParticle("Anti-Lambda_c_Minus_2880", -ionCode);
+  ionCode = 4125;
+  if (!db->GetParticle(ionCode)) {
+    db->AddParticle("Lambda_c_Plus_2940", "Lambda_c_Plus_2940", 2.9396, false, 0.0200, 0, "Resonance", ionCode);
+  }
+  db->AddAntiParticle("Anti-Lambda_c_Minus_2940", -ionCode);
 
   // d*(2380) - dibaryon resonance
 

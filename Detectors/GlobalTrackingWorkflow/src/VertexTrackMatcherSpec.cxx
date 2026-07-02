@@ -23,7 +23,7 @@
 #include "TPCBase/ParameterElectronics.h"
 #include "TPCBase/ParameterDetector.h"
 #include "TPCCalibration/VDriftHelper.h"
-#include "ITSMFTBase/DPLAlpideParam.h"
+#include "DataFormatsITSMFT/DPLAlpideParam.h"
 #include "TStopwatch.h"
 
 using namespace o2::framework;
@@ -98,6 +98,7 @@ void VertexTrackMatcherSpec::updateTimeDependentParams(ProcessingContext& pc)
     mMatcher.setITSROFrameLengthMUS(o2::base::GRPGeomHelper::instance().getGRPECS()->isDetContinuousReadOut(o2::detectors::DetID::ITS) ? alpParamsITS.roFrameLengthInBC * o2::constants::lhc::LHCBunchSpacingMUS : alpParamsITS.roFrameLengthTrig * 1.e-3);
     const auto& alpParamsMFT = o2::itsmft::DPLAlpideParam<o2::detectors::DetID::MFT>::Instance();
     mMatcher.setMFTROFrameLengthMUS(o2::base::GRPGeomHelper::instance().getGRPECS()->isDetContinuousReadOut(o2::detectors::DetID::MFT) ? alpParamsMFT.roFrameLengthInBC * o2::constants::lhc::LHCBunchSpacingMUS : alpParamsMFT.roFrameLengthTrig * 1.e-3);
+    mMatcher.init();
     LOGP(info, "VertexTrackMatcher ITSROFrameLengthMUS:{} MFTROFrameLengthMUS:{}", mMatcher.getITSROFrameLengthMUS(), mMatcher.getMFTROFrameLengthMUS());
   }
   // we may have other params which need to be queried regularly

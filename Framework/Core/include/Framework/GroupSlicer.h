@@ -14,20 +14,33 @@
 
 #include "Framework/Pack.h"
 #include "Framework/ASoA.h"
+#include "Framework/AnalysisHelpers.h"
 
 #include <arrow/util/config.h>
 #include <arrow/util/key_value_metadata.h>
 #include <type_traits>
 #include <string>
+namespace
+{
+template <typename T>
+auto getMatcherFor(std::string const& columnName, o2::header::DataOrigin newOrigin = o2::header::DataOrigin{"AOD"})
+{
+  auto matcher = o2::soa::getMatcherFromTypeForKey<std::decay_t<T>>(columnName);
+  if ((matcher.origin == o2::header::DataOrigin{"AOD"}) && (newOrigin != o2::header::DataOrigin{"AOD"})) {
+    matcher = o2::framework::replaceOrigin(matcher, newOrigin);
+  }
+  return matcher;
+}
+} // namespace
 
 namespace o2::framework
 {
 template <typename G, typename... A>
 struct GroupSlicer {
   using grouping_t = std::decay_t<G>;
-  GroupSlicer(G& gt, std::tuple<A...>& at, ArrowTableSlicingCache& slices)
+  GroupSlicer(G& gt, std::tuple<A...>& at, ArrowTableSlicingCache& slices, header::DataOrigin newOrigin = header::DataOrigin{"AOD"})
     : max{gt.size()},
-      mBegin{GroupSlicerIterator(gt, at, slices)}
+      mBegin{GroupSlicerIterator(gt, at, slices, newOrigin)}
   {
   }
 
@@ -49,24 +62,24 @@ struct GroupSlicer {
     {
     }
 
-    template <typename T>
+    template <soa::is_table T>
+      requires(o2::soa::relatedByIndex<std::decay_t<G>, std::decay_t<T>>() && !soa::is_smallgroups<T>)
+    auto splittingFunction(T&& table)
+    {
+      if (table.size() == 0) {
+        return;
+      }
+      sliceInfos[framework::has_type_at_v<std::decay_t<T>>(associated_pack_t{})] = mSlices->getCacheFor(Entry("", getMatcherFor<T>(mIndexColumnName, replacementOrigin), mIndexColumnName));
+    }
+
+    template <soa::is_smallgroups T>
       requires(o2::soa::relatedByIndex<std::decay_t<G>, std::decay_t<T>>())
     auto splittingFunction(T&& table)
     {
-      constexpr auto index = framework::has_type_at_v<std::decay_t<T>>(associated_pack_t{});
-      auto binding = o2::soa::getLabelFromTypeForKey<std::decay_t<T>>(mIndexColumnName);
-      auto bk = Entry(binding, o2::soa::getMatcherFromTypeForKey<std::decay_t<T>>(mIndexColumnName), mIndexColumnName);
-      if constexpr (!o2::soa::is_smallgroups<std::decay_t<T>>) {
-        if (table.size() == 0) {
-          return;
-        }
-        sliceInfos[index] = mSlices->getCacheFor(bk);
-      } else {
-        if (table.tableSize() == 0) {
-          return;
-        }
-        sliceInfosUnsorted[index] = mSlices->getCacheUnsortedFor(bk);
+      if (table.tableSize() == 0) {
+        return;
       }
+      sliceInfosUnsorted[framework::has_type_at_v<std::decay_t<T>>(associated_pack_t{})] = mSlices->getCacheUnsortedFor(Entry("", getMatcherFor<T>(mIndexColumnName, replacementOrigin), mIndexColumnName));
     }
 
     template <typename T>
@@ -82,13 +95,14 @@ struct GroupSlicer {
       starts[index] = selections[index]->begin();
     }
 
-    GroupSlicerIterator(G& gt, std::tuple<A...>& at, ArrowTableSlicingCache& slices)
+    GroupSlicerIterator(G& gt, std::tuple<A...>& at, ArrowTableSlicingCache& slices, header::DataOrigin newOrigin = header::DataOrigin{"AOD"})
       : mIndexColumnName{std::string("fIndex") + o2::framework::cutString(o2::soa::getLabelFromType<G>())},
         mGt{&gt},
         mAt{&at},
         mGroupingElement{gt.begin()},
         position{0},
-        mSlices{&slices}
+        mSlices{&slices},
+        replacementOrigin{newOrigin}
     {
       if constexpr (soa::is_filtered_table<std::decay_t<G>>) {
         groupSelection = mGt->getSelectedRows();
@@ -96,18 +110,12 @@ struct GroupSlicer {
 
       /// prepare slices and offsets for all associated tables that have index
       /// to grouping table
-      ///
-      std::apply(
-        [&](auto&&... x) -> void {
-          (splittingFunction(x), ...);
-        },
-        at);
       /// extract selections from filtered associated tables
-      std::apply(
-        [&](auto&&... x) -> void {
-          (extractingFunction(x), ...);
-        },
-        at);
+
+      [this]<size_t... Is>(std::tuple<A...>& at, std::index_sequence<Is...>) {
+        (splittingFunction(std::get<Is>(at)), ...);
+        (extractingFunction(std::get<Is>(at)), ...);
+      }(*mAt, std::make_index_sequence<sizeof...(A)>());
     }
 
     GroupSlicerIterator& operator++()
@@ -210,10 +218,16 @@ struct GroupSlicer {
       auto oc = sliceInfos[index].getSliceFor(pos);
       uint64_t offset = oc.first;
       auto count = oc.second;
-      auto groupedElementsTable = originalTable.asArrowTable()->Slice(offset, count);
       if (count == 0) {
-        return std::decay_t<A1>{{groupedElementsTable}, soa::SelectionVector{}};
+        // Empty group: avoid slicing every column only to discard it. Cache one
+        // empty (0-row) table per associated table and reuse it. This is the
+        // common case for sparse grouping (e.g. collisions with no candidates).
+        if (!emptyTables[index]) {
+          emptyTables[index] = originalTable.asArrowTable()->Slice(0, 0);
+        }
+        return std::decay_t<A1>{{emptyTables[index]}, soa::SelectionVector{}};
       }
+      auto groupedElementsTable = originalTable.asArrowTable()->Slice(offset, count);
 
       // for each grouping element we need to slice the selection vector
       auto start_iterator = std::lower_bound(starts[index], selections[index]->end(), offset);
@@ -267,10 +281,14 @@ struct GroupSlicer {
     std::span<int64_t const> groupSelection;
     std::array<std::span<int64_t const> const*, sizeof...(A)> selections;
     std::array<std::span<int64_t const>::iterator, sizeof...(A)> starts;
+    // Cached empty (0-row) table per associated table, lazily built and reused
+    // for empty groups so we do not slice every column on each empty group.
+    std::array<std::shared_ptr<arrow::Table>, sizeof...(A)> emptyTables{};
 
     std::array<SliceInfoPtr, sizeof...(A)> sliceInfos;
     std::array<SliceInfoUnsortedPtr, sizeof...(A)> sliceInfosUnsorted;
     ArrowTableSlicingCache* mSlices;
+    header::DataOrigin replacementOrigin;
   };
 
   GroupSlicerIterator& begin()

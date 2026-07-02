@@ -15,9 +15,17 @@
 #pragma link off all classes;
 #pragma link off all functions;
 
+#pragma link C++ class o2::itsmft::DPLAlpideParam < o2::detectors::DetID::ITS> + ;
+#pragma link C++ class o2::itsmft::DPLAlpideParam < o2::detectors::DetID::MFT> + ;
+#pragma link C++ class o2::conf::ConfigurableParamHelper < o2::itsmft::DPLAlpideParam < o2::detectors::DetID::ITS>> + ;
+#pragma link C++ class o2::conf::ConfigurableParamHelper < o2::itsmft::DPLAlpideParam < o2::detectors::DetID::MFT>> + ;
+
 #pragma link C++ class o2::itsmft::Digit + ;
 #pragma link C++ class o2::itsmft::NoiseMap + ;
 #pragma link C++ class o2::itsmft::TimeDeadMap + ;
+#pragma link C++ class o2::itsmft::StuckPixelEntry + ;
+#pragma link C++ class std::vector < o2::itsmft::StuckPixelEntry> + ;
+#pragma link C++ class o2::itsmft::StuckPixelData + ;
 #pragma link C++ class std::vector < o2::itsmft::Digit> + ;
 
 #pragma link C++ class o2::itsmft::GBTCalibData + ;

@@ -37,6 +37,7 @@
 #include "TPCSimulation/GEMAmplification.h"
 
 // for ITSMFT
+#include "DataFormatsITSMFT/DPLAlpideParamInitializer.h"
 #include "ITSMFTDigitizerSpec.h"
 #include "ITSMFTWorkflow/DigitWriterSpec.h"
 
@@ -48,6 +49,10 @@
 // for alice 3 TRK
 #include "TRKDigitizerSpec.h"
 #include "TRKWorkflow/DigitWriterSpec.h"
+
+// for alice 3 TF3
+#include "IOTOFDigitizerSpec.h"
+#include "IOTOFWorkflow/DigitWriterSpec.h"
 #endif
 
 // for TOF
@@ -225,6 +230,7 @@ void customize(std::vector<o2::framework::ConfigParamSpec>& workflowOptions)
 
   // option to propagate CTP Lumi scaler counts (if >=0) into the CTP digits
   workflowOptions.push_back(ConfigParamSpec{"store-ctp-lumi", VariantType::Float, -1.f, {"store CTP lumi scaler in CTP digits (if >= 0)"}});
+  o2::itsmft::DPLAlpideParamInitializer::addConfigOption(workflowOptions);
 }
 
 void customize(std::vector<o2::framework::DispatchPolicy>& policies)
@@ -637,20 +643,22 @@ WorkflowSpec defineDataProcessing(ConfigContext const& configcontext)
   // the ITS part
   if (isEnabled(o2::detectors::DetID::ITS)) {
     detList.emplace_back(o2::detectors::DetID::ITS);
+    bool doStag = o2::itsmft::DPLAlpideParamInitializer::isITSStaggeringEnabled(configcontext);
     // connect the ITS digitization
-    digitizerSpecs.emplace_back(o2::itsmft::getITSDigitizerSpec(fanoutsize++, mctruth));
+    digitizerSpecs.emplace_back(o2::itsmft::getITSDigitizerSpec(fanoutsize++, mctruth, doStag));
     // connect ITS digit writer
-    writerSpecs.emplace_back(o2::itsmft::getITSDigitWriterSpec(mctruth));
+    writerSpecs.emplace_back(o2::itsmft::getITSDigitWriterSpec(mctruth, doStag));
   }
 
 #ifdef ENABLE_UPGRADES
   // the ITS3 part
   if (isEnabled(o2::detectors::DetID::IT3)) {
     detList.emplace_back(o2::detectors::DetID::IT3);
+    bool doStag = o2::itsmft::DPLAlpideParamInitializer::isITSStaggeringEnabled(configcontext);
     // connect the ITS digitization
-    specs.emplace_back(o2::its3::getITS3DigitizerSpec(fanoutsize++, mctruth));
+    specs.emplace_back(o2::its3::getITS3DigitizerSpec(fanoutsize++, mctruth, doStag));
     // // connect ITS digit writer
-    specs.emplace_back(o2::its3::getITS3DigitWriterSpec(mctruth));
+    specs.emplace_back(o2::its3::getITS3DigitWriterSpec(mctruth, doStag));
   }
 
   // the ALICE 3 TRK part
@@ -661,15 +669,25 @@ WorkflowSpec defineDataProcessing(ConfigContext const& configcontext)
     // connect the ALICE 3 TRK digit writer
     specs.emplace_back(o2::trk::getTRKDigitWriterSpec(mctruth));
   }
+
+  // the ALICE 3 IOTOF part
+  if (isEnabled(o2::detectors::DetID::TF3)) {
+    detList.emplace_back(o2::detectors::DetID::TF3);
+    // connect the ALICE 3 IOTOF digitization
+    specs.emplace_back(o2::iotof::getIOTOFDigitizerSpec(fanoutsize++, mctruth));
+    // connect the ALICE 3 IOTOF digit writer
+    specs.emplace_back(o2::iotof::getIOTOFDigitWriterSpec(mctruth));
+  }
 #endif
 
   // the MFT part
   if (isEnabled(o2::detectors::DetID::MFT)) {
     detList.emplace_back(o2::detectors::DetID::MFT);
+    bool doStag = o2::itsmft::DPLAlpideParamInitializer::isMFTStaggeringEnabled(configcontext);
     // connect the MFT digitization
-    digitizerSpecs.emplace_back(o2::itsmft::getMFTDigitizerSpec(fanoutsize++, mctruth));
+    digitizerSpecs.emplace_back(o2::itsmft::getMFTDigitizerSpec(fanoutsize++, mctruth, doStag));
     // connect MFT digit writer
-    writerSpecs.emplace_back(o2::itsmft::getMFTDigitWriterSpec(mctruth));
+    writerSpecs.emplace_back(o2::itsmft::getMFTDigitWriterSpec(mctruth, doStag));
   }
 
   // the TOF part

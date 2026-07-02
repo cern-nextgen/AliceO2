@@ -64,9 +64,14 @@ struct ArrowTableSlicingCacheDef {
   constexpr static ServiceKind service_kind = ServiceKind::Global;
   Cache bindingsKeys;
   Cache bindingsKeysUnsorted;
+  header::DataOrigin newOrigin = header::DataOrigin{"AOD"};
 
   void setCaches(Cache&& bsks);
   void setCachesUnsorted(Cache&& bsks);
+  void setOrigin(header::DataOrigin newOrigin_ = header::DataOrigin{"AOD"})
+  {
+    newOrigin = newOrigin_;
+  }
 };
 
 struct ArrowTableSlicingCache {
@@ -80,7 +85,9 @@ struct ArrowTableSlicingCache {
   std::vector<std::vector<int>> valuesUnsorted;
   std::vector<ListVector> groups;
 
-  ArrowTableSlicingCache(Cache&& bsks, Cache&& bsksUnsorted = {});
+  header::DataOrigin newOrigin = header::DataOrigin{"AOD"};
+
+  ArrowTableSlicingCache(Cache&& bsks, Cache&& bsksUnsorted = {}, header::DataOrigin newOrigin_ = header::DataOrigin{"AOD"});
 
   // set caching information externally
   void setCaches(Cache&& bsks, Cache&& bsksUnsorted = {});
@@ -99,6 +106,12 @@ struct ArrowTableSlicingCache {
   SliceInfoUnsortedPtr getCacheUnsortedFor(Entry const& bindingKey) const;
   SliceInfoPtr getCacheForPos(int pos) const;
   SliceInfoUnsortedPtr getCacheUnsortedForPos(int pos) const;
+
+  // get a cached empty (0-row) slice of the given table, so that empty groups
+  // do not slice every column only to produce 0 rows (the common case for
+  // sparse grouping). One-slot cache keyed by the table pointer.
+  std::shared_ptr<arrow::Table> getEmptySliceFor(std::shared_ptr<arrow::Table> const& table);
+  std::pair<arrow::Table const*, std::shared_ptr<arrow::Table>> emptySlice{nullptr, nullptr};
 
   static void validateOrder(Entry const& bindingKey, std::shared_ptr<arrow::Table> const& input);
 };

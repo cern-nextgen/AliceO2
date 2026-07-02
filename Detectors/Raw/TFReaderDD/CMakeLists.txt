@@ -11,6 +11,7 @@
 
 o2_add_library(TFReaderDD
                SOURCES src/SubTimeFrameFile.cxx
+                       src/BinFileOp.cxx
                        src/SubTimeFrameFileReader.cxx
                PUBLIC_LINK_LIBRARIES FairRoot::Base
                                      O2::Headers
@@ -25,4 +26,11 @@ o2_add_executable(tf-reader-workflow
                   COMPONENT_NAME raw
                   SOURCES src/TFReaderSpec.cxx
                           src/tf-reader-workflow.cxx
+                  PUBLIC_LINK_LIBRARIES O2::TFReaderDD)
+
+
+o2_add_executable(tf-dump-workflow
+                  COMPONENT_NAME raw
+                  SOURCES src/RawTFDumpSpec.cxx
+                          src/tf-data-dump-workflow.cxx
                   PUBLIC_LINK_LIBRARIES O2::TFReaderDD)
