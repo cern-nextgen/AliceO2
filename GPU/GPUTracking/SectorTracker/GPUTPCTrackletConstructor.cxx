@@ -39,8 +39,7 @@ GPUdii() void GPUTPCTrackletConstructor::InitTracklet(MemLayout::wrapper<GPUTPCT
 GPUd() bool GPUTPCTrackletConstructor::CheckCov(MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::reference_restrict> tParam)
 {
   bool ok = 1;
-  MemLayout::wrapper<detail::GPUTPCCovarianceSkeleton, MemLayout::reference> c = tParam.mParam.mC;
-  //const float* c = tParam.mParam.Cov();
+  const float* c = tParam.Cov();
   for (int32_t i = 0; i < 15; i++) {
     ok = ok && CAMath::Finite(c[i]);
   }

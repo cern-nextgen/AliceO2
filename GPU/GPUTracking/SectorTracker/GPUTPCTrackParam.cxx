@@ -697,7 +697,7 @@ GPUd() bool GPUTPCTrackParamSkeleton<F>::CheckNumericalQuality() const
 
   bool ok = CAMath::Finite(GetX()) && CAMath::Finite(mSignCosPhi) && CAMath::Finite(mChi2);
 
-  MemLayout::wrapper<detail::GPUTPCCovarianceSkeleton, MemLayout::const_reference> c = Cov();
+  const float* c = Cov();
   for (int32_t i = 0; i < 15; i++) {
     ok = ok && CAMath::Finite(c[i]);
   }
