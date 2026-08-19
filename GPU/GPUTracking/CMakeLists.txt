@@ -44,6 +44,9 @@ set(SRCS
     SectorTracker/GPUTPCTracker.cxx
     SectorTracker/GPUTPCTrackingData.cxx
     SectorTracker/GPUTPCTrackletConstructor.cxx
+    SectorTracker/GPUTPCTrackletSortCount.cxx
+    SectorTracker/GPUTPCTrackletSortOffsets.cxx
+    SectorTracker/GPUTPCTrackletSortScatter.cxx
     SectorTracker/GPUTPCSectorDebugSortKernels.cxx
     SectorTracker/GPUTPCCreateOccupancyMap.cxx
     SectorTracker/GPUTPCNeighboursFinder.cxx
