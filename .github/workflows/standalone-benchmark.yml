@@ -14,14 +14,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [cpu, nvidia-h100, nvidia-l40s, amd-mi300x, amd-w7900]
+        name: [nvidia-h100, nvidia-l40s, amd-mi300x, amd-w7900] # cpu, 
         include:
-          - name: cpu
-            runner: cern-nextgen-mi300x
-            cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=0
-            profiler_runs: 42
-            standalone_runs: 42
-            cpu_gpu: "-c"
+          # - name: cpu
+          #   runner: cern-nextgen-mi300x
+          #   cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=0
+          #   profiler_runs: 42
+          #   standalone_runs: 42
+          #   cpu_gpu: "-c"
           - name: nvidia-h100
             runner: cern-nextgen-h100
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=90
