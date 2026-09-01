@@ -31,6 +31,10 @@ class GPUTPCTracker;
 class GPUTPCTrackletSelector : public GPUKernelTemplate
 {
  public:
+  enum K { defaultKernel = 0,
+           prepare = 1,
+           sort = 2 };
+
   struct GPUSharedMemory {
     int32_t mItr0;          // index of the first track in the block
     int32_t mNThreadsTotal; // total n threads

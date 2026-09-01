@@ -28,9 +28,6 @@
 #include "GPUTPCStartHitsFinder.h"
 #include "GPUTPCStartHitsSorter.h"
 #include "GPUTPCTrackletConstructor.h"
-#include "GPUTPCTrackletSortCount.h"
-#include "GPUTPCTrackletSortOffsets.h"
-#include "GPUTPCTrackletSortScatter.h"
 #include "GPUTPCTrackletSelector.h"
 #include "GPUTPCSectorDebugSortKernels.h"
 #include "utils/strtag.h"
@@ -216,11 +213,11 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
 
     // Sort tracklets by (LastRow, FirstRow) ahead of the Selector, so a warp's threads mostly
     // walk the same TPC row at the same time (coalesced HitWeight() access) and finish their
-    // row loop together (fewer idle lanes from tracklet-length divergence).
-    runKernel<GPUMemClean16>(GetGridAutoStep(useStream, RecoStep::TPCSectorTracking), trkShadow.TrackletSortKeyCount(), GPUTPCGeometry::NROWS * GPUTPCGeometry::NROWS * sizeof(*trkShadow.TrackletSortKeyCount()));
-    runKernel<GPUTPCTrackletSortCount>({GetGridAuto(useStream), {iSector}});
-    runKernel<GPUTPCTrackletSortOffsets>({GetGrid(1, 1, useStream), {iSector}});
-    runKernel<GPUTPCTrackletSortScatter>({GetGridAuto(useStream), {iSector}});
+    // row loop together (fewer idle lanes from tracklet-length divergence). The "sort" sub-kernel
+    // always sorts the full, host-known-size NMaxTracklets buffer (padding pushed to the tail by
+    // its comparator), so no GPU->host sync of the real tracklet count is needed here.
+    runKernel<GPUTPCTrackletSelector, GPUTPCTrackletSelector::prepare>({GetGridAuto(useStream), {iSector}});
+    runKernel<GPUTPCTrackletSelector, GPUTPCTrackletSelector::sort>({GetGridAuto(useStream), {iSector}});
 
     runKernel<GPUTPCTrackletSelector>({GetGridAuto(useStream), {iSector}});
     runKernel<GPUTPCExtrapolationTrackingCopyNumbers>({{1, -ThreadCount(), useStream}, {iSector}}, 1);
@@ -238,6 +235,14 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
     }
   });
   mRec->SetNActiveThreadsOuterLoop(1);
+  // The "sort" sub-kernel above draws its CUB temp storage from the volatile device memory pool
+  // (AllocateVolatileDeviceMemory), once per sector, on that sector's own stream. Sectors run on
+  // different streams and their sort kernels can execute concurrently on the GPU, so we must NOT
+  // return (and thereby let a later sector reuse) that memory until every sector's sort kernel has
+  // been enqueued: returning it earlier would let two concurrently-running sort kernels alias the
+  // same temp-storage address. Deferring the single ReturnVolatileDeviceMemory() call to here means
+  // each sector gets its own, non-overlapping slice of the pool for the lifetime of the loop.
+  mRec->ReturnVolatileDeviceMemory();
   if (error) {
     return (3);
   }
