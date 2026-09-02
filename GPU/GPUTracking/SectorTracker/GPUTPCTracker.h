@@ -185,8 +185,9 @@ class GPUTPCTracker : public GPUProcessor
   GPUhd() GPUglobalref() GPUTPCHitId* TrackletTmpStartHits() const { return mTrackletTmpStartHits; }
 
   GPUhd() GPUglobalref() auto Tracklets() const { return mTracklets; }
+  GPUhd() GPUglobalref() auto TrackletsSorted() const { return mTrackletsSorted; }
   GPUhd() GPUglobalref() calink* TrackletRowHits() const { return mTrackletRowHits; }
-  GPUhd() GPUglobalref() uint32_t* TrackletSortedIndex() const { return mTrackletSortedIndex; }
+  GPUhd() GPUglobalref() GPUAtomic(uint32_t) * TrackletSortKeyCount() const { return mTrackletSortKeyCount; }
 
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NTracks() const { return &mCommonMem->nTracks; }
   GPUhd() GPUglobalref() auto Tracks() const { return mTracks; }
@@ -239,9 +240,10 @@ class GPUTPCTracker : public GPUProcessor
   // event
   GPUglobalref() commonMemoryStruct* mCommonMem = nullptr;           // common event memory
   GPUglobalref() GPUTPCHitId* mTrackletStartHits = nullptr;          // start hits for the tracklets
-  GPUglobalref() MemLayout::interface<GPUTPCTrackletSkeleton, MemLayout::pointer, GPUTPCTrackletLayout>::type mTracklets; // tracklets
+  GPUglobalref() MemLayout::interface<GPUTPCTrackletSkeleton, MemLayout::pointer, GPUTPCTrackletLayout>::type mTracklets; // tracklets, in construction order
+  GPUglobalref() MemLayout::interface<GPUTPCTrackletSkeleton, MemLayout::pointer, GPUTPCTrackletLayout>::type mTrackletsSorted; // same tracklets, physically rearranged into (LastRow,FirstRow) order for GPUTPCTrackletSelector's select pass
   GPUglobalref() calink* mTrackletRowHits = nullptr;                 // Hits for each Tracklet in each row
-  GPUglobalref() uint32_t* mTrackletSortedIndex = nullptr;              // [mNMaxTracklets] permutation: sorted position -> original tracklet index, consumed by GPUTPCTrackletSelector
+  GPUglobalref() GPUAtomic(uint32_t) * mTrackletSortKeyCount = nullptr; // [NROWS*NROWS] histogram by (LastRow,FirstRow) key, later reused in place as prefix-sum offsets / scatter cursor
   GPUglobalref() MemLayout::interface<GPUTPCTrackSkeleton, MemLayout::pointer, GPUTPCTrackLayout>::type mTracks;       // reconstructed tracks
   GPUglobalref() GPUTPCHitId* mTrackHits = nullptr;                  // array of track hit numbers
 

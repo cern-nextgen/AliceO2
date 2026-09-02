@@ -47,13 +47,6 @@ inline void GPUCA_M_CAT(GPUReconstruction, GPUCA_GPUTYPE)::runKernelBackendTimed
 {
   GPUCommonAlgorithm::sortOnDevice(this, _xyz.x.stream, mProcessorsShadow->tpcMerger.TrackSortO2(), processors()->tpcMerger.NOutputTracksTPCO2(), GPUTPCGMO2OutputSort_comp());
 }
-
-template <>
-inline void GPUCA_M_CAT(GPUReconstruction, GPUCA_GPUTYPE)::runKernelBackendTimed<GPUTPCTrackletSelector, GPUTPCTrackletSelector::sort>(const krnlSetupTime& _xyz)
-{
-  GPUTPCTracker& trackerShadow = mProcessorsShadow->tpcTrackers[_xyz.y.index];
-  GPUCommonAlgorithm::sortOnDevice(this, _xyz.x.stream, trackerShadow.TrackletSortedIndex(), processors()->tpcTrackers[_xyz.y.index].NMaxTracklets(), GPUTPCTrackletSort_comp(&trackerShadow));
-}
 #endif // GPUCA_SPECIALIZE_THRUST_SORTS
 
 template <>

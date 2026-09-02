@@ -18,55 +18,93 @@
 #include "GPUTPCTrackParam.h"
 #include "GPUTPCTracklet.h"
 #include "GPUCommonMath.h"
-#include "GPUCommonAlgorithm.h"
 #include "MemLayout.h"
 
 using namespace o2::gpu;
 
-// The sorted-index buffer is fixed at NMaxTracklets (host-known ahead of time, so the
-// CUDA/HIP specialization of the "sort" sub-kernel can call GPUCommonAlgorithm::sortOnDevice
-// without a GPU->host round trip for the real, device-only tracklet count). Slots at or
-// beyond the real tracklet count are pushed to the tail here, so the "select" sub-kernel's
-// [0, NTracklets) range still sees only real, correctly-sorted tracklets.
-struct GPUTPCTrackletSort_comp {
-  const GPUTPCTracker* const mTracker;
-  GPUhd() GPUTPCTrackletSort_comp(const GPUTPCTracker* tracker) : mTracker(tracker) {}
-  GPUd() bool operator()(const uint32_t aa, const uint32_t bb) const
-  {
-    const uint32_t n = *mTracker->NTracklets();
-    const bool aValid = aa < n;
-    const bool bValid = bb < n;
-    if (aValid != bValid) {
-      return aValid;
-    }
-    if (!aValid) {
-      return aa < bb;
-    }
-    GPUglobalref() MemLayout::wrapper<GPUTPCTrackletSkeleton, MemLayout::const_reference_restrict> ta = mTracker->Tracklets()[aa];
-    GPUglobalref() MemLayout::wrapper<GPUTPCTrackletSkeleton, MemLayout::const_reference_restrict> tb = mTracker->Tracklets()[bb];
-    if (ta.LastRow() != tb.LastRow()) {
-      return ta.LastRow() < tb.LastRow();
-    }
-    return ta.FirstRow() < tb.FirstRow();
-  }
-};
+// Tracklets are physically rearranged into (LastRow, FirstRow) order ahead of selection, via a
+// counting sort rather than a comparison sort: both keys are bounded to [0, NROWS), so the
+// combined key only spans NROWS*NROWS distinct values -- small enough that a histogram + prefix
+// sum + scatter beats a general O(N log N) comparison sort. Unlike a sorted *index* permutation,
+// physically moving the tracklet records (SoA field by SoA field, via MemLayout's wrapper
+// assignment) means the "select" sub-kernel below can read TrackletsSorted()[i] directly, with i
+// running sequentially across a warp -- restoring coalesced SoA access there, instead of forcing
+// every field read through a scattered per-lane index into Tracklets().
+// The three passes below share TrackletSortKeyCount() as histogram, then in-place prefix-sum
+// offsets, then per-key scatter cursor.
 
 template <>
-GPUdii() void GPUTPCTrackletSelector::Thread<GPUTPCTrackletSelector::prepare>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& s, processorType& GPUrestrict() tracker)
+GPUdii() void GPUTPCTrackletSelector::Thread<GPUTPCTrackletSelector::count>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& s, processorType& GPUrestrict() tracker)
 {
-  for (uint32_t i = iBlock * nThreads + iThread; i < tracker.NMaxTracklets(); i += nBlocks * nThreads) {
-    tracker.TrackletSortedIndex()[i] = i;
+  const uint32_t nTracklets = *tracker.NTracklets();
+  for (uint32_t itr = iBlock * nThreads + iThread; itr < nTracklets; itr += nBlocks * nThreads) {
+    GPUglobalref() MemLayout::wrapper<GPUTPCTrackletSkeleton, MemLayout::const_reference_restrict> tracklet = tracker.Tracklets()[itr];
+    const uint32_t key = tracklet.LastRow() * GPUTPCGeometry::NROWS + tracklet.FirstRow();
+    CAMath::AtomicAdd(&tracker.TrackletSortKeyCount()[key], 1u);
   }
 }
 
 template <>
-GPUdii() void GPUTPCTrackletSelector::Thread<GPUTPCTrackletSelector::sort>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& s, processorType& GPUrestrict() tracker)
+GPUdii() void GPUTPCTrackletSelector::Thread<GPUTPCTrackletSelector::offsets>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& s, processorType& GPUrestrict() tracker)
 {
-#ifndef GPUCA_SPECIALIZE_THRUST_SORTS
-  if (iThread == 0 && iBlock == 0) {
-    GPUCommonAlgorithm::sortDeviceDynamic(tracker.TrackletSortedIndex(), tracker.TrackletSortedIndex() + tracker.NMaxTracklets(), GPUTPCTrackletSort_comp(&tracker));
+  if (iBlock != 0) {
+    return;
   }
-#endif
+  // Parallel block-wide exclusive prefix sum over the NROWS*NROWS-key histogram, launched with
+  // exactly OffsetsThreads threads in one block (see GPUChainTrackingSectorTracker.cxx). A single
+  // serial thread doing this (the previous implementation) means ~23k *dependent* global-memory
+  // round trips -- each atomic's write value depends on the previous one's result, so nothing can
+  // overlap -- which measured at ~138ms on a partitioned H100, dwarfing every other pass in this
+  // sort. Splitting the key range into OffsetsThreads chunks, prefix-summing each chunk locally,
+  // then combining the per-chunk totals with a small (log2(OffsetsThreads)-step) shared-memory
+  // scan removes that dependency chain almost entirely.
+  GPUglobalref() GPUAtomic(uint32_t)* GPUrestrict() keyCount = tracker.TrackletSortKeyCount();
+  constexpr uint32_t nKeys = GPUTPCGeometry::NROWS * GPUTPCGeometry::NROWS;
+  const uint32_t chunk = (nKeys + nThreads - 1) / nThreads;
+  const uint32_t begin = CAMath::Min(nKeys, (uint32_t)iThread * chunk);
+  const uint32_t end = CAMath::Min(nKeys, begin + chunk);
+
+  // Phase 1: each thread sums the raw counts in its own chunk (plain reads -- the "count" pass
+  // that produced them ran to completion in an earlier kernel launch, so there is no concurrent
+  // writer left to race with).
+  uint32_t local = 0;
+  for (uint32_t key = begin; key < end; key++) {
+    local += keyCount[key];
+  }
+  s.mOffsetsScan[iThread] = local;
+  GPUbarrier();
+
+  // Phase 2: turn the per-thread chunk totals into an exclusive prefix sum, in shared memory
+  // (Hillis-Steele scan: read-then-barrier-then-write-then-barrier avoids any read/write race
+  // between a slot's own update and a neighbor reading its pre-update value this round).
+  for (uint32_t offset = 1; offset < (uint32_t)nThreads; offset <<= 1) {
+    const uint32_t addend = ((uint32_t)iThread >= offset) ? s.mOffsetsScan[iThread - offset] : 0;
+    GPUbarrier();
+    s.mOffsetsScan[iThread] += addend;
+    GPUbarrier();
+  }
+  const uint32_t base = s.mOffsetsScan[iThread] - local; // inclusive -> exclusive
+
+  // Phase 3: re-derive each key's count and write back its final offset (doubling as the
+  // scatter kernel's per-key cursor), now fully in parallel across chunks.
+  uint32_t running = base;
+  for (uint32_t key = begin; key < end; key++) {
+    const uint32_t c = keyCount[key];
+    keyCount[key] = running;
+    running += c;
+  }
+}
+
+template <>
+GPUdii() void GPUTPCTrackletSelector::Thread<GPUTPCTrackletSelector::scatter>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& s, processorType& GPUrestrict() tracker)
+{
+  const uint32_t nTracklets = *tracker.NTracklets();
+  for (uint32_t itr = iBlock * nThreads + iThread; itr < nTracklets; itr += nBlocks * nThreads) {
+    GPUglobalref() MemLayout::wrapper<GPUTPCTrackletSkeleton, MemLayout::const_reference_restrict> tracklet = tracker.Tracklets()[itr];
+    const uint32_t key = tracklet.LastRow() * GPUTPCGeometry::NROWS + tracklet.FirstRow();
+    const uint32_t pos = CAMath::AtomicAdd(&tracker.TrackletSortKeyCount()[key], 1u);
+    tracker.TrackletsSorted()[pos] = tracklet; // physical, per-SoA-field copy (MemLayout::wrapper assignment)
+  }
 }
 
 template <>
@@ -87,8 +125,7 @@ GPUdii() void GPUTPCTrackletSelector::Thread<0>(int32_t nBlocks, int32_t nThread
   for (int32_t i = s.mItr0 + iThread; i < s.mNTracklets; i += s.mNThreadsTotal) {
     GPUbarrierWarp();
 
-    const int32_t itr = tracker.TrackletSortedIndex()[i];
-    GPUglobalref() MemLayout::wrapper<GPUTPCTrackletSkeleton, MemLayout::reference_restrict> tracklet = tracker.Tracklets()[itr];
+    GPUglobalref() MemLayout::wrapper<GPUTPCTrackletSkeleton, MemLayout::reference_restrict> tracklet = tracker.TrackletsSorted()[i];
 
     int32_t firstRow = tracklet.FirstRow();
     int32_t lastRow = tracklet.LastRow();

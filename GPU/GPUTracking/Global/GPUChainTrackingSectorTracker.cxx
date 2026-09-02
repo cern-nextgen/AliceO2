@@ -213,11 +213,15 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
 
     // Sort tracklets by (LastRow, FirstRow) ahead of the Selector, so a warp's threads mostly
     // walk the same TPC row at the same time (coalesced HitWeight() access) and finish their
-    // row loop together (fewer idle lanes from tracklet-length divergence). The "sort" sub-kernel
-    // always sorts the full, host-known-size NMaxTracklets buffer (padding pushed to the tail by
-    // its comparator), so no GPU->host sync of the real tracklet count is needed here.
-    runKernel<GPUTPCTrackletSelector, GPUTPCTrackletSelector::prepare>({GetGridAuto(useStream), {iSector}});
-    runKernel<GPUTPCTrackletSelector, GPUTPCTrackletSelector::sort>({GetGridAuto(useStream), {iSector}});
+    // row loop together (fewer idle lanes from tracklet-length divergence). Implemented as a
+    // counting sort (count / offsets / scatter) rather than a comparison sort, since the key is
+    // bounded to NROWS*NROWS distinct values, and the scatter physically rearranges the tracklet
+    // SoA into TrackletsSorted() rather than just permuting an index array, so the Selector's own
+    // reads stay sequential (and therefore coalesced) too -- see GPUTPCTrackletSelector.cxx.
+    runKernel<GPUMemClean16>(GetGridAutoStep(useStream, RecoStep::TPCSectorTracking), trkShadow.TrackletSortKeyCount(), GPUTPCGeometry::NROWS * GPUTPCGeometry::NROWS * sizeof(*trkShadow.TrackletSortKeyCount()));
+    runKernel<GPUTPCTrackletSelector, GPUTPCTrackletSelector::count>({GetGridAuto(useStream), {iSector}});
+    runKernel<GPUTPCTrackletSelector, GPUTPCTrackletSelector::offsets>({GetGrid(GPUTPCTrackletSelector::OffsetsThreads, GPUTPCTrackletSelector::OffsetsThreads, useStream), {iSector}});
+    runKernel<GPUTPCTrackletSelector, GPUTPCTrackletSelector::scatter>({GetGridAuto(useStream), {iSector}});
 
     runKernel<GPUTPCTrackletSelector>({GetGridAuto(useStream), {iSector}});
     runKernel<GPUTPCExtrapolationTrackingCopyNumbers>({{1, -ThreadCount(), useStream}, {iSector}}, 1);

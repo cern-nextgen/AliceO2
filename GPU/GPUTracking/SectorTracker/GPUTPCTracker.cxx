@@ -65,6 +65,7 @@ void* GPUTPCTracker::SetPointersScratch(void* mem)
   if (mRec->GetRecoStepsGPU() & gpudatatypes::RecoStep::TPCSectorTracking) {
     computePointerWithAlignment(mem, mTrackletTmpStartHits, GPUTPCGeometry::NROWS * mNMaxRowStartHits);
     computePointerWithAlignment(mem, mRowStartHitCountOffset, GPUTPCGeometry::NROWS);
+    computePointerWithAlignment(mem, mTrackletSortKeyCount, GPUTPCGeometry::NROWS * GPUTPCGeometry::NROWS + 16 / sizeof(*mTrackletSortKeyCount)); // slack for GPUMemClean16 rounding up to 16 bytes
   }
   return mem;
 }
@@ -139,8 +140,8 @@ GPUhd() void* GPUTPCTracker::SetPointersTracklets(void* mem)
 {
   auto tracklet_helper = [&mem, this](auto& tracklets) -> void { computePointerWithAlignment(mem, tracklets, mNMaxTracklets); };
   ApplyRecursive{tracklet_helper}(mTracklets);
+  ApplyRecursive{tracklet_helper}(mTrackletsSorted);
   computePointerWithAlignment(mem, mTrackletRowHits, mNMaxRowHits);
-  computePointerWithAlignment(mem, mTrackletSortedIndex, mNMaxTracklets);
   return mem;
 }
 
