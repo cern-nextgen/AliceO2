@@ -34,6 +34,18 @@ class GPUTPCTracker;
 class GPUTPCTrackletSortOffsets : public GPUKernelTemplate
 {
  public:
+  // Fixed thread count this kernel is launched with (single block, see
+  // GPUChainTrackingSectorTracker.cxx): the exclusive prefix sum over the NROWS*NROWS-key
+  // histogram is done as a parallel block-wide scan, not a single-thread serial loop -- a single
+  // thread doing ~23k dependent global-memory round trips (each atomic's write value depends on
+  // the previous one's result, so nothing can overlap) dominates the entire tracklet sort
+  // (observed ~138ms on a partitioned H100, vs. ~1-5ms for the count/scatter passes).
+  static constexpr int32_t OffsetsThreads = 256;
+
+  struct GPUSharedMemory {
+    uint32_t mScan[OffsetsThreads]; // per-thread chunk totals / running block-wide scan
+  };
+
   typedef GPUconstantref() GPUTPCTracker processorType;
   GPUhdi() constexpr static gpudatatypes::RecoStep GetRecoStep() { return gpudatatypes::RecoStep::TPCSectorTracking; }
   GPUhdi() static processorType* Processor(GPUConstantMem& processors)

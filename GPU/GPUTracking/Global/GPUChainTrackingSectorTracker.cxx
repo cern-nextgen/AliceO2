@@ -219,7 +219,7 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
     // row loop together (fewer idle lanes from tracklet-length divergence).
     runKernel<GPUMemClean16>(GetGridAutoStep(useStream, RecoStep::TPCSectorTracking), trkShadow.TrackletSortKeyCount(), GPUTPCGeometry::NROWS * GPUTPCGeometry::NROWS * sizeof(*trkShadow.TrackletSortKeyCount()));
     runKernel<GPUTPCTrackletSortCount>({GetGridAuto(useStream), {iSector}});
-    runKernel<GPUTPCTrackletSortOffsets>({GetGrid(1, 1, useStream), {iSector}});
+    runKernel<GPUTPCTrackletSortOffsets>({GetGrid(GPUTPCTrackletSortOffsets::OffsetsThreads, GPUTPCTrackletSortOffsets::OffsetsThreads, useStream), {iSector}});
     runKernel<GPUTPCTrackletSortScatter>({GetGridAuto(useStream), {iSector}});
 
     runKernel<GPUTPCTrackletSelector>({GetGridAuto(useStream), {iSector}});
