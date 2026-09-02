@@ -37,11 +37,12 @@ class GPUTPCTrackletSelector : public GPUKernelTemplate
            scatter = 3 };
 
   // Fixed thread count the "offsets" sub-kernel is launched with (single block, see
-  // GPUChainTrackingSectorTracker.cxx): the exclusive prefix sum over the NROWS*NROWS-key
-  // histogram is done as a parallel block-wide scan, not a single-thread serial loop -- a single
-  // thread doing ~23k dependent global-memory round trips (each atomic's write value depends on
-  // the previous one's result, so nothing can overlap) dominates the entire tracklet sort
-  // (observed ~138ms on a partitioned H100, vs. ~1-5ms for the count/scatter passes).
+  // GPUChainTrackingSectorTracker.cxx): the exclusive prefix sum over the NROWS-key histogram is
+  // done as a parallel block-wide scan, not a single-thread serial loop -- a single thread doing
+  // dependent global-memory round trips (each atomic's write value depends on the previous one's
+  // result, so nothing can overlap) dominated the entire tracklet sort when this key space was
+  // still NROWS*NROWS (observed ~138ms on a partitioned H100, vs. ~1-5ms for the count/scatter
+  // passes) and remains serialized in principle now, just over a much smaller key space.
   static constexpr int32_t OffsetsThreads = 256;
 
   struct GPUSharedMemory {
