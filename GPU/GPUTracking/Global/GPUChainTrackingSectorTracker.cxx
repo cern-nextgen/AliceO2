@@ -28,9 +28,6 @@
 #include "GPUTPCStartHitsFinder.h"
 #include "GPUTPCStartHitsSorter.h"
 #include "GPUTPCTrackletConstructor.h"
-#include "GPUTPCTrackletSortCount.h"
-#include "GPUTPCTrackletSortOffsets.h"
-#include "GPUTPCTrackletSortScatter.h"
 #include "GPUTPCTrackletSelector.h"
 #include "GPUTPCSectorDebugSortKernels.h"
 #include "utils/strtag.h"
@@ -218,9 +215,9 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
     // walk the same TPC row at the same time (coalesced HitWeight() access) and finish their
     // row loop together (fewer idle lanes from tracklet-length divergence).
     runKernel<GPUMemClean16>(GetGridAutoStep(useStream, RecoStep::TPCSectorTracking), trkShadow.TrackletSortKeyCount(), GPUTPCGeometry::NROWS * GPUTPCGeometry::NROWS * sizeof(*trkShadow.TrackletSortKeyCount()));
-    runKernel<GPUTPCTrackletSortCount>({GetGridAuto(useStream), {iSector}});
-    runKernel<GPUTPCTrackletSortOffsets>({GetGrid(GPUTPCTrackletSortOffsets::OffsetsThreads, GPUTPCTrackletSortOffsets::OffsetsThreads, useStream), {iSector}});
-    runKernel<GPUTPCTrackletSortScatter>({GetGridAuto(useStream), {iSector}});
+    runKernel<GPUTPCTrackletSelector, GPUTPCTrackletSelector::count>({GetGridAuto(useStream), {iSector}});
+    runKernel<GPUTPCTrackletSelector, GPUTPCTrackletSelector::offsets>({GetGrid(GPUTPCTrackletSelector::OffsetsThreads, GPUTPCTrackletSelector::OffsetsThreads, useStream), {iSector}});
+    runKernel<GPUTPCTrackletSelector, GPUTPCTrackletSelector::scatter>({GetGridAuto(useStream), {iSector}});
 
     runKernel<GPUTPCTrackletSelector>({GetGridAuto(useStream), {iSector}});
     runKernel<GPUTPCExtrapolationTrackingCopyNumbers>({{1, -ThreadCount(), useStream}, {iSector}}, 1);
