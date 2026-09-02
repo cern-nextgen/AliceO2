@@ -22,18 +22,22 @@
 
 using namespace o2::gpu;
 
-// Tracklets are sorted by length (LastRow - FirstRow) ahead of selection, via a counting sort
-// rather than a comparison sort: length is bounded to [0, NROWS), so the key spans only NROWS
+// Tracklets are sorted by (length, LastRow) ahead of selection, via a counting sort rather than
+// a comparison sort: both are bounded to [0, NROWS), so the combined key spans only NROWS*NROWS
 // distinct values -- small enough that a histogram + prefix sum + scatter beats a general
-// O(N log N) comparison sort. Length, not (LastRow, FirstRow), is the sort key because the
-// select loop below runs exactly `length` iterations per tracklet: grouping by length directly
-// equalizes each warp round's cost (bounded by its longest tracklet), where grouping by LastRow
-// only did so as an indirect side effect (two tracklets can share a LastRow while differing
-// hugely in length, or have very different LastRow while being the same length). Measured against
-// a real event, this closes roughly another ~25-30% of the warp-divergence gap that the
-// (LastRow, FirstRow) sort left on the table. The three passes below share TrackletSortKeyCount()
-// as histogram, then in-place prefix-sum offsets, then per-key scatter cursor, and produce a
-// permutation in TrackletSortedIndex() that "select" (Thread<0> below) reads through.
+// O(N log N) comparison sort. Length (LastRow - FirstRow) is the *primary* key because the select
+// loop below runs exactly `length` iterations per tracklet: grouping by length directly equalizes
+// each warp round's cost (bounded by its longest tracklet), where grouping by LastRow alone only
+// did so as an indirect side effect. LastRow is only a *secondary* key -- its specific values
+// don't matter for that goal -- added purely to spread the histogram back out over NROWS*NROWS
+// buckets: keying on length alone (NROWS buckets) concentrates the many tracklets that share a
+// common length onto the same few global-memory addresses, and count()/scatter()'s per-tracklet
+// AtomicAdd on that address serializes under contention -- measured ~50% slower overall than the
+// wider (LastRow, FirstRow) key, even though the offsets scan itself got cheaper. The secondary
+// key restores the original spread while keeping length as the dominant sort criterion. The three
+// passes below share TrackletSortKeyCount() as histogram, then in-place prefix-sum offsets, then
+// per-key scatter cursor, and produce a permutation in TrackletSortedIndex() that "select"
+// (Thread<0> below) reads through.
 
 template <>
 GPUdii() void GPUTPCTrackletSelector::Thread<GPUTPCTrackletSelector::count>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& s, processorType& GPUrestrict() tracker)
@@ -41,7 +45,8 @@ GPUdii() void GPUTPCTrackletSelector::Thread<GPUTPCTrackletSelector::count>(int3
   const uint32_t nTracklets = *tracker.NTracklets();
   for (uint32_t itr = iBlock * nThreads + iThread; itr < nTracklets; itr += nBlocks * nThreads) {
     GPUglobalref() MemLayout::wrapper<GPUTPCTrackletSkeleton, MemLayout::const_reference_restrict> tracklet = tracker.Tracklets()[itr];
-    const uint32_t key = tracklet.LastRow() - tracklet.FirstRow();
+    const uint32_t length = tracklet.LastRow() - tracklet.FirstRow();
+    const uint32_t key = length * GPUTPCGeometry::NROWS + tracklet.LastRow();
     CAMath::AtomicAdd(&tracker.TrackletSortKeyCount()[key], 1u);
   }
 }
@@ -52,15 +57,14 @@ GPUdii() void GPUTPCTrackletSelector::Thread<GPUTPCTrackletSelector::offsets>(in
   if (iBlock != 0) {
     return;
   }
-  // Parallel block-wide exclusive prefix sum over the NROWS-key histogram, launched with exactly
-  // OffsetsThreads threads in one block (see GPUChainTrackingSectorTracker.cxx). Splitting the key
-  // range into OffsetsThreads chunks, prefix-summing each chunk locally, then combining the
-  // per-chunk totals with a small (log2(OffsetsThreads)-step) shared-memory scan replaces what
+  // Parallel block-wide exclusive prefix sum over the NROWS*NROWS-key histogram, launched with
+  // exactly OffsetsThreads threads in one block (see GPUChainTrackingSectorTracker.cxx). Splitting
+  // the key range into OffsetsThreads chunks, prefix-summing each chunk locally, then combining
+  // the per-chunk totals with a small (log2(OffsetsThreads)-step) shared-memory scan replaces what
   // used to be a fully serial single-thread loop (the original bug this sort inherited: doing this
-  // on one thread, even over the much larger NROWS*NROWS key space we used before switching to a
-  // length-only key, measured at ~138ms on a partitioned H100).
+  // on one thread measured at ~138ms on a partitioned H100).
   GPUglobalref() GPUAtomic(uint32_t)* GPUrestrict() keyCount = tracker.TrackletSortKeyCount();
-  constexpr uint32_t nKeys = GPUTPCGeometry::NROWS;
+  constexpr uint32_t nKeys = GPUTPCGeometry::NROWS * GPUTPCGeometry::NROWS;
   const uint32_t chunk = (nKeys + nThreads - 1) / nThreads;
   const uint32_t begin = CAMath::Min(nKeys, (uint32_t)iThread * chunk);
   const uint32_t end = CAMath::Min(nKeys, begin + chunk);
@@ -102,7 +106,8 @@ GPUdii() void GPUTPCTrackletSelector::Thread<GPUTPCTrackletSelector::scatter>(in
   const uint32_t nTracklets = *tracker.NTracklets();
   for (uint32_t itr = iBlock * nThreads + iThread; itr < nTracklets; itr += nBlocks * nThreads) {
     GPUglobalref() MemLayout::wrapper<GPUTPCTrackletSkeleton, MemLayout::const_reference_restrict> tracklet = tracker.Tracklets()[itr];
-    const uint32_t key = tracklet.LastRow() - tracklet.FirstRow();
+    const uint32_t length = tracklet.LastRow() - tracklet.FirstRow();
+    const uint32_t key = length * GPUTPCGeometry::NROWS + tracklet.LastRow();
     const uint32_t pos = CAMath::AtomicAdd(&tracker.TrackletSortKeyCount()[key], 1u);
     tracker.TrackletSortedIndex()[pos] = itr;
   }

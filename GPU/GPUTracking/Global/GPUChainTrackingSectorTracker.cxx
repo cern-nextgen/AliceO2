@@ -211,10 +211,12 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
       trk.DumpHitWeights(*mDebugFile);
     }
 
-    // Sort tracklets by length (LastRow - FirstRow) ahead of the Selector, so each warp round's
-    // 32 tracklets have similar length -- directly equalizing the round's cost (bounded by its
-    // longest tracklet) instead of just correlating with it via a row-based key.
-    runKernel<GPUMemClean16>(GetGridAutoStep(useStream, RecoStep::TPCSectorTracking), trkShadow.TrackletSortKeyCount(), GPUTPCGeometry::NROWS * sizeof(*trkShadow.TrackletSortKeyCount()));
+    // Sort tracklets by (length, LastRow) ahead of the Selector, so each warp round's 32
+    // tracklets have similar length -- directly equalizing the round's cost (bounded by its
+    // longest tracklet). LastRow is only a secondary key, added to spread the histogram back out
+    // over NROWS*NROWS buckets and avoid atomic contention in count()/scatter() (see
+    // GPUTPCTrackletSelector.cxx).
+    runKernel<GPUMemClean16>(GetGridAutoStep(useStream, RecoStep::TPCSectorTracking), trkShadow.TrackletSortKeyCount(), GPUTPCGeometry::NROWS * GPUTPCGeometry::NROWS * sizeof(*trkShadow.TrackletSortKeyCount()));
     runKernel<GPUTPCTrackletSelector, GPUTPCTrackletSelector::count>({GetGridAuto(useStream), {iSector}});
     runKernel<GPUTPCTrackletSelector, GPUTPCTrackletSelector::offsets>({GetGrid(GPUTPCTrackletSelector::OffsetsThreads, GPUTPCTrackletSelector::OffsetsThreads, useStream), {iSector}});
     runKernel<GPUTPCTrackletSelector, GPUTPCTrackletSelector::scatter>({GetGridAuto(useStream), {iSector}});
