@@ -70,6 +70,9 @@ class GPUTPCTracker : public GPUProcessor
     int32_t nLocalTracks = 0;           // number of reconstructed tracks before extrapolation tracking
     GPUAtomic(uint32_t) nTrackHits = 0; // number of track hits
     int32_t nLocalTrackHits = 0;        // see above
+    uint32_t nLanesUsed = 0;            // GPUTPCTrackletPacking diagnostic: number of lanes the greedy sweep opened
+    GPUAtomic(uint32_t) nTracksPacked = 0;     // GPUTPCTrackletSelector::selectPacked diagnostic output count
+    GPUAtomic(uint32_t) nTrackHitsPacked = 0;  // GPUTPCTrackletSelector::selectPacked diagnostic output count
   };
 
   GPUhdi() const GPUTPCRow& Row(const GPUTPCHitId& HitId) const { return mData.Row(HitId.RowIndex()); }
@@ -189,10 +192,31 @@ class GPUTPCTracker : public GPUProcessor
   GPUhd() GPUglobalref() calink* TrackletRowHits() const { return mTrackletRowHits; }
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * TrackletSortKeyCount() const { return mTrackletSortKeyCount; }
 
+  // GPUTPCTrackletPacking diagnostic buffers (see GPUTPCTrackletPacking.cxx)
+  GPUhd() GPUglobalref() GPUAtomic(uint32_t) * TrackletFirstRowCount() const { return mTrackletFirstRowCount; }
+  GPUhd() GPUglobalref() GPUAtomic(uint32_t) * TrackletLastRowCount() const { return mTrackletLastRowCount; }
+  GPUhd() GPUglobalref() uint32_t* TrackletByFirstRow() const { return mTrackletByFirstRow; }
+  GPUhd() GPUglobalref() uint32_t* TrackletByLastRow() const { return mTrackletByLastRow; }
+  GPUhd() GPUglobalref() uint32_t* TrackletLane() const { return mTrackletLane; }
+  GPUhd() GPUglobalref() uint32_t* LaneFreeStack() const { return mLaneFreeStack; }
+  GPUhd() GPUglobalref() uint32_t* NLanesUsed() const { return &mCommonMem->nLanesUsed; }
+  GPUhd() GPUglobalref() uint32_t* LaneListNext() const { return mLaneListNext; }
+  GPUhd() GPUglobalref() uint32_t* LaneListHead() const { return mLaneListHead; }
+  GPUhd() GPUglobalref() uint32_t* LaneListTail() const { return mLaneListTail; }
+  GPUhd() GPUglobalref() calink* LaneRowHit() const { return mLaneRowHit; }
+
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NTracks() const { return &mCommonMem->nTracks; }
   GPUhd() GPUglobalref() auto Tracks() const { return mTracks; }
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NTrackHits() const { return &mCommonMem->nTrackHits; }
   GPUhd() GPUglobalref() GPUTPCHitId* TrackHits() const { return mTrackHits; }
+
+  // GPUTPCTrackletSelector::selectPacked diagnostic output -- isolated from Tracks()/TrackHits()
+  // so this experimental consumer can run alongside the production select pass without
+  // corrupting its output.
+  GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NTracksPacked() const { return &mCommonMem->nTracksPacked; }
+  GPUhd() GPUglobalref() auto TracksPacked() const { return mTracksPacked; }
+  GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NTrackHitsPacked() const { return &mCommonMem->nTrackHitsPacked; }
+  GPUhd() GPUglobalref() GPUTPCHitId* TrackHitsPacked() const { return mTrackHitsPacked; }
 
   GPUhd() GPUglobalref() GPUTPCRow* TrackingDataRows() const { return (mData.Rows()); }
   GPUhd() GPUglobalref() int32_t* RowStartHitCountOffset() const { return (mRowStartHitCountOffset); }
@@ -244,8 +268,25 @@ class GPUTPCTracker : public GPUProcessor
   GPUglobalref() MemLayout::interface<GPUTPCTrackletSkeleton, MemLayout::pointer, GPUTPCTrackletLayout>::type mTrackletsSorted; // same tracklets, physically rearranged into (LastRow,FirstRow) order for GPUTPCTrackletSelector's select pass
   GPUglobalref() calink* mTrackletRowHits = nullptr;                 // Hits for each Tracklet in each row
   GPUglobalref() GPUAtomic(uint32_t) * mTrackletSortKeyCount = nullptr; // [NROWS*NROWS] histogram by (LastRow,FirstRow) key, later reused in place as prefix-sum offsets / scatter cursor
+
+  // GPUTPCTrackletPacking diagnostic buffers (see GPUTPCTrackletPacking.cxx)
+  GPUglobalref() GPUAtomic(uint32_t) * mTrackletFirstRowCount = nullptr; // [NROWS] histogram/offsets/cursor by FirstRow
+  GPUglobalref() GPUAtomic(uint32_t) * mTrackletLastRowCount = nullptr;  // [NROWS] histogram/offsets/cursor by LastRow
+  GPUglobalref() uint32_t* mTrackletByFirstRow = nullptr; // [mNMaxTracklets] permutation: FirstRow-sorted position -> original tracklet index
+  GPUglobalref() uint32_t* mTrackletByLastRow = nullptr;  // [mNMaxTracklets] permutation: LastRow-sorted position -> original tracklet index
+  GPUglobalref() uint32_t* mTrackletLane = nullptr;       // [mNMaxTracklets] lane assigned to each original tracklet index by the greedy sweep
+  GPUglobalref() uint32_t* mLaneFreeStack = nullptr;      // [mNMaxTracklets] scratch stack of freed lanes, used only by the sweep
+  GPUglobalref() uint32_t* mLaneListNext = nullptr;       // [mNMaxTracklets] per-lane singly linked list, in the (LastRow -> FirstRow) walk order the Selector reads
+  GPUglobalref() uint32_t* mLaneListHead = nullptr;       // [mNMaxTracklets, indexed by lane] head of each lane's list
+  GPUglobalref() uint32_t* mLaneListTail = nullptr;       // [mNMaxTracklets, indexed by lane] tail of each lane's list, used only while the sweep is building it
+  GPUglobalref() calink* mLaneRowHit = nullptr;           // [NROWS * mNMaxTracklets, row-major] row-major transpose of TrackletRowHits(), indexed [row * mNMaxTracklets + lane]
+
   GPUglobalref() MemLayout::interface<GPUTPCTrackSkeleton, MemLayout::pointer, GPUTPCTrackLayout>::type mTracks;       // reconstructed tracks
   GPUglobalref() GPUTPCHitId* mTrackHits = nullptr;                  // array of track hit numbers
+
+  // GPUTPCTrackletSelector::selectPacked diagnostic output (see NTracksPacked() etc. above)
+  GPUglobalref() MemLayout::interface<GPUTPCTrackSkeleton, MemLayout::pointer, GPUTPCTrackLayout>::type mTracksPacked;
+  GPUglobalref() GPUTPCHitId* mTrackHitsPacked = nullptr;
 
   static int32_t StarthitSortComparison(const void* a, const void* b);
 };

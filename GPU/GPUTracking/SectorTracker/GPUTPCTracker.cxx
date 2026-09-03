@@ -66,6 +66,8 @@ void* GPUTPCTracker::SetPointersScratch(void* mem)
     computePointerWithAlignment(mem, mTrackletTmpStartHits, GPUTPCGeometry::NROWS * mNMaxRowStartHits);
     computePointerWithAlignment(mem, mRowStartHitCountOffset, GPUTPCGeometry::NROWS);
     computePointerWithAlignment(mem, mTrackletSortKeyCount, GPUTPCGeometry::NROWS * GPUTPCGeometry::NROWS + 16 / sizeof(*mTrackletSortKeyCount)); // slack for GPUMemClean16 rounding up to 16 bytes
+    computePointerWithAlignment(mem, mTrackletFirstRowCount, GPUTPCGeometry::NROWS + 16 / sizeof(*mTrackletFirstRowCount)); // slack for GPUMemClean16
+    computePointerWithAlignment(mem, mTrackletLastRowCount, GPUTPCGeometry::NROWS + 16 / sizeof(*mTrackletLastRowCount));   // slack for GPUMemClean16
   }
   return mem;
 }
@@ -142,6 +144,14 @@ GPUhd() void* GPUTPCTracker::SetPointersTracklets(void* mem)
   ApplyRecursive{tracklet_helper}(mTracklets);
   ApplyRecursive{tracklet_helper}(mTrackletsSorted);
   computePointerWithAlignment(mem, mTrackletRowHits, mNMaxRowHits);
+  computePointerWithAlignment(mem, mTrackletByFirstRow, mNMaxTracklets);
+  computePointerWithAlignment(mem, mTrackletByLastRow, mNMaxTracklets);
+  computePointerWithAlignment(mem, mTrackletLane, mNMaxTracklets);
+  computePointerWithAlignment(mem, mLaneFreeStack, mNMaxTracklets);
+  computePointerWithAlignment(mem, mLaneListNext, mNMaxTracklets);
+  computePointerWithAlignment(mem, mLaneListHead, mNMaxTracklets);
+  computePointerWithAlignment(mem, mLaneListTail, mNMaxTracklets);
+  computePointerWithAlignment(mem, mLaneRowHit, GPUTPCGeometry::NROWS * (size_t)mNMaxTracklets);
   return mem;
 }
 
@@ -150,6 +160,8 @@ GPUhd() void* GPUTPCTracker::SetPointersOutput(void* mem)
   auto track_helper = [&mem, this](auto& tracks) -> void { computePointerWithAlignment(mem, tracks, mNMaxTracks); };
   ApplyRecursive{track_helper}(mTracks);
   computePointerWithAlignment(mem, mTrackHits, mNMaxTrackHits);
+  ApplyRecursive{track_helper}(mTracksPacked);
+  computePointerWithAlignment(mem, mTrackHitsPacked, mNMaxTrackHits);
   return mem;
 }
 

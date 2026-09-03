@@ -34,7 +34,8 @@ class GPUTPCTrackletSelector : public GPUKernelTemplate
   enum K { defaultKernel = 0,
            count = 1,
            offsets = 2,
-           scatter = 3 };
+           scatter = 3,
+           selectPacked = 4 };
 
   // Fixed thread count the "offsets" sub-kernel is launched with (single block, see
   // GPUChainTrackingSectorTracker.cxx): the exclusive prefix sum over the NROWS*NROWS-key

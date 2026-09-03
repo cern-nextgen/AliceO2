@@ -17,6 +17,7 @@
 #include "GPUTPCTracker.h"
 #include "GPUTPCTrackParam.h"
 #include "GPUTPCTracklet.h"
+#include "GPUTPCTrackletPacking.h"
 #include "GPUCommonMath.h"
 #include "MemLayout.h"
 
@@ -206,6 +207,145 @@ GPUdii() void GPUTPCTrackletSelector::Thread<0>(int32_t nBlocks, int32_t nThread
         nHits = 0;
         gap = 0;
         nShared = 0;
+      }
+    }
+  }
+}
+
+// GPUTPCTrackletPacking-based consumer: one thread per lane instead of per tracklet, walking
+// every physical row (NROWS iterations, uniform across all lanes -- no length-driven trip-count
+// divergence) rather than only its own tracklet's row range. Reads GPUTPCTrackletPacking's
+// row-major LaneRowHit() instead of the scattered per-tracklet TrackletRowHits() index, and
+// walks each lane's assigned tracklets via LaneListHead()/LaneListNext() in exactly the
+// LastRow -> FirstRow order the inner logic below assumes (see the walk-direction note on
+// GPUTPCTrackletPacking's "sweep"). That inner logic -- gap tracking, shared-hit bookkeeping,
+// the minHits-reachability early exit, and the fact that one tracklet can emit several tracks if
+// it has an internal gap -- is copied unchanged from Thread<0> above; the only new part is the
+// outer per-row loop and the tracklet-boundary detection wrapped around it. Writes to
+// TracksPacked()/TrackHitsPacked(), not Tracks()/TrackHits(), so this diagnostic can run
+// alongside the production "select" pass above without corrupting its output.
+template <>
+GPUdii() void GPUTPCTrackletSelector::Thread<GPUTPCTrackletSelector::selectPacked>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& s, processorType& GPUrestrict() tracker)
+{
+  const uint32_t nLanes = *tracker.NLanesUsed();
+  const uint32_t laneStride = tracker.NMaxTracklets();
+  const float maxSharedFrac = tracker.Param().rec.tpc.trackletMaxSharedFraction;
+
+  GPUTPCHitId trackHits[GPUTPCGeometry::NROWS - GPUCA_PAR_TRACKLET_SELECTOR_HITS_REG_SIZE];
+
+  for (uint32_t lane = iBlock * nThreads + iThread; lane < nLanes; lane += nBlocks * nThreads) {
+    uint32_t cur = tracker.LaneListHead()[lane];
+    bool active = false;
+    int32_t firstRow = 0;
+    int32_t w = 0;
+    uint32_t minHits = 0;
+    uint32_t sharingMinNorm = 0;
+    float maxSharedNorm = 0.f;
+    uint32_t gap = 0;
+    uint32_t nShared = 0;
+    uint32_t nHits = 0;
+
+    GPUCA_UNROLL(, U(1))
+    for (int32_t row = GPUTPCGeometry::NROWS - 1; row >= 0; row--) {
+      GPUbarrierWarp();
+
+      if (!active && cur != GPUTPCTrackletPacking::NoLane) {
+        GPUglobalref() MemLayout::wrapper<GPUTPCTrackletSkeleton, MemLayout::const_reference_restrict> newTracklet = tracker.Tracklets()[cur];
+        if ((int32_t)newTracklet.LastRow() == row) {
+          firstRow = newTracklet.FirstRow();
+          w = newTracklet.HitWeight();
+          minHits = tracker.Param().rec.tpc.minNClustersTrackSeed == -1 ? tracker.Param().tpcMinHitsB5(newTracklet.Param().QPt() * tracker.Param().qptB5Scaler) : tracker.Param().rec.tpc.minNClustersTrackSeed;
+          sharingMinNorm = minHits * tracker.Param().rec.tpc.trackletMinSharedNormFactor;
+          maxSharedNorm = maxSharedFrac * sharingMinNorm;
+          gap = 0;
+          nShared = 0;
+          nHits = 0;
+          active = true;
+        }
+      }
+
+      if (!active) {
+        continue;
+      }
+
+      if (row - firstRow + (int32_t)nHits < (int32_t)minHits) {
+        // budget exhausted before reaching firstRow: give up on this tracklet's remaining rows
+        active = false;
+        cur = tracker.LaneListNext()[cur];
+        continue;
+      }
+
+      calink ih = tracker.LaneRowHit()[row * laneStride + lane];
+      if (ih != CALINK_DEAD_CHANNEL) {
+        gap++;
+      }
+      if (ih != CALINK_INVAL && ih != CALINK_DEAD_CHANNEL) {
+        GPUglobalref() const GPUTPCRow& hitRow = tracker.Row(row);
+        const bool own = (tracker.HitWeight(hitRow, ih) <= w);
+        const bool sharedOK = nShared <= (nHits < sharingMinNorm ? maxSharedNorm : nHits * maxSharedFrac);
+        if (own || sharedOK) { // SG!!!
+          gap = 0;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wtype-limits"
+          const bool inShared = nHits < (uint32_t)GPUCA_PAR_TRACKLET_SELECTOR_HITS_REG_SIZE;
+#pragma GCC diagnostic pop
+          if constexpr (GPUCA_PAR_TRACKLET_SELECTOR_HITS_REG_SIZE > 0) {
+            if (inShared) {
+              s.mHits[nHits][iThread].Set(row, ih);
+            }
+          }
+          if (!inShared) {
+            trackHits[nHits - GPUCA_PAR_TRACKLET_SELECTOR_HITS_REG_SIZE].Set(row, ih);
+          }
+          nHits++;
+          if (!own) {
+            nShared++;
+          }
+        }
+      }
+
+      if (gap > tracker.Param().rec.tpc.trackFollowingMaxRowGap || row == firstRow) { // store
+        if (nHits >= minHits) {
+          uint32_t nFirstTrackHit = CAMath::AtomicAdd(tracker.NTrackHitsPacked(), (uint32_t)nHits);
+          if (nFirstTrackHit + nHits > tracker.NMaxTrackHits()) {
+            tracker.raiseError(GPUErrors::ERROR_TRACK_HIT_OVERFLOW, tracker.ISector(), nFirstTrackHit + nHits, tracker.NMaxTrackHits());
+            CAMath::AtomicExch(tracker.NTrackHitsPacked(), tracker.NMaxTrackHits());
+            return;
+          }
+          uint32_t itrout = CAMath::AtomicAdd(tracker.NTracksPacked(), 1u);
+          if (itrout >= tracker.NMaxTracks()) {
+            tracker.raiseError(GPUErrors::ERROR_TRACK_OVERFLOW, tracker.ISector(), itrout, tracker.NMaxTracks());
+            CAMath::AtomicExch(tracker.NTracksPacked(), tracker.NMaxTracks());
+            return;
+          }
+          GPUglobalref() MemLayout::wrapper<GPUTPCTrackletSkeleton, MemLayout::const_reference_restrict> curTracklet = tracker.Tracklets()[cur];
+          tracker.TracksPacked()[itrout].SetLocalTrackId(itrout);
+          tracker.TracksPacked()[itrout].SetParam(curTracklet.Param());
+          tracker.TracksPacked()[itrout].SetFirstHitID(nFirstTrackHit);
+          tracker.TracksPacked()[itrout].SetNHits(nHits);
+          for (uint32_t jh = 0; jh < nHits; jh++) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wtype-limits"
+            const bool inShared = jh < (uint32_t)GPUCA_PAR_TRACKLET_SELECTOR_HITS_REG_SIZE;
+#pragma GCC diagnostic pop
+            if constexpr (GPUCA_PAR_TRACKLET_SELECTOR_HITS_REG_SIZE > 0) {
+              if (inShared) {
+                tracker.TrackHitsPacked()[nFirstTrackHit + nHits - 1 - jh] = s.mHits[jh][iThread];
+              }
+            }
+            if (!inShared) {
+              tracker.TrackHitsPacked()[nFirstTrackHit + nHits - 1 - jh] = trackHits[jh - GPUCA_PAR_TRACKLET_SELECTOR_HITS_REG_SIZE];
+            }
+          }
+        }
+        nHits = 0;
+        gap = 0;
+        nShared = 0;
+      }
+
+      if (row == firstRow) {
+        active = false;
+        cur = tracker.LaneListNext()[cur];
       }
     }
   }

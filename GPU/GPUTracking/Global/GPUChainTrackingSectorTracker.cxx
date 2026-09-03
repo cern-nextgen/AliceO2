@@ -29,6 +29,7 @@
 #include "GPUTPCStartHitsSorter.h"
 #include "GPUTPCTrackletConstructor.h"
 #include "GPUTPCTrackletSelector.h"
+#include "GPUTPCTrackletPacking.h"
 #include "GPUTPCSectorDebugSortKernels.h"
 #include "utils/strtag.h"
 #include <fstream>
@@ -210,6 +211,21 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
     if (GetProcessingSettings().debugMask & GPUChainTrackingDebugFlags::TPCHitWeights && GetProcessingSettings().deterministicGPUReconstruction < 2) {
       trk.DumpHitWeights(*mDebugFile);
     }
+
+    // Diagnostic prototype: assign each tracklet a non-overlapping "lane" via a greedy sweep,
+    // transpose hits into a row-major [row][lane] layout, and run an alternative, lane-major
+    // "selectPacked" consumer alongside the production Selector below (writing to
+    // TracksPacked()/TrackHitsPacked(), not Tracks()/TrackHits(), so it can't corrupt real
+    // output). Purely for profiling at this stage -- see GPUTPCTrackletPacking.cxx and
+    // GPUTPCTrackletSelector.cxx's selectPacked for the design.
+    runKernel<GPUMemClean16>(GetGridAutoStep(useStream, RecoStep::TPCSectorTracking), trkShadow.TrackletFirstRowCount(), GPUTPCGeometry::NROWS * sizeof(*trkShadow.TrackletFirstRowCount()));
+    runKernel<GPUMemClean16>(GetGridAutoStep(useStream, RecoStep::TPCSectorTracking), trkShadow.TrackletLastRowCount(), GPUTPCGeometry::NROWS * sizeof(*trkShadow.TrackletLastRowCount()));
+    runKernel<GPUTPCTrackletPacking, GPUTPCTrackletPacking::count>({GetGridAuto(useStream), {iSector}});
+    runKernel<GPUTPCTrackletPacking, GPUTPCTrackletPacking::offsets>({GetGrid(1, 1, useStream), {iSector}});
+    runKernel<GPUTPCTrackletPacking, GPUTPCTrackletPacking::scatter>({GetGridAuto(useStream), {iSector}});
+    runKernel<GPUTPCTrackletPacking, GPUTPCTrackletPacking::sweep>({GetGrid(1, 1, useStream), {iSector}});
+    runKernel<GPUTPCTrackletPacking, GPUTPCTrackletPacking::gather>({GetGridAuto(useStream), {iSector}});
+    runKernel<GPUTPCTrackletSelector, GPUTPCTrackletSelector::selectPacked>({GetGridAuto(useStream), {iSector}});
 
     // Sort tracklets by (LastRow, FirstRow) ahead of the Selector, so a warp's threads mostly
     // walk the same TPC row at the same time (coalesced HitWeight() access) and finish their
