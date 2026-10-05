@@ -24,7 +24,7 @@
 
 using namespace o2::gpu;
 
-GPUd() int32_t GPUTPCExtrapolationTracking::PerformExtrapolationTrackingRun(GPUTPCTracker& tracker, GPUsharedref() GPUSharedMemory& smem, const GPUTPCTracker& GPUrestrict() sectorSource, int32_t iTrack, int32_t rowIndex, float angle, int32_t direction)
+GPUd() int32_t GPUTPCExtrapolationTracking::PerformExtrapolationTrackingRun(GPUTPCTracker& tracker, GPUsharedref() GPUSharedMemory& smem, MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> sourceParam, int32_t sourceLocalTrackId, uint32_t sourceSector, int32_t rowIndex, float angle, int32_t direction)
 {
   /*for (int32_t j = 0;j < Tracks()[j].NHits();j++)
   {
@@ -39,7 +39,7 @@ GPUd() int32_t GPUTPCExtrapolationTracking::PerformExtrapolationTrackingRun(GPUT
   tParam.SetCov(5, 0.001f);
   tParam.SetCov(9, 0.001f);
   tParam.SetCov(14, 0.05f);
-  tParam.SetParam(sectorSource.Tracks()[iTrack].Param());
+  tParam.SetParam(sourceParam);
 
   // GPUInfo("Parameters X %f Y %f Z %f SinPhi %f DzDs %f QPt %f SignCosPhi %f", tParam.X(), tParam.Y(), tParam.Z(), tParam.SinPhi(), tParam.DzDs(), tParam.QPt(), tParam.SignCosPhi());
   if (!tParam.Rotate(angle, constants::MAX_SIN_PHI)) {
@@ -114,48 +114,16 @@ GPUd() int32_t GPUTPCExtrapolationTracking::PerformExtrapolationTrackingRun(GPUT
     track.SetParam(tParam.GetParam());
     track.SetNHits(nHits);
     track.SetFirstHitID(hitId);
-    track.SetLocalTrackId((direction == 1 ? 0x40000000 : 0) | (sectorSource.ISector() << 24) | sectorSource.Tracks()[iTrack].LocalTrackId());
+    track.SetLocalTrackId((direction == 1 ? 0x40000000 : 0) | (sourceSector << 24) | sourceLocalTrackId);
   }
 
   return (nHits >= tracker.Param().rec.tpc.extrapolationTrackingMinHits);
 }
 
-GPUd() void GPUTPCExtrapolationTracking::PerformExtrapolationTracking(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, const GPUTPCTracker& tracker, GPUsharedref() GPUSharedMemory& smem, GPUTPCTracker& GPUrestrict() sectorTarget, bool right)
+GPUd() void GPUTPCExtrapolationTracking::ConsumeExtrapolationCandidates(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, uint32_t sourceSector, GPUsharedref() GPUSharedMemory& smem, GPUTPCTracker& GPUrestrict() sectorTarget, MemLayout::wrapper<GPUTPCExtrapolationCandidateSkeleton, MemLayout::pointer> cand, uint32_t nCand, float angle, int32_t direction)
 {
-  for (int32_t i = iBlock * nThreads + iThread; i < tracker.CommonMemory()->nLocalTracks; i += nThreads * nBlocks) {
-    {
-      const int32_t tmpHit = tracker.Tracks()[i].FirstHitID();
-      if (tracker.TrackHits()[tmpHit].RowIndex() >= tracker.Param().rec.tpc.extrapolationTrackingMinRows && tracker.TrackHits()[tmpHit].RowIndex() < tracker.Param().rec.tpc.extrapolationTrackingRowRange) {
-        int32_t rowIndex = tracker.TrackHits()[tmpHit].RowIndex();
-        const GPUTPCRow& GPUrestrict() row = tracker.Row(rowIndex);
-        float Y = (float)tracker.Data().HitDataY(row, tracker.TrackHits()[tmpHit].HitIndex()) * row.HstepY() + row.Grid().YMin();
-        if (!right && Y < -row.MaxY() * tracker.Param().rec.tpc.extrapolationTrackingYRangeLower) {
-          // GPUInfo("Track %d, lower row %d, left border (%f of %f)", i, mTrackHits[tmpHit].RowIndex(), Y, -row.MaxY());
-          PerformExtrapolationTrackingRun(sectorTarget, smem, tracker, i, rowIndex, -tracker.Param().dAlpha, -1);
-        }
-        if (right && Y > row.MaxY() * tracker.Param().rec.tpc.extrapolationTrackingYRangeLower) {
-          // GPUInfo("Track %d, lower row %d, right border (%f of %f)", i, mTrackHits[tmpHit].RowIndex(), Y, row.MaxY());
-          PerformExtrapolationTrackingRun(sectorTarget, smem, tracker, i, rowIndex, tracker.Param().dAlpha, -1);
-        }
-      }
-    }
-
-    {
-      const int32_t tmpHit = tracker.Tracks()[i].FirstHitID() + tracker.Tracks()[i].NHits() - 1;
-      if (tracker.TrackHits()[tmpHit].RowIndex() < GPUTPCGeometry::NROWS - tracker.Param().rec.tpc.extrapolationTrackingMinRows && tracker.TrackHits()[tmpHit].RowIndex() >= GPUTPCGeometry::NROWS - tracker.Param().rec.tpc.extrapolationTrackingRowRange) {
-        int32_t rowIndex = tracker.TrackHits()[tmpHit].RowIndex();
-        const GPUTPCRow& GPUrestrict() row = tracker.Row(rowIndex);
-        float Y = (float)tracker.Data().HitDataY(row, tracker.TrackHits()[tmpHit].HitIndex()) * row.HstepY() + row.Grid().YMin();
-        if (!right && Y < -row.MaxY() * tracker.Param().rec.tpc.extrapolationTrackingYRangeUpper) {
-          // GPUInfo("Track %d, upper row %d, left border (%f of %f)", i, mTrackHits[tmpHit].RowIndex(), Y, -row.MaxY());
-          PerformExtrapolationTrackingRun(sectorTarget, smem, tracker, i, rowIndex, -tracker.Param().dAlpha, 1);
-        }
-        if (right && Y > row.MaxY() * tracker.Param().rec.tpc.extrapolationTrackingYRangeUpper) {
-          // GPUInfo("Track %d, upper row %d, right border (%f of %f)", i, mTrackHits[tmpHit].RowIndex(), Y, row.MaxY());
-          PerformExtrapolationTrackingRun(sectorTarget, smem, tracker, i, rowIndex, tracker.Param().dAlpha, 1);
-        }
-      }
-    }
+  for (uint32_t i = iBlock * nThreads + iThread; i < nCand; i += nThreads * nBlocks) {
+    PerformExtrapolationTrackingRun(sectorTarget, smem, cand[i].Param(), cand[i].LocalTrackId(), sourceSector, cand[i].RowIndex(), angle, direction);
   }
 }
 
@@ -168,15 +136,18 @@ GPUdii() void GPUTPCExtrapolationTracking::Thread<0>(int32_t nBlocks, int32_t nT
   if (tracker.NHitsTotal() == 0) {
     return;
   }
-  const uint32_t iSector = tracker.ISector();
-  uint32_t sectorLeft = (iSector + (GPUTPCGeometry::NSECTORS / 2 - 1)) % (GPUTPCGeometry::NSECTORS / 2);
-  uint32_t sectorRight = (iSector + 1) % (GPUTPCGeometry::NSECTORS / 2);
-  if (iSector >= (int32_t)GPUTPCGeometry::NSECTORS / 2) {
-    sectorLeft += GPUTPCGeometry::NSECTORS / 2;
-    sectorRight += GPUTPCGeometry::NSECTORS / 2;
-  }
-  PerformExtrapolationTracking(nBlocks, nThreads, iBlock, iThread, tracker.GetConstantMem()->tpcTrackers[sectorLeft], smem, tracker, true);
-  PerformExtrapolationTracking(nBlocks, nThreads, iBlock, iThread, tracker.GetConstantMem()->tpcTrackers[sectorRight], smem, tracker, false);
+  uint32_t sectorLeft, sectorRight;
+  ExtrapolationTrackingSectorLeftRight(tracker.ISector(), sectorLeft, sectorRight);
+  const GPUTPCTracker& GPUrestrict() left = tracker.GetConstantMem()->tpcTrackers[sectorLeft];
+  const GPUTPCTracker& GPUrestrict() right = tracker.GetConstantMem()->tpcTrackers[sectorRight];
+
+  // Candidates were classified and compacted by GPUTPCTrackletSelector when each track was stored
+  // (see the piggyback block there) -- every entry in each of these 4 dense arrays is already known
+  // to qualify, so these are plain, fully-dense grid-strides, not gated scans over all local tracks.
+  ConsumeExtrapolationCandidates(nBlocks, nThreads, iBlock, iThread, sectorLeft, smem, tracker, left.ExtrapCandLowerToRight(), *left.NExtrapCandLowerToRight(), left.Param().dAlpha, -1);
+  ConsumeExtrapolationCandidates(nBlocks, nThreads, iBlock, iThread, sectorLeft, smem, tracker, left.ExtrapCandUpperToRight(), *left.NExtrapCandUpperToRight(), left.Param().dAlpha, 1);
+  ConsumeExtrapolationCandidates(nBlocks, nThreads, iBlock, iThread, sectorRight, smem, tracker, right.ExtrapCandLowerToLeft(), *right.NExtrapCandLowerToLeft(), -right.Param().dAlpha, -1);
+  ConsumeExtrapolationCandidates(nBlocks, nThreads, iBlock, iThread, sectorRight, smem, tracker, right.ExtrapCandUpperToLeft(), *right.NExtrapCandUpperToLeft(), -right.Param().dAlpha, 1);
 }
 
 GPUd() int32_t GPUTPCExtrapolationTracking::ExtrapolationTrackingSectorOrder(int32_t iSector)

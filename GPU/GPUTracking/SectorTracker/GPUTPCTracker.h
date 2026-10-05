@@ -28,6 +28,7 @@
 #include "GPUTPCTrack.h"
 #include "GPUProcessor.h"
 #include "MemLayout.h"
+#include "GPUTPCExtrapolationCandidate.h"
 
 namespace o2::gpu
 {
@@ -70,6 +71,14 @@ class GPUTPCTracker : public GPUProcessor
     int32_t nLocalTracks = 0;           // number of reconstructed tracks before extrapolation tracking
     GPUAtomic(uint32_t) nTrackHits = 0; // number of track hits
     int32_t nLocalTrackHits = 0;        // see above
+
+    // Dense per-sector candidate lists for ExtrapolationTracking, filled by GPUTPCTrackletSelector
+    // as a side effect of writing each local track, so ExtrapolationTracking can consume them densely
+    // instead of re-scanning all local tracks and masking out the ones that don't qualify.
+    GPUAtomic(uint32_t) nExtrapCandLowerToLeft = 0;
+    GPUAtomic(uint32_t) nExtrapCandLowerToRight = 0;
+    GPUAtomic(uint32_t) nExtrapCandUpperToLeft = 0;
+    GPUAtomic(uint32_t) nExtrapCandUpperToRight = 0;
   };
 
   GPUhdi() const GPUTPCRow& Row(const GPUTPCHitId& HitId) const { return mData.Row(HitId.RowIndex()); }
@@ -106,6 +115,7 @@ class GPUTPCTracker : public GPUProcessor
   void* SetPointersTracklets(void* mem);
   void* SetPointersTracks(void* mem);
   void* SetPointersOutput(void* mem);
+  void* SetPointersExtrapolationCandidates(void* mem);
   void RegisterMemoryAllocation();
   bool MemoryReuseAllowed();
 
@@ -192,6 +202,15 @@ class GPUTPCTracker : public GPUProcessor
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NTrackHits() const { return &mCommonMem->nTrackHits; }
   GPUhd() GPUglobalref() GPUTPCHitId* TrackHits() const { return mTrackHits; }
 
+  GPUhd() GPUglobalref() auto ExtrapCandLowerToLeft() const { return mExtrapCandLowerToLeft; }
+  GPUhd() GPUglobalref() auto ExtrapCandLowerToRight() const { return mExtrapCandLowerToRight; }
+  GPUhd() GPUglobalref() auto ExtrapCandUpperToLeft() const { return mExtrapCandUpperToLeft; }
+  GPUhd() GPUglobalref() auto ExtrapCandUpperToRight() const { return mExtrapCandUpperToRight; }
+  GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NExtrapCandLowerToLeft() const { return &mCommonMem->nExtrapCandLowerToLeft; }
+  GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NExtrapCandLowerToRight() const { return &mCommonMem->nExtrapCandLowerToRight; }
+  GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NExtrapCandUpperToLeft() const { return &mCommonMem->nExtrapCandUpperToLeft; }
+  GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NExtrapCandUpperToRight() const { return &mCommonMem->nExtrapCandUpperToRight; }
+
   GPUhd() GPUglobalref() GPUTPCRow* TrackingDataRows() const { return (mData.Rows()); }
   GPUhd() GPUglobalref() int32_t* RowStartHitCountOffset() const { return (mRowStartHitCountOffset); }
 
@@ -242,6 +261,12 @@ class GPUTPCTracker : public GPUProcessor
   GPUglobalref() calink* mTrackletRowHits = nullptr;                 // Hits for each Tracklet in each row
   GPUglobalref() MemLayout::interface<GPUTPCTrackSkeleton, MemLayout::pointer, GPUTPCTrackLayout>::type mTracks;       // reconstructed tracks
   GPUglobalref() GPUTPCHitId* mTrackHits = nullptr;                  // array of track hit numbers
+
+  // Dense ExtrapolationTracking candidate lists, filled by GPUTPCTrackletSelector, consumed by GPUTPCExtrapolationTracking
+  GPUglobalref() MemLayout::interface<GPUTPCExtrapolationCandidateSkeleton, MemLayout::pointer, GPUTPCExtrapolationCandidateLayout>::type mExtrapCandLowerToLeft;
+  GPUglobalref() MemLayout::interface<GPUTPCExtrapolationCandidateSkeleton, MemLayout::pointer, GPUTPCExtrapolationCandidateLayout>::type mExtrapCandLowerToRight;
+  GPUglobalref() MemLayout::interface<GPUTPCExtrapolationCandidateSkeleton, MemLayout::pointer, GPUTPCExtrapolationCandidateLayout>::type mExtrapCandUpperToLeft;
+  GPUglobalref() MemLayout::interface<GPUTPCExtrapolationCandidateSkeleton, MemLayout::pointer, GPUTPCExtrapolationCandidateLayout>::type mExtrapCandUpperToRight;
 
   static int32_t StarthitSortComparison(const void* a, const void* b);
 };

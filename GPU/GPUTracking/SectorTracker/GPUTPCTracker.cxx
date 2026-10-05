@@ -110,6 +110,7 @@ void GPUTPCTracker::RegisterMemoryAllocation()
     mMemoryResTracklets = mRec->RegisterMemoryAllocation(this, &GPUTPCTracker::SetPointersTracklets, type | GPUMemoryResource::MEMORY_STACK, "TPCTrackerTracklets");
   }
   mMemoryResOutput = mRec->RegisterMemoryAllocation(this, &GPUTPCTracker::SetPointersOutput, type, "TPCTrackerTracks"); // TODO: Ideally this should eventually go on the stack, so that we can free it after the first phase of track merging
+  mRec->RegisterMemoryAllocation(this, &GPUTPCTracker::SetPointersExtrapolationCandidates, type, "TPCTrackerExtrapCandidates");
 }
 
 namespace {
@@ -148,6 +149,16 @@ GPUhd() void* GPUTPCTracker::SetPointersOutput(void* mem)
   auto track_helper = [&mem, this](auto& tracks) -> void { computePointerWithAlignment(mem, tracks, mNMaxTracks); };
   ApplyRecursive{track_helper}(mTracks);
   computePointerWithAlignment(mem, mTrackHits, mNMaxTrackHits);
+  return mem;
+}
+
+GPUhd() void* GPUTPCTracker::SetPointersExtrapolationCandidates(void* mem)
+{
+  auto extrapCand_helper = [&mem, this](auto& field) -> void { computePointerWithAlignment(mem, field, mNMaxTracks); };
+  ApplyRecursive{extrapCand_helper}(mExtrapCandLowerToLeft);
+  ApplyRecursive{extrapCand_helper}(mExtrapCandLowerToRight);
+  ApplyRecursive{extrapCand_helper}(mExtrapCandUpperToLeft);
+  ApplyRecursive{extrapCand_helper}(mExtrapCandUpperToRight);
   return mem;
 }
 

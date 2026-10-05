@@ -17,6 +17,7 @@
 
 #include "GPUGeneralKernels.h"
 #include "GPUConstantMem.h"
+#include "GPUTPCExtrapolationCandidate.h"
 
 namespace o2::gpu
 {
@@ -42,8 +43,8 @@ class GPUTPCExtrapolationTracking : public GPUKernelTemplate
   GPUd() static void ExtrapolationTrackingSectorLeftRight(uint32_t iSector, uint32_t& left, uint32_t& right);
 
  private:
-  GPUd() static int32_t PerformExtrapolationTrackingRun(GPUTPCTracker& tracker, GPUsharedref() GPUSharedMemory& smem, const GPUTPCTracker& sectorSource, int32_t iTrack, int32_t rowIndex, float angle, int32_t direction);
-  GPUd() static void PerformExtrapolationTracking(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, const GPUTPCTracker& tracker, GPUsharedref() GPUSharedMemory& smem, GPUTPCTracker& sectorTarget, bool right);
+  GPUd() static int32_t PerformExtrapolationTrackingRun(GPUTPCTracker& tracker, GPUsharedref() GPUSharedMemory& smem, MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> sourceParam, int32_t sourceLocalTrackId, uint32_t sourceSector, int32_t rowIndex, float angle, int32_t direction);
+  GPUd() static void ConsumeExtrapolationCandidates(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, uint32_t sourceSector, GPUsharedref() GPUSharedMemory& smem, GPUTPCTracker& sectorTarget, MemLayout::wrapper<GPUTPCExtrapolationCandidateSkeleton, MemLayout::pointer> cand, uint32_t nCand, float angle, int32_t direction);
 };
 
 class GPUTPCExtrapolationTrackingCopyNumbers : public GPUKernelTemplate
