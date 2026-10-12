@@ -337,6 +337,7 @@ AddOption(allocDebugLevel, int32_t, 0, "allocDebug", 0, "Some debug output for m
 AddOption(debugMask, uint32_t, (1 << 18) - 1, "debugMask", 0, "Mask for debug output dumps to file")
 AddOption(debugLogSuffix, std::string, "", "debugSuffix", 0, "Suffix for debug log files with --debug 6")
 AddOption(debugFileHexFloat, int32_t, -1, "", 0, "Use hex format to print floats to debug dump file")
+AddOption(dumpClusterGrid, bool, false, "", 0, "Also print each row's hit-grid bounds (y0, z0, stepY, stepZ) in the Sector Data debug dump, needed to convert the quantized hit coordinates there back to cm. Off by default for backwards compatibility with existing GPU.out parsers/diffs.")
 AddOption(debugCSV, std::string, "", "", 0, "CSV filename to append the benchmark results. Verbosity determined by parameter --debug.")
 AddOption(debugMarkdown, bool, false, "", 0, "Print the results of standlaone benchmarks in markdown format")
 AddOption(serializeGPU, int8_t, 0, "", 0, "Synchronize after each kernel call (bit 1) and DMA transfer (bit 2) and identify failures")

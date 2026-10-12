@@ -211,6 +211,15 @@ class GPUTPCTracker : public GPUProcessor
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NExtrapCandUpperToLeft() const { return &mCommonMem->nExtrapCandUpperToLeft; }
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NExtrapCandUpperToRight() const { return &mCommonMem->nExtrapCandUpperToRight; }
 
+  GPUhd() GPUglobalref() GPUAtomic(uint32_t) * ExtrapCandSortKeyCountLowerToLeft() const { return mExtrapCandSortKeyCountLowerToLeft; }
+  GPUhd() GPUglobalref() GPUAtomic(uint32_t) * ExtrapCandSortKeyCountLowerToRight() const { return mExtrapCandSortKeyCountLowerToRight; }
+  GPUhd() GPUglobalref() GPUAtomic(uint32_t) * ExtrapCandSortKeyCountUpperToLeft() const { return mExtrapCandSortKeyCountUpperToLeft; }
+  GPUhd() GPUglobalref() GPUAtomic(uint32_t) * ExtrapCandSortKeyCountUpperToRight() const { return mExtrapCandSortKeyCountUpperToRight; }
+  GPUhd() GPUglobalref() uint32_t* ExtrapCandSortedIndexLowerToLeft() const { return mExtrapCandSortedIndexLowerToLeft; }
+  GPUhd() GPUglobalref() uint32_t* ExtrapCandSortedIndexLowerToRight() const { return mExtrapCandSortedIndexLowerToRight; }
+  GPUhd() GPUglobalref() uint32_t* ExtrapCandSortedIndexUpperToLeft() const { return mExtrapCandSortedIndexUpperToLeft; }
+  GPUhd() GPUglobalref() uint32_t* ExtrapCandSortedIndexUpperToRight() const { return mExtrapCandSortedIndexUpperToRight; }
+
   GPUhd() GPUglobalref() GPUTPCRow* TrackingDataRows() const { return (mData.Rows()); }
   GPUhd() GPUglobalref() int32_t* RowStartHitCountOffset() const { return (mRowStartHitCountOffset); }
 
@@ -267,6 +276,22 @@ class GPUTPCTracker : public GPUProcessor
   GPUglobalref() MemLayout::interface<GPUTPCExtrapolationCandidateSkeleton, MemLayout::pointer, GPUTPCExtrapolationCandidateLayout>::type mExtrapCandLowerToRight;
   GPUglobalref() MemLayout::interface<GPUTPCExtrapolationCandidateSkeleton, MemLayout::pointer, GPUTPCExtrapolationCandidateLayout>::type mExtrapCandUpperToLeft;
   GPUglobalref() MemLayout::interface<GPUTPCExtrapolationCandidateSkeleton, MemLayout::pointer, GPUTPCExtrapolationCandidateLayout>::type mExtrapCandUpperToRight;
+
+  // Sort scratch for the 4 candidate arrays above (see GPUTPCExtrapolationTracking's
+  // count/offsets/scatter sub-kernels): a per-array (RowIndex, QPt-bucket) histogram, reused
+  // in-place as prefix-sum offsets / scatter cursor, and a per-array index permutation that
+  // ConsumeExtrapolationCandidates reads through instead of indexing the candidate array directly.
+  // Sized independently of mNMaxTracks (histograms) / at mNMaxTracks (permutations), allocated in
+  // SetPointersExtrapolationCandidates (not MEMORY_STACK scratch) because the permutation output
+  // must survive into ExtrapolationTracking's later, separately-scheduled per-sector pass.
+  GPUglobalref() GPUAtomic(uint32_t) * mExtrapCandSortKeyCountLowerToLeft = nullptr;
+  GPUglobalref() GPUAtomic(uint32_t) * mExtrapCandSortKeyCountLowerToRight = nullptr;
+  GPUglobalref() GPUAtomic(uint32_t) * mExtrapCandSortKeyCountUpperToLeft = nullptr;
+  GPUglobalref() GPUAtomic(uint32_t) * mExtrapCandSortKeyCountUpperToRight = nullptr;
+  GPUglobalref() uint32_t* mExtrapCandSortedIndexLowerToLeft = nullptr;
+  GPUglobalref() uint32_t* mExtrapCandSortedIndexLowerToRight = nullptr;
+  GPUglobalref() uint32_t* mExtrapCandSortedIndexUpperToLeft = nullptr;
+  GPUglobalref() uint32_t* mExtrapCandSortedIndexUpperToRight = nullptr;
 
   static int32_t StarthitSortComparison(const void* a, const void* b);
 };
