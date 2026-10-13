@@ -43,8 +43,17 @@ class GPUCommonAlgorithm
   template <class T, class S>
   GPUd() static void sortDeviceDynamic(T begin, T end, const S& comp);
 #ifndef __OPENCL__
+  // tempMemExternal/tempSizeExternal: optional caller-provided scratch buffer for CUB's temp
+  // storage, used instead of AllocateVolatileDeviceMemory() when non-null and large enough.
+  // AllocateVolatileDeviceMemory() is a single, global, non-reentrant stack allocator (see
+  // GPUReconstruction.cxx) -- fine for callers that invoke sortOnDevice rarely and sequentially
+  // (e.g. the TPC merger, once per event), but it forbids any other persistent memory allocation
+  // anywhere in the program while its chunk is open, which breaks callers invoking sortOnDevice
+  // frequently and/or concurrently across streams (e.g. once per sector). Those callers should
+  // pass their own small, persistently-registered buffer instead (same RegisterMemoryAllocation
+  // mechanism used for every other buffer in this codebase).
   template <class T, class S>
-  GPUh() static void sortOnDevice(auto* rec, int32_t stream, T* begin, size_t N, const S& comp);
+  GPUh() static void sortOnDevice(auto* rec, int32_t stream, T* begin, size_t N, const S& comp, void* tempMemExternal = nullptr, size_t tempSizeExternal = 0);
 #endif
   template <class T>
   GPUd() static void swap(T& a, T& b);

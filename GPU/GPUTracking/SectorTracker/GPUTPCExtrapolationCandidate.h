@@ -60,40 +60,6 @@ class GPUTPCExtrapolationCandidateSkeleton
 // Flag::soa, so the AoS/SoA choice can be revisited in one place later without touching call sites.
 constexpr MemLayout::Flag GPUTPCExtrapolationCandidateLayout = MemLayout::Flag::soa;
 
-// Needed for sorting (GPUCommonAlgorithm::sortDeviceDynamic / thrust::sort directly on the
-// candidate array, see GPUTPCExtrapolationTracking.cxx): same pattern as GPUTPCTrackSkeleton's and
-// GPUTPCBaseTrackParamSkeleton's own swap() overloads (GPUTPCTrack.h, GPUTPCBaseTrackParam.h) --
-// generic std::swap can't bind the MemLayout proxy reference type thrust's internal swap produces,
-// so a dedicated by-value overload swapping each leaf field (and recursing into the nested Param())
-// is required.
-constexpr void swap(GPUTPCExtrapolationCandidateSkeleton<MemLayout::reference> a, GPUTPCExtrapolationCandidateSkeleton<MemLayout::reference> b)
-{
-  swap(a.mParam, b.mParam);
-  std::swap(a.mLocalTrackId, b.mLocalTrackId);
-  std::swap(a.mRowIndex, b.mRowIndex);
-  std::swap(a.mDirection, b.mDirection);
-}
-
 } // namespace o2::gpu
-
-// Needed so thrust::sort (via sortDeviceDynamic) recognizes the candidate array's SoA
-// pointer-wrapper as a random-access iterator -- same pattern as GPUTPCTrack.h's own specialization
-// for MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::pointer>.
-namespace std
-{
-template <class T>
-class iterator_traits;
-class random_access_iterator_tag;
-
-template <>
-struct iterator_traits<MemLayout::wrapper<o2::gpu::GPUTPCExtrapolationCandidateSkeleton, MemLayout::pointer>> {
-  using iterator_category = random_access_iterator_tag;
-  using difference_type = MemLayout::ptrdiff_t;
-  using value_type = MemLayout::wrapper<o2::gpu::GPUTPCExtrapolationCandidateSkeleton, MemLayout::value>;
-  using pointer = void;
-  using reference = MemLayout::wrapper<o2::gpu::GPUTPCExtrapolationCandidateSkeleton, MemLayout::reference>;
-};
-
-} // namespace std
 
 #endif // GPUTPCEXTRAPOLATIONCANDIDATE_H

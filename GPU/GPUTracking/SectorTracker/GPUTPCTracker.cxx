@@ -157,6 +157,9 @@ GPUhd() void* GPUTPCTracker::SetPointersExtrapolationCandidates(void* mem)
   auto extrapCand_helper = [&mem, this](auto& field) -> void { computePointerWithAlignment(mem, field, mNMaxTracks); };
   ApplyRecursive{extrapCand_helper}(mExtrapCandToLeft);
   ApplyRecursive{extrapCand_helper}(mExtrapCandToRight);
+  computePointerWithAlignment(mem, mExtrapCandSortedIndexToLeft, mNMaxTracks);
+  computePointerWithAlignment(mem, mExtrapCandSortedIndexToRight, mNMaxTracks);
+  computePointerWithAlignment(mem, mExtrapCandSortTempMem, ExtrapCandSortTempMemSize(mNMaxTracks));
   return mem;
 }
 

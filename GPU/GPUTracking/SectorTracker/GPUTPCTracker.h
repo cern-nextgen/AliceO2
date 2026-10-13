@@ -204,6 +204,14 @@ class GPUTPCTracker : public GPUProcessor
   GPUhd() GPUglobalref() auto ExtrapCandToRight() const { return mExtrapCandToRight; }
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NExtrapCandToLeft() const { return &mCommonMem->nExtrapCandToLeft; }
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NExtrapCandToRight() const { return &mCommonMem->nExtrapCandToRight; }
+  GPUhd() GPUglobalref() int32_t* ExtrapCandSortedIndexToLeft() const { return mExtrapCandSortedIndexToLeft; }
+  GPUhd() GPUglobalref() int32_t* ExtrapCandSortedIndexToRight() const { return mExtrapCandSortedIndexToRight; }
+  // Persistent scratch for sortOnDevice's CUB temp storage (see GPUReconstructionCUDAKernelsSpecialize.inc)
+  // -- passed in explicitly instead of letting sortOnDevice fall back to AllocateVolatileDeviceMemory(),
+  // which is a single global non-reentrant allocator incompatible with calling sortOnDevice once per
+  // sector, concurrently across streams (see GPUCommonAlgorithm.h's sortOnDevice comment).
+  GPUhd() GPUglobalref() char* ExtrapCandSortTempMem() const { return mExtrapCandSortTempMem; }
+  GPUhd() static constexpr size_t ExtrapCandSortTempMemSize(uint32_t nMaxTracks) { return 16 * (size_t)nMaxTracks; } // generous margin over CUB's typical ~2*N*sizeof(int32_t) need
 
   GPUhd() GPUglobalref() GPUTPCRow* TrackingDataRows() const { return (mData.Rows()); }
   GPUhd() GPUglobalref() int32_t* RowStartHitCountOffset() const { return (mRowStartHitCountOffset); }
@@ -259,6 +267,13 @@ class GPUTPCTracker : public GPUProcessor
   // Dense ExtrapolationTracking candidate lists, filled by GPUTPCTrackletSelector, consumed by GPUTPCExtrapolationTracking
   GPUglobalref() MemLayout::interface<GPUTPCExtrapolationCandidateSkeleton, MemLayout::pointer, GPUTPCExtrapolationCandidateLayout>::type mExtrapCandToLeft;
   GPUglobalref() MemLayout::interface<GPUTPCExtrapolationCandidateSkeleton, MemLayout::pointer, GPUTPCExtrapolationCandidateLayout>::type mExtrapCandToRight;
+
+  // Index permutation sorting ExtrapCandToLeft/ToRight by RowIndex -- GPUCommonAlgorithm::sortOnDevice
+  // needs a genuine contiguous T* array (see GPUChainTrackingSectorTracker.cxx), which the SoA-stored
+  // candidate records themselves aren't, so a plain uint32_t index array is sorted instead.
+  GPUglobalref() int32_t* mExtrapCandSortedIndexToLeft = nullptr;
+  GPUglobalref() int32_t* mExtrapCandSortedIndexToRight = nullptr;
+  GPUglobalref() char* mExtrapCandSortTempMem = nullptr;
 
   static int32_t StarthitSortComparison(const void* a, const void* b);
 };

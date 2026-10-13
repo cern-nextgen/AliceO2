@@ -213,12 +213,38 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
 
     runKernel<GPUTPCTrackletSelector>({GetGridAuto(useStream), {iSector}});
     if (param().rec.tpc.extrapolationTracking) {
-      // Sort the 4 dense candidate arrays GPUTPCTrackletSelector just populated, in place, by
-      // RowIndex, so ConsumeExtrapolationCandidates' later per-sector pass walks them with less
-      // warp divergence (see GPUTPCExtrapolationTracking.cxx). Runs on the same useStream as
-      // GPUTPCTrackletSelector so it completes before the sector-completion event recorded below,
-      // which is what gates the neighbor sector's consumer in the later, sector-ordered pass.
-      runKernel<GPUTPCExtrapolationTracking, GPUTPCExtrapolationTracking::sort>({GetGrid(32, 1, useStream), {iSector}});
+      // Sort the 2 dense candidate arrays GPUTPCTrackletSelector just populated, by RowIndex, so
+      // ConsumeExtrapolationCandidates' later per-sector pass walks them with less warp divergence
+      // (see GPUTPCExtrapolationTracking.cxx). The actual sort runs via sortOnDevice (CUB
+      // DeviceMergeSort) on a plain int32_t index permutation -- not sortDeviceDynamic on the
+      // candidate records themselves, which measured ~1.35ms/call of dynamic-parallelism launch
+      // overhead (nsys), 1.8x the consumer kernel it was meant to speed up.
+      //
+      // The sortOnDevice call itself lives in GPUReconstructionCUDAKernelsSpecialize.inc, as a
+      // runKernelBackendTimed<GPUTPCExtrapolationTracking, sort> specialization -- NOT inline here.
+      // This .cxx file is plain, backend-agnostic C++, compiled by a normal host compiler, never by
+      // nvcc, so GPUCA_SPECIALIZE_THRUST_SORTS (which depends on __CUDACC__/__HIPCC__ being defined)
+      // is never true here; a guard here would just compile out silently, which is exactly the bug
+      // that produced an illegal-memory-access crash (uninitialized sortedIndex array, never filled
+      // or sorted, read as garbage by the consumer). The specialize file is only included from a
+      // real .cu translation unit, where __CUDACC__ is genuinely defined -- same reason every other
+      // real sort in this codebase (GPUTPCGMMergerSortTracks/SortTracksQPt, GPUTPCGMO2Output::sort)
+      // puts its sortOnDevice call there instead of in its own .cxx call site.
+      //
+      // sortOnDevice needs the candidate counts on the host, but GPUTPCTrackletSelector just wrote
+      // them on the device -- transfer just this sector's tiny common-memory struct and wait on it,
+      // the same pattern GPUTPCGMMergerSortTracks already uses (GPUChainTrackingMerger.cxx). This is
+      // a small, targeted host wait on one sector's own transfer, not a full kernel/stream sync, and
+      // since sectors are dispatched across multiple host threads (runParallelOuterLoop), it only
+      // stalls the one host thread handling this sector.
+      TransferMemoryResourceLinkToHost(RecoStep::TPCSectorTracking, trk.MemoryResCommon(), useStream, &mEvents->sector[iSector]);
+      int32_t waitForCandidateCounts = 1;
+      CondWaitEvent(waitForCandidateCounts, &mEvents->sector[iSector]);
+
+      runKernel<GPUitoa>(GetGridAutoStep(useStream, RecoStep::TPCSectorTracking), trkShadow.ExtrapCandSortedIndexToLeft(), (uint64_t)*trk.NExtrapCandToLeft());
+      runKernel<GPUitoa>(GetGridAutoStep(useStream, RecoStep::TPCSectorTracking), trkShadow.ExtrapCandSortedIndexToRight(), (uint64_t)*trk.NExtrapCandToRight());
+
+      runKernel<GPUTPCExtrapolationTracking, GPUTPCExtrapolationTracking::sort>({GetGrid(1, 1, useStream), {iSector}});
     }
     runKernel<GPUTPCExtrapolationTrackingCopyNumbers>({{1, -ThreadCount(), useStream}, {iSector}}, 1);
     if (GetProcessingSettings().deterministicGPUReconstruction) {
