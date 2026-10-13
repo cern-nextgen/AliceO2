@@ -213,18 +213,12 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
 
     runKernel<GPUTPCTrackletSelector>({GetGridAuto(useStream), {iSector}});
     if (param().rec.tpc.extrapolationTracking) {
-      // Sort the 4 dense candidate arrays GPUTPCTrackletSelector just populated (by RowIndex,
-      // QPt-bucket), so ConsumeExtrapolationCandidates' later per-sector pass walks them with less
+      // Sort the 4 dense candidate arrays GPUTPCTrackletSelector just populated, in place, by
+      // RowIndex, so ConsumeExtrapolationCandidates' later per-sector pass walks them with less
       // warp divergence (see GPUTPCExtrapolationTracking.cxx). Runs on the same useStream as
       // GPUTPCTrackletSelector so it completes before the sector-completion event recorded below,
       // which is what gates the neighbor sector's consumer in the later, sector-ordered pass.
-      runKernel<GPUMemClean16>(GetGridAutoStep(useStream, RecoStep::TPCSectorTracking), trkShadow.ExtrapCandSortKeyCountLowerToLeft(), GPUTPCExtrapolationTracking::NSortKeys * sizeof(uint32_t));
-      runKernel<GPUMemClean16>(GetGridAutoStep(useStream, RecoStep::TPCSectorTracking), trkShadow.ExtrapCandSortKeyCountLowerToRight(), GPUTPCExtrapolationTracking::NSortKeys * sizeof(uint32_t));
-      runKernel<GPUMemClean16>(GetGridAutoStep(useStream, RecoStep::TPCSectorTracking), trkShadow.ExtrapCandSortKeyCountUpperToLeft(), GPUTPCExtrapolationTracking::NSortKeys * sizeof(uint32_t));
-      runKernel<GPUMemClean16>(GetGridAutoStep(useStream, RecoStep::TPCSectorTracking), trkShadow.ExtrapCandSortKeyCountUpperToRight(), GPUTPCExtrapolationTracking::NSortKeys * sizeof(uint32_t));
-      runKernel<GPUTPCExtrapolationTracking, GPUTPCExtrapolationTracking::count>({GetGridAuto(useStream), {iSector}});
-      runKernel<GPUTPCExtrapolationTracking, GPUTPCExtrapolationTracking::offsets>({GetGrid(GPUTPCExtrapolationTracking::OffsetsThreads, GPUTPCExtrapolationTracking::OffsetsThreads, useStream), {iSector}});
-      runKernel<GPUTPCExtrapolationTracking, GPUTPCExtrapolationTracking::scatter>({GetGridAuto(useStream), {iSector}});
+      runKernel<GPUTPCExtrapolationTracking, GPUTPCExtrapolationTracking::sort>({GetGrid(32, 1, useStream), {iSector}});
     }
     runKernel<GPUTPCExtrapolationTrackingCopyNumbers>({{1, -ThreadCount(), useStream}, {iSector}}, 1);
     if (GetProcessingSettings().deterministicGPUReconstruction) {

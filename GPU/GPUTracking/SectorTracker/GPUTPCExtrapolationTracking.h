@@ -27,26 +27,10 @@ class GPUTPCExtrapolationTracking : public GPUKernelTemplate
 {
  public:
   enum K { defaultKernel = 0,
-           count = 1,
-           offsets = 2,
-           scatter = 3 };
-
-  // Secondary sort-key bucket count for the candidate sort below (see count()/scatter() in the
-  // .cxx) -- purely to spread the (RowIndex, QPt-bucket) histogram beyond RowIndex()'s own narrow
-  // range and avoid the ~50% atomic-contention regression a too-narrow key caused for the sibling
-  // GPUTPCTrackletSelector sort (fix-tracklet-sort-offsets branch history). Tunable; revisit with
-  // real per-bucket occupancy data (see GPUTPCExtrapolationTracking.cxx's ExtrapCandSortKey).
-  static constexpr int32_t QPtBuckets = 8;
-  static constexpr uint32_t NSortKeys = GPUTPCGeometry::NROWS * QPtBuckets;
-
-  // Fixed thread count the "offsets" sub-kernel runs with (single block). NSortKeys here is much
-  // smaller than GPUTPCTrackletSelector's own NROWS*NROWS, so fewer threads keep each thread's
-  // histogram chunk nontrivial.
-  static constexpr int32_t OffsetsThreads = 128;
+           sort = 1 };
 
   struct GPUSharedMemory {
     GPUCA_SHARED_STORAGE(GPUTPCRow mRows[GPUTPCGeometry::NROWS]);
-    uint32_t mOffsetsScan[OffsetsThreads]; // per-thread chunk totals / running block-wide scan, used only by "offsets"
   };
 
   typedef GPUconstantref() GPUTPCTracker processorType;
@@ -63,7 +47,7 @@ class GPUTPCExtrapolationTracking : public GPUKernelTemplate
 
  private:
   GPUd() static int32_t PerformExtrapolationTrackingRun(GPUTPCTracker& tracker, GPUsharedref() GPUSharedMemory& smem, MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> sourceParam, int32_t sourceLocalTrackId, uint32_t sourceSector, int32_t rowIndex, float angle, int32_t direction);
-  GPUd() static void ConsumeExtrapolationCandidates(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, uint32_t sourceSector, GPUsharedref() GPUSharedMemory& smem, GPUTPCTracker& sectorTarget, MemLayout::wrapper<GPUTPCExtrapolationCandidateSkeleton, MemLayout::pointer> cand, GPUglobalref() const uint32_t* sortedIndex, uint32_t nCand, float angle, int32_t direction);
+  GPUd() static void ConsumeExtrapolationCandidates(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, uint32_t sourceSector, GPUsharedref() GPUSharedMemory& smem, GPUTPCTracker& sectorTarget, MemLayout::wrapper<GPUTPCExtrapolationCandidateSkeleton, MemLayout::pointer> cand, uint32_t nCand, float angle);
 };
 
 class GPUTPCExtrapolationTrackingCopyNumbers : public GPUKernelTemplate

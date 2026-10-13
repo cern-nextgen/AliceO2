@@ -21,7 +21,6 @@
 #include "GPUTPCTrackParam.h"
 #include "GPUTPCTracklet.h"
 #include "GPUTPCTrack.h"
-#include "GPUTPCExtrapolationTracking.h"
 #include "GPUParam.inc"
 #include "GPUTPCConvertImpl.h"
 #include "GPUDefParametersRuntime.h"
@@ -156,20 +155,8 @@ GPUhd() void* GPUTPCTracker::SetPointersOutput(void* mem)
 GPUhd() void* GPUTPCTracker::SetPointersExtrapolationCandidates(void* mem)
 {
   auto extrapCand_helper = [&mem, this](auto& field) -> void { computePointerWithAlignment(mem, field, mNMaxTracks); };
-  ApplyRecursive{extrapCand_helper}(mExtrapCandLowerToLeft);
-  ApplyRecursive{extrapCand_helper}(mExtrapCandLowerToRight);
-  ApplyRecursive{extrapCand_helper}(mExtrapCandUpperToLeft);
-  ApplyRecursive{extrapCand_helper}(mExtrapCandUpperToRight);
-
-  constexpr uint32_t sortHistSlack = 16 / sizeof(uint32_t); // slack for GPUMemClean16 rounding up to 16 bytes
-  computePointerWithAlignment(mem, mExtrapCandSortKeyCountLowerToLeft, GPUTPCExtrapolationTracking::NSortKeys + sortHistSlack);
-  computePointerWithAlignment(mem, mExtrapCandSortKeyCountLowerToRight, GPUTPCExtrapolationTracking::NSortKeys + sortHistSlack);
-  computePointerWithAlignment(mem, mExtrapCandSortKeyCountUpperToLeft, GPUTPCExtrapolationTracking::NSortKeys + sortHistSlack);
-  computePointerWithAlignment(mem, mExtrapCandSortKeyCountUpperToRight, GPUTPCExtrapolationTracking::NSortKeys + sortHistSlack);
-  computePointerWithAlignment(mem, mExtrapCandSortedIndexLowerToLeft, mNMaxTracks);
-  computePointerWithAlignment(mem, mExtrapCandSortedIndexLowerToRight, mNMaxTracks);
-  computePointerWithAlignment(mem, mExtrapCandSortedIndexUpperToLeft, mNMaxTracks);
-  computePointerWithAlignment(mem, mExtrapCandSortedIndexUpperToRight, mNMaxTracks);
+  ApplyRecursive{extrapCand_helper}(mExtrapCandToLeft);
+  ApplyRecursive{extrapCand_helper}(mExtrapCandToRight);
   return mem;
 }
 

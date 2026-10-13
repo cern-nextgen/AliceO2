@@ -134,26 +134,28 @@ GPUdii() void GPUTPCTrackletSelector::Thread<0>(int32_t nBlocks, int32_t nThread
               GPUglobalref() const GPUTPCRow& GPUrestrict() edgeRow = tracker.Row(rowIndex);
               const float y = (float)tracker.Data().HitDataY(edgeRow, tracker.TrackHits()[nFirstTrackHit].HitIndex()) * edgeRow.HstepY() + edgeRow.Grid().YMin();
               if (y < -edgeRow.MaxY() * tracker.Param().rec.tpc.extrapolationTrackingYRangeLower) {
-                const uint32_t pos = CAMath::AtomicAdd(tracker.NExtrapCandLowerToLeft(), 1u);
+                const uint32_t pos = CAMath::AtomicAdd(tracker.NExtrapCandToLeft(), 1u);
                 if (pos < tracker.NMaxTracks()) {
-                  auto cand = tracker.ExtrapCandLowerToLeft()[pos];
+                  auto cand = tracker.ExtrapCandToLeft()[pos];
                   cand.SetParam(tracklet.Param());
                   cand.SetLocalTrackId((int32_t)itrout);
                   cand.SetRowIndex(rowIndex);
+                  cand.SetDirection(-1);
                 } else {
                   tracker.raiseError(GPUErrors::ERROR_EXTRAPOLATION_CANDIDATE_OVERFLOW, tracker.ISector(), pos, tracker.NMaxTracks());
-                  CAMath::AtomicExch(tracker.NExtrapCandLowerToLeft(), tracker.NMaxTracks());
+                  CAMath::AtomicExch(tracker.NExtrapCandToLeft(), tracker.NMaxTracks());
                 }
               } else if (y > edgeRow.MaxY() * tracker.Param().rec.tpc.extrapolationTrackingYRangeLower) {
-                const uint32_t pos = CAMath::AtomicAdd(tracker.NExtrapCandLowerToRight(), 1u);
+                const uint32_t pos = CAMath::AtomicAdd(tracker.NExtrapCandToRight(), 1u);
                 if (pos < tracker.NMaxTracks()) {
-                  auto cand = tracker.ExtrapCandLowerToRight()[pos];
+                  auto cand = tracker.ExtrapCandToRight()[pos];
                   cand.SetParam(tracklet.Param());
                   cand.SetLocalTrackId((int32_t)itrout);
                   cand.SetRowIndex(rowIndex);
+                  cand.SetDirection(-1);
                 } else {
                   tracker.raiseError(GPUErrors::ERROR_EXTRAPOLATION_CANDIDATE_OVERFLOW, tracker.ISector(), pos, tracker.NMaxTracks());
-                  CAMath::AtomicExch(tracker.NExtrapCandLowerToRight(), tracker.NMaxTracks());
+                  CAMath::AtomicExch(tracker.NExtrapCandToRight(), tracker.NMaxTracks());
                 }
               }
             }
@@ -162,26 +164,28 @@ GPUdii() void GPUTPCTrackletSelector::Thread<0>(int32_t nBlocks, int32_t nThread
               GPUglobalref() const GPUTPCRow& GPUrestrict() edgeRow = tracker.Row(rowIndex);
               const float y = (float)tracker.Data().HitDataY(edgeRow, tracker.TrackHits()[nFirstTrackHit + nHits - 1].HitIndex()) * edgeRow.HstepY() + edgeRow.Grid().YMin();
               if (y < -edgeRow.MaxY() * tracker.Param().rec.tpc.extrapolationTrackingYRangeUpper) {
-                const uint32_t pos = CAMath::AtomicAdd(tracker.NExtrapCandUpperToLeft(), 1u);
+                const uint32_t pos = CAMath::AtomicAdd(tracker.NExtrapCandToLeft(), 1u);
                 if (pos < tracker.NMaxTracks()) {
-                  auto cand = tracker.ExtrapCandUpperToLeft()[pos];
+                  auto cand = tracker.ExtrapCandToLeft()[pos];
                   cand.SetParam(tracklet.Param());
                   cand.SetLocalTrackId((int32_t)itrout);
                   cand.SetRowIndex(rowIndex);
+                  cand.SetDirection(1);
                 } else {
                   tracker.raiseError(GPUErrors::ERROR_EXTRAPOLATION_CANDIDATE_OVERFLOW, tracker.ISector(), pos, tracker.NMaxTracks());
-                  CAMath::AtomicExch(tracker.NExtrapCandUpperToLeft(), tracker.NMaxTracks());
+                  CAMath::AtomicExch(tracker.NExtrapCandToLeft(), tracker.NMaxTracks());
                 }
               } else if (y > edgeRow.MaxY() * tracker.Param().rec.tpc.extrapolationTrackingYRangeUpper) {
-                const uint32_t pos = CAMath::AtomicAdd(tracker.NExtrapCandUpperToRight(), 1u);
+                const uint32_t pos = CAMath::AtomicAdd(tracker.NExtrapCandToRight(), 1u);
                 if (pos < tracker.NMaxTracks()) {
-                  auto cand = tracker.ExtrapCandUpperToRight()[pos];
+                  auto cand = tracker.ExtrapCandToRight()[pos];
                   cand.SetParam(tracklet.Param());
                   cand.SetLocalTrackId((int32_t)itrout);
                   cand.SetRowIndex(rowIndex);
+                  cand.SetDirection(1);
                 } else {
                   tracker.raiseError(GPUErrors::ERROR_EXTRAPOLATION_CANDIDATE_OVERFLOW, tracker.ISector(), pos, tracker.NMaxTracks());
-                  CAMath::AtomicExch(tracker.NExtrapCandUpperToRight(), tracker.NMaxTracks());
+                  CAMath::AtomicExch(tracker.NExtrapCandToRight(), tracker.NMaxTracks());
                 }
               }
             }
