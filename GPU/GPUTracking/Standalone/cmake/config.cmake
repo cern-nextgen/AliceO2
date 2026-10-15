@@ -12,9 +12,10 @@
 # This is the configuration file for the standalone build
 # Its options do not affect the O2 build !!!!
 
-set(ENABLE_CUDA AUTO CACHE STRING "ENABLE_CUDA")
-set(ENABLE_HIP AUTO CACHE STRING "ENABLE_HIP")
-set(ENABLE_OPENCL 0)
+set(ENABLE_CUDA AUTO CACHE STRING "ENABLE_CUDA") # Enable CUDA compilation. Possible Settings are 1/N, 0/OFF, AUTO (for auto-detection)
+set(ENABLE_HIP AUTO CACHE STRING "ENABLE_HIP") # Enable AMD ROCm / HIP compilation (same options as CUDA)
+set(ENABLE_OPENCL 0)                          # Enable OpenCL compilation (same options as CUDA)
+set(ENABLE_CPUDEVICE 1)                       # Enable CPUDevice backend: runs the CPU kernels on the host, but behaves like a GPU device (for debugging)
 set(GPUCA_CONFIG_VC 1)
 set(GPUCA_CONFIG_FMT 1)
 set(GPUCA_CONFIG_ROOT 0)

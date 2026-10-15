@@ -27,7 +27,7 @@
 //Define macros for GPU keywords. i-version defines inline functions.
 //All host-functions in GPU code are automatically inlined, to avoid duplicate symbols.
 //For non-inline host only functions, use no keyword at all!
-#if !defined(GPUCA_GPUCODE) || defined(__OPENCL_HOST__) // For host / ROOT dictionary
+#if !defined(GPUCA_GPUCODE) || defined(__OPENCL_HOST__) || defined(__METAL_HOST__) || defined(__CPUDEVICE__) // For host / ROOT dictionary, and for the CPUDevice backend whose device code runs on the host
   #define GPUd()                                    // device function
   #define GPUdDefault()                             // default (constructor / operator) device function
   #define GPUhdDefault()                            // default (constructor / operator) host device function
@@ -48,6 +48,8 @@
   #define GPUglobal()                               // global memory variable declaration (only used for kernel input pointers)
   #define GPUconstant()                             // constant memory variable declaraion
   #define GPUconstexpr() static constexpr           // constexpr on GPU that needs to be instantiated for dynamic access (e.g. arrays), becomes __constant on GPU
+  #define GPUglobalconstexpr() constexpr            // constexpr variable at program scope, needs the constant address space in MSL
+  #define GPUnoexcept() noexcept                    // noexcept where the backend supports it
   #define GPUprivate()                              // private memory variable declaration
   #define GPUgeneric()                              // reference / ptr to generic address space
   #define GPUbarrier()                              // synchronize all GPU threads in block
@@ -124,6 +126,54 @@
   #if (!defined(__OPENCL__) || !defined(GPUCA_NO_CONSTANT_MEMORY))
     #define GPUconstantref() GPUconstant()
   #endif
+#elif defined(__METAL__) //Defines for Metal Shading Language
+  // ADDRESS SPACES. This backend targets MSL 4.1 (macOS 27) and later only --
+  // see -std=metal4.1 in the CMakeLists, which fails the build on anything
+  // older rather than miscompiling quietly.
+  //
+  // That version is what makes the port tractable: up to MSL 4.0 a member
+  // function's implicit `this` is `thread`, which is wrong for us, since most
+  // objects the kernels touch live in `device` memory. Pinning defaulted
+  // constructors and operators to `device` was the 4.0 workaround, and it made
+  // the same type unusable in `thread` or `threadgroup`. In 4.1 an unannotated
+  // `this` is GENERIC and resolves to whichever address space the object is in
+  // -- the C++ semantics this codebase already assumes -- so GPUdDefault()
+  // needs nothing at all. The compiler resolves it statically in almost every
+  // case; it only falls back to a runtime branch where it cannot see through,
+  // such as argument buffers or dynamic libraries.
+  //
+  // The *ref() macros below stay explicit even so. They are already correct
+  // from the OpenCL port, an explicit annotation is never slower than a generic
+  // one, and `constant` is not covered by generic pointers at all.
+  #define GPUdDefault()                             // generic `this` (MSL 4.1+)
+  #define GPUd()
+  #define GPUhdDefault()
+  #define GPUdi() inline
+  #define GPUdii() inline
+  #define GPUdni()
+  #define GPUdnii()
+  #define GPUh() inline
+  #define GPUhi() inline
+  #define GPUhd() inline
+  #define GPUhdi() inline
+  #define GPUhdni()
+  #define GPUg() kernel
+  #define GPUshared() threadgroup
+  #define GPUglobal() device
+  #define GPUconstant() constant // TODO: possibly add const __restrict where possible later!
+  #define GPUconstexpr() constant
+  #define GPUglobalconstexpr() constant constexpr
+  #define GPUnoexcept()
+  #define GPUprivate() thread
+  #define GPUgeneric()
+  #define GPUglobalref()
+  #define GPUsharedref() threadgroup
+  #define GPUprivateref() thread
+  #define GPUconstexprref() GPUconstexpr()
+  #define GPUdouble() float
+  #define GPUbarrier() threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup)
+  #define GPUbarrierWarp() simdgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup)
+  #define GPUAtomic(type) type                      // atomic variable type
 #elif defined(__HIPCC__) //Defines for HIP
   #define GPUd() __device__
   #define GPUdDefault() __device__
@@ -208,6 +258,12 @@
 #ifndef GPUconstexprref
 #define GPUconstexprref()
 #endif
+#ifndef GPUglobalconstexpr
+#define GPUglobalconstexpr() constexpr
+#endif
+#ifndef GPUnoexcept
+#define GPUnoexcept() noexcept
+#endif
 
 #define GPUrestrict() __restrict__
 
@@ -221,6 +277,16 @@
   #define get_group_id(dim) (blockIdx.x)
 #elif defined(__OPENCL__)
   // Using OpenCL defaults
+#elif defined(__METAL__)
+  // MSL has no work-item builtins. They arrive as attributes on the entry point,
+  // named there after the nBlocks / nThreads / iBlock / iThread that Thread()
+  // already takes, so these resolve both there and in every function below it.
+  #define get_global_id(dim) (iBlock * nThreads + iThread)
+  #define get_global_size(dim) (nBlocks * nThreads)
+  #define get_num_groups(dim) (nBlocks)
+  #define get_local_id(dim) (iThread)
+  #define get_local_size(dim) (nThreads)
+  #define get_group_id(dim) (iBlock)
 #else
   #define get_global_id(dim) iBlock
   #define get_global_size(dim) nBlocks
@@ -230,5 +296,16 @@
   #define get_group_id(dim) iBlock
 #endif
 
-    // clang-format on
+// A device function that uses the helpers above but has none of the indices in
+// scope needs them passed in on Metal, where they are ordinary parameters.
+// Both expand to nothing everywhere else, and go last in the parameter list.
+#ifdef __METAL__
+  #define GPUCA_THREAD_INFO_DECL , int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread
+  #define GPUCA_THREAD_INFO_PROVIDE , nBlocks, nThreads, iBlock, iThread
+#else
+  #define GPUCA_THREAD_INFO_DECL
+  #define GPUCA_THREAD_INFO_PROVIDE
+#endif
+
+// clang-format on
 #endif

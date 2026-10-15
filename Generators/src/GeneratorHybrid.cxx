@@ -17,6 +17,7 @@
 #include <tbb/parallel_for.h>
 #include <CommonUtils/FileSystemUtils.h>
 #include <filesystem>
+#include "TGrid.h"
 
 namespace o2
 {
@@ -37,7 +38,26 @@ GeneratorHybrid::GeneratorHybrid(const std::string& inputgens)
   setMomentumUnit(1.);
   setEnergyUnit(1.);
 
-  if (!parseJSON(inputgens)) {
+  // Pull file from alien for dynamic configuration if needed
+  bool isAlien = false;
+  if (inputgens.starts_with("alien://")) {
+    if (!gGrid) {
+      TGrid::Connect("alien://");
+      if (!gGrid) {
+        LOG(fatal) << "AliEn connection failed, check token.";
+        exit(1);
+      }
+    }
+    TString aliencp = Form("alien_cp %s file:./%s",
+                           inputgens.c_str(), "hybridAlien.json");
+    if (gSystem->Exec(aliencp.Data()) != 0) {
+      LOG(fatal) << "Error: Issues in fetching file" << inputgens;
+      exit(1);
+    }
+    isAlien = true;
+  }
+
+  if (!parseJSON(isAlien ? "hybridAlien.json" : inputgens)) {
     LOG(fatal) << "Failed to parse JSON configuration from input generators";
     exit(1);
   }
@@ -102,6 +122,13 @@ GeneratorHybrid::GeneratorHybrid(const std::string& inputgens)
         mGens.push_back(gen);
       } else if (gen.compare("external") == 0) {
         int confextIndex = std::stoi(mConfigs[index].substr(9));
+        // Hybrid configs can clone the same external generator config multiple times so
+        // an external macro that self-seeds from gRandom could sample the same seed.
+        // For this reason the shared RNG state is advanced as a precaution
+        // mirroring what GeneratorPythia8::seedGenerator() does for multiple Pythia8 instances.
+        if (std::count(mGens.begin(), mGens.end(), "external") > 0) {
+          gRandom->Rndm();
+        }
         // we need analyse the ini file to update the config key param
         if (mExternalGenConfigs[confextIndex]->iniFile.size() > 0) {
           LOG(info) << "Setting up external gen using the given INI file";
@@ -225,6 +252,18 @@ Bool_t GeneratorHybrid::Init()
     }
     count++;
   }
+  // Label for groups: concatenation of the names of the generators in the group, separated by '+'.
+  // Currently used only if randomisation is enabled
+  auto groupLabel = [this](int k) {
+    std::string label;
+    for (auto subIndex : mGroups[k]) {
+      if (!label.empty()) {
+        label += "+";
+      }
+      label += (mConfigs[subIndex] == "" ? mGens[subIndex] : mConfigs[subIndex]);
+    }
+    return label;
+  };
   if (mRandomize) {
     if (std::all_of(mFractions.begin(), mFractions.end(), [](int i) { return i == 1; })) {
       LOG(info) << "Full randomisation of generators order";
@@ -241,12 +280,12 @@ Bool_t GeneratorHybrid::Init()
         if (mFractions[k] == 0) {
           // Generator will not be used if fraction is 0
           mRngFractions.push_back(-1);
-          LOG(info) << "Generator " << mGens[k] << " will not be used";
+          LOG(info) << "Generator " << groupLabel(k) << " will not be used";
         } else {
           chance = static_cast<float>(mFractions[k]) / allfracs;
           sum += chance;
           mRngFractions.push_back(sum);
-          LOG(info) << "Generator " << (mConfigs[k] == "" ? mGens[k] : mConfigs[k]) << " has a " << chance * 100 << "% chance of being used";
+          LOG(info) << "Generator " << groupLabel(k) << " has a " << chance * 100 << "% chance of being used";
         }
       }
     }
@@ -687,6 +726,10 @@ Bool_t GeneratorHybrid::parseJSON(const std::string& path)
   if (doc.HasMember("fractions")) {
     const auto& fractions = doc["fractions"];
     for (const auto& frac : fractions.GetArray()) {
+      if (!frac.IsInt()) {
+        LOG(fatal) << "Fractions must be integers. Wrong type found in JSON";
+        return false;
+      }
       mFractions.push_back(frac.GetInt());
     }
   } else {

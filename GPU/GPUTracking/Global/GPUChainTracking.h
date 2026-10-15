@@ -19,6 +19,7 @@
 #include "GPUDataTypesIO.h"
 #include "GPUDataTypesConfig.h"
 #include "GPUCommonAlignedAlloc.h"
+#include "utils/HashStreamBuf.h"
 #include <atomic>
 #include <mutex>
 #include <functional>
@@ -148,7 +149,6 @@ class GPUChainTracking : public GPUChain
 
   // Converter / loader functions
   int32_t ConvertNativeToClusterData();
-  void ConvertNativeToClusterDataLegacy();
   void ConvertRun2RawToNative();
   void ConvertZSEncoder(int32_t version);
   void ConvertZSFilter(bool zs12bit);
@@ -196,7 +196,7 @@ class GPUChainTracking : public GPUChain
   void SetCalibObjects(const GPUCalibObjects& obj);
   void SetUpdateCalibObjects(const GPUCalibObjectsConst& obj, const GPUNewCalibValues& vals);
   void SetSubOutputControl(int32_t i, GPUOutputControl* v) { mSubOutputControls[i] = v; }
-  void SetFinalInputCallback(std::function<void()> v) { mWaitForFinalInputs = v; }
+  void SetFinalInputCallback(std::function<int32_t()> v) { mWaitForFinalInputs = v; }
 
   const GPUSettingsDisplay* mConfigDisplay = nullptr; // Abstract pointer to Standalone Display Configuration Structure
   const GPUSettingsQA* mConfigQA = nullptr;           // Abstract pointer to Standalone QA Configuration Structure
@@ -287,7 +287,9 @@ class GPUChainTracking : public GPUChain
   uint32_t mMaxTRDTracklets = 0;
 
   // Debug
-  std::unique_ptr<std::ofstream> mDebugFile;
+  std::filebuf mDebugFileBuffer;
+  HashStreamBuf mDebugFileStream;
+  std::unique_ptr<std::ostream> mDebugFile;
 
   // Synchronization and Locks
   eventStruct* mEvents = nullptr;
@@ -301,11 +303,11 @@ class GPUChainTracking : public GPUChain
   int32_t RunTPCTrackingSectors_internal();
   int32_t RunTPCClusterizer_prepare(bool restorePointers, const GPUTPCExtraADC& extraADCs);
 #ifndef GPUCA_RUN2
-  std::pair<uint32_t, uint32_t> RunTPCClusterizer_transferZS(int32_t iSector, const CfFragment& fragment, int32_t lane, const GPUTPCExtraADC& extraADCs);
+  std::pair<uint32_t, uint32_t> RunTPCClusterizer_transferZS(int32_t iSector, const CfFragment& frag, int32_t lane, const GPUTPCExtraADC& extraADCs);
   void RunTPCClusterizer_compactPeaks(GPUTPCClusterFinder& clusterer, GPUTPCClusterFinder& clustererShadow, int32_t stage, bool doGPU, int32_t lane);
-  std::pair<uint32_t, uint32_t> TPCClusterizerDecodeZSCount(uint32_t iSector, const CfFragment& fragment);
-  std::pair<uint32_t, uint32_t> TPCClusterizerDecodeZSCountUpdate(uint32_t iSector, const CfFragment& fragment);
-  void TPCClusterizerEnsureZSOffsets(uint32_t iSector, const CfFragment& fragment);
+  std::pair<uint32_t, uint32_t> TPCClusterizerDecodeZSCount(uint32_t iSector, const CfFragment& frag);
+  std::pair<uint32_t, uint32_t> TPCClusterizerDecodeZSCountUpdate(uint32_t iSector, const CfFragment& frag);
+  void TPCClusterizerEnsureZSOffsets(uint32_t iSector, const CfFragment& frag);
   void TPCClusterizerTransferExtraADC(GPUTPCClusterFinder& clusterer, GPUTPCClusterFinder& clustererShadow, int lane, const GPUTPCExtraADC& extraADCs);
   void TPCClusterizerCheckExtraADCZeros(GPUTPCClusterFinder& clusterer, GPUTPCClusterFinder& clustererShadow, int lane, const GPUTPCExtraADC& extraADCs);
 #endif
@@ -322,7 +324,7 @@ class GPUChainTracking : public GPUChain
   std::mutex mMutexUpdateCalib;
   std::unique_ptr<GPUChainTrackingFinalContext> mPipelineFinalizationCtx;
   GPUChainTrackingFinalContext* mPipelineNotifyCtx = nullptr;
-  std::function<void()> mWaitForFinalInputs;
+  std::function<int32_t()> mWaitForFinalInputs;
 
   int32_t OutputStream() const { return mRec->NStreams() - 2; }
 };

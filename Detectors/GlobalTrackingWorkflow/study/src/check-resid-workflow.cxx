@@ -59,10 +59,13 @@ WorkflowSpec defineDataProcessing(ConfigContext const& configcontext)
 
   bool drawOnly = configcontext.options().get<bool>("draw-external-only");
   bool postProcOnly = configcontext.options().get<bool>("postproc-external-only");
+  bool doStag = o2::itsmft::DPLAlpideParamInitializer::isITSStaggeringEnabled(configcontext);
   GID::mask_t allowedSourcesTrc = GID::getSourcesMask("ITS,TPC,ITS-TPC,ITS-TPC-TRD,ITS-TPC-TOF,ITS-TPC-TRD-TOF");
   GID::mask_t allowedSourcesClus = GID::getSourcesMask("ITS");
 
   // Update the (declared) parameters if changed from the command line
+  const std::string PVDef = "pvertexer.useMeanVertexConstraint=false;pvertexer.meanVertexExtraErrSelection=0.2;pvertexer.iniScale2=100;pvertexer.acceptableScale2=10.;pvertexer.useTimeInChi2=false;";
+  o2::conf::ConfigurableParam::updateFromString(PVDef); // first set proper defaults of PV refitting, the CL options will override them if provided
   o2::conf::ConfigurableParam::updateFromString(configcontext.options().get<std::string>("configKeyValues"));
 
   GID::mask_t srcTrc = allowedSourcesTrc & GID::getSourcesMask(configcontext.options().get<std::string>("track-sources"));
@@ -75,7 +78,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& configcontext)
     allowedSourcesTrc = {};
     allowedSourcesClus = {};
   }
-  specs.emplace_back(o2::checkresid::getCheckResidSpec(srcTrc, srcCls, drawOnly, postProcOnly));
+  specs.emplace_back(o2::checkresid::getCheckResidSpec(srcTrc, srcCls, drawOnly, postProcOnly, doStag));
 
   // configure dpl timer to inject correct firstTForbit: start from the 1st orbit of TF containing 1st sampled orbit
   if (!drawOnly) {

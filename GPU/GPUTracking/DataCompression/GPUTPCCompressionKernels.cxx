@@ -117,7 +117,7 @@ GPUdii() void GPUTPCCompressionKernels::Thread<GPUTPCCompressionKernels::step0at
         float time = CAMath::Max(0.f, geo.LinearZ2Time(hit.sector, track.Z() + zOffset));
         c.timeResA[cidx] = (orgCl.getTimePacked() - orgCl.packTime(time)) & 0xFFFFFF;
       }
-      uint16_t qtot = orgCl.qTot, qmax = orgCl.qMax;
+      uint16_t qtot = orgCl.qTotPacked, qmax = orgCl.qMax;
       uint8_t sigmapad = orgCl.sigmaPadPacked, sigmatime = orgCl.sigmaTimePacked;
       if (param.rec.tpc.compressionTypeMask & GPUSettings::CompressionTruncate) {
         compressor.truncateSignificantBitsChargeMax(qmax, param);
@@ -184,7 +184,7 @@ GPUd() bool GPUTPCCompressionKernels::GPUTPCCompressionKernels_Compare<4>::opera
   if (mClsPtr[a].padPacked != mClsPtr[b].padPacked) {
     return mClsPtr[a].padPacked < mClsPtr[b].padPacked;
   }
-  return mClsPtr[a].qTot < mClsPtr[b].qTot;
+  return mClsPtr[a].qTotPacked < mClsPtr[b].qTotPacked;
 }
 
 GPUd() bool GPUTPCCompression::rejectCluster(int32_t idx, const GPUParam& GPUrestrict() param, const GPUTrackingInOutPointers& GPUrestrict() ioPtrs) const
@@ -274,16 +274,16 @@ GPUdii() void GPUTPCCompressionKernels::Thread<GPUTPCCompressionKernels::step1un
         static_assert(GPUCA_GET_THREAD_COUNT(GPUCA_LB_GPUTPCCompressionKernels_step1unattached) * 2 <= constants::TPC_COMP_CHUNK_SIZE);
 #endif
 #ifdef GPUCA_DETERMINISTIC_MODE
-        CAAlgo::sortInBlock(sortBuffer, sortBuffer + count, GPUTPCCompressionKernels_Compare<GPUSettings::SortZPadTime>(clusters->clusters[iSector][iRow]));
+        CAAlgo::sortInBlock(sortBuffer, sortBuffer + count, GPUTPCCompressionKernels_Compare<GPUSettings::SortZPadTime>(clusters->clusters[iSector][iRow]) GPUCA_THREAD_INFO_PROVIDE);
 #else  // GPUCA_DETERMINISTIC_MODE
         if (param.rec.tpc.compressionSortOrder == GPUSettings::SortZPadTime) {
-          CAAlgo::sortInBlock(sortBuffer, sortBuffer + count, GPUTPCCompressionKernels_Compare<GPUSettings::SortZPadTime>(clusters->clusters[iSector][iRow]));
+          CAAlgo::sortInBlock(sortBuffer, sortBuffer + count, GPUTPCCompressionKernels_Compare<GPUSettings::SortZPadTime>(clusters->clusters[iSector][iRow]) GPUCA_THREAD_INFO_PROVIDE);
         } else if (param.rec.tpc.compressionSortOrder == GPUSettings::SortZTimePad) {
-          CAAlgo::sortInBlock(sortBuffer, sortBuffer + count, GPUTPCCompressionKernels_Compare<GPUSettings::SortZTimePad>(clusters->clusters[iSector][iRow]));
+          CAAlgo::sortInBlock(sortBuffer, sortBuffer + count, GPUTPCCompressionKernels_Compare<GPUSettings::SortZTimePad>(clusters->clusters[iSector][iRow]) GPUCA_THREAD_INFO_PROVIDE);
         } else if (param.rec.tpc.compressionSortOrder == GPUSettings::SortPad) {
-          CAAlgo::sortInBlock(sortBuffer, sortBuffer + count, GPUTPCCompressionKernels_Compare<GPUSettings::SortPad>(clusters->clusters[iSector][iRow]));
+          CAAlgo::sortInBlock(sortBuffer, sortBuffer + count, GPUTPCCompressionKernels_Compare<GPUSettings::SortPad>(clusters->clusters[iSector][iRow]) GPUCA_THREAD_INFO_PROVIDE);
         } else if (param.rec.tpc.compressionSortOrder == GPUSettings::SortTime) {
-          CAAlgo::sortInBlock(sortBuffer, sortBuffer + count, GPUTPCCompressionKernels_Compare<GPUSettings::SortTime>(clusters->clusters[iSector][iRow]));
+          CAAlgo::sortInBlock(sortBuffer, sortBuffer + count, GPUTPCCompressionKernels_Compare<GPUSettings::SortTime>(clusters->clusters[iSector][iRow]) GPUCA_THREAD_INFO_PROVIDE);
         }
 #endif // GPUCA_DETERMINISTIC_MODE
         GPUbarrier();
@@ -296,7 +296,7 @@ GPUdii() void GPUTPCCompressionKernels::Thread<GPUTPCCompressionKernels::step1un
         int32_t preId = j != 0 ? (int32_t)sortBuffer[j - 1] : (totalCount != 0 ? (int32_t)smem.lastIndex : -1);
         GPUTPCCompression_EncodeUnattached(param.rec.tpc.compressionTypeMask, orgCl, c.timeDiffU[outidx], c.padDiffU[outidx], preId == -1 ? nullptr : &clusters->clusters[iSector][iRow][preId]);
 
-        uint16_t qtot = orgCl.qTot, qmax = orgCl.qMax;
+        uint16_t qtot = orgCl.qTotPacked, qmax = orgCl.qMax;
         uint8_t sigmapad = orgCl.sigmaPadPacked, sigmatime = orgCl.sigmaTimePacked;
         if (param.rec.tpc.compressionTypeMask & GPUSettings::CompressionTruncate) {
           compressor.truncateSignificantBitsChargeMax(qmax, param);

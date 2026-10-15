@@ -23,8 +23,9 @@
 #include <deque>
 #include <memory>
 
-#include "Rtypes.h"  // for Digitizer::Class
-#include "TObject.h" // for TObject
+#include <TH2D.h>
+#include <Rtypes.h>  // for Digitizer::Class
+#include <TObject.h> // for TObject
 
 #include "ITSMFTSimulation/Hit.h"
 #include "DataFormatsIOTOF/Digit.h"
@@ -34,7 +35,7 @@
 #include "SimulationDataFormat/MCCompLabel.h"
 #include "SimulationDataFormat/MCTruthContainer.h"
 #include "IOTOFBase/GeometryTGeo.h"
-#include "IOTOFSimulation/Segmentation.h"
+#include "IOTOFBase/Segmentation.h"
 
 namespace o2::iotof
 {
@@ -62,6 +63,7 @@ class Digitizer : public TObject
 
   /// Set the event time
   void setEventTime(const o2::InteractionTimeRecord& irt) { mEventTime = irt; }
+  void setROFRecordIR(const o2::InteractionRecord& ir) { mROFRecordIR = ir; }
 
   /// Set continuous readout mode
   void setContinuous(bool v) { mContinuous = v; }
@@ -73,33 +75,32 @@ class Digitizer : public TObject
   // Provide the common iotof::GeometryTGeo to access matrices and segmentation
   void setGeometry(const o2::iotof::GeometryTGeo* gm) { mGeometry = gm; }
 
-  // Setters for digitization parameters
-  void setChargeThreshold(float thr) { mChargeThreshold = thr; }
-  void setTimeResolution(float res) { mTimeResolution = res; }
-  void setEfficiency(float eff) { mEfficiency = eff; }
-  void setEnergyToCharge(float e2c) { mEnergyToCharge = e2c; }
-
-  // Getters
-  float getChargeThreshold() const { return mChargeThreshold; }
-  float getTimeResolution() const { return mTimeResolution; }
-  float getEfficiency() const { return mEfficiency; }
-
  private:
   /// Process a single hit
   void processHit(const o2::itsmft::Hit& hit, int evID, int srcID);
 
   /// Register digits in a given chip
-  void registerDigits(Chip& chip, uint32_t roFrame, float timeInitROF, int nROF,
+  void registerDigits(Chip& chip, uint32_t roFrame, double time, int nROF,
                       uint16_t row, uint16_t col, int nElectrons, o2::MCCompLabel& label);
 
+  void stepping(const o2::itsmft::Hit& hit, float**& respMatrix, float**& avgHitLocalX, float**& avgHitLocalZ, int& rowStart, int& colStart, int& rowSpan, int& colSpan);
+
   /// Apply time smearing to simulate detector resolution
-  double smearTime(double time) const;
+  double smearTime(double time, const float x, const float z) const;
 
   /// Convert energy loss to charge
   int energyToCharge(float energyLoss) const;
 
+  /// Load a map from CCDB (path prefixed with "ccdb://") or from a ROOT file (any other path)
+  /// \param mapName Name of the histogram inside the ROOT file (ignored for CCDB)
+  void loadMap(TH2D*& map, const std::string& path, const char* mapName);
+
+  void prepareScaledResolutionMap();
+
   /// Check if the hit passes efficiency cut
-  bool isEfficient() const;
+  /// \param x Detector local coordinate x in cm with respect to the center of the sensitive volume.
+  /// \param z Detector local coordinate z in cm with respect to the center of the sensitive volume.
+  bool isEfficient(const float x, const float z) const;
 
   std::vector<o2::iotof::McLabelRef>* getExtraLabelBuffer(uint32_t roFrame)
   {
@@ -115,9 +116,15 @@ class Digitizer : public TObject
     return mExtraLabelBuffer[index].get();
   }
 
+  static constexpr float ps2ns = 1e-3f; ///< picoseconds to nanoseconds conversion
   static constexpr float sec2ns = 1e9f; ///< seconds to nanoseconds conversion
+  static constexpr float cm2um = 1e4f;  ///< centimeters to micrometers conversion
 
   const o2::iotof::GeometryTGeo* mGeometry = nullptr; ///< IOTOF geometry
+  TH2D* mEfficiencyMap = nullptr;                     ///< Efficiency map for the detector
+  TH2D* mResolutionMap = nullptr;                     ///< Resolution map for the detector
+  TH2D* mScaledResolutionMap = nullptr;               ///< Scaled resolution map for the detector
+  TH2D* mTimeOfArrivalMap = nullptr;                  ///< Time of arrival map for the detector
 
   std::vector<o2::iotof::Chip> mChips;                                               //! Chips in the detector, indexed by chip ID
   std::deque<std::unique_ptr<std::vector<o2::iotof::McLabelRef>>> mExtraLabelBuffer; //! buffer for multiple mc labels to the same pixel
@@ -127,13 +134,8 @@ class Digitizer : public TObject
   o2::dataformats::MCTruthContainer<o2::MCCompLabel>* mMCLabels = nullptr; //! output labels
 
   o2::InteractionTimeRecord mEventTime; ///< global event time and interaction record
+  o2::InteractionRecord mROFRecordIR;   ///< interaction record assigned to the output ROF
   bool mContinuous = true;              ///< continuous readout mode
-
-  // Digitization parameters
-  float mChargeThreshold = 100.f;  ///< charge threshold for digit creation (electrons)
-  float mTimeResolution = 0.020f;  ///< time resolution sigma in ns (20 ps default)
-  float mEfficiency = 0.98f;       ///< detection efficiency
-  float mEnergyToCharge = 3.6e-9f; ///< energy loss to electrons conversion (3.6 eV per e-h pair in Si)
 
   static o2::iotof::Segmentation* sSegmentation; ///< IOTOF segmentation instance (singleton)
 

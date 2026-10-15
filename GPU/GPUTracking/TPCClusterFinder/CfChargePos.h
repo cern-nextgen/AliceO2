@@ -15,6 +15,8 @@
 #ifndef O2_GPU_CHARGE_POS_H
 #define O2_GPU_CHARGE_POS_H
 
+#include "GPUCommonDef.h"
+
 #include "clusterFinderDefs.h"
 
 namespace o2::gpu
@@ -32,6 +34,9 @@ struct CfChargePos {
     : gpad(tpcGlobalPadIdx(row, pad)), timePadded(t + GPUCF_PADDING_TIME)
   {
   }
+#ifdef __METAL__
+  constexpr GPUhdi() CfChargePos(tpccf::Row row, tpccf::Pad pad, tpccf::TPCFragmentTime t) constant : gpad(tpcGlobalPadIdx(row, pad)), timePadded(t + GPUCF_PADDING_TIME) {}
+#endif
 
   GPUdi() CfChargePos(const tpccf::GlobalPad& p, const tpccf::TPCFragmentTime& t) : gpad(p), timePadded(t) {}
 
@@ -56,7 +61,7 @@ struct CfChargePos {
   }
 };
 
-inline constexpr CfChargePos INVALID_CHARGE_POS{255, 255, INVALID_TIME_BIN};
+inline GPUglobalconstexpr() CfChargePos INVALID_CHARGE_POS{255, 255, INVALID_TIME_BIN};
 
 } // namespace o2::gpu
 

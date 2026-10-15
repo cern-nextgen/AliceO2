@@ -14,6 +14,7 @@
 /// \author ruben.shahoyan@cern.ch
 
 #include "Field/MagneticField.h"
+#include "Field/FieldOriginBiasParam.h"
 #include <TFile.h>             // for TFile
 #include <TPRegexp.h>          // for TPRegexp
 #include <TString.h>           // for TString
@@ -26,6 +27,8 @@
 using namespace o2::field;
 
 ClassImp(MagneticField);
+
+const FieldOriginBiasParam* MagneticField::gOriginBias = nullptr;
 
 const Double_t MagneticField::sSolenoidToDipoleZ = -700.;
 
@@ -88,6 +91,9 @@ MagneticField::MagneticField()
    * Default constructor
    */
   fType = 2; // flag non-constant field
+  if (!gOriginBias) {
+    checkOriginBias();
+  }
 }
 
 MagneticField::MagneticField(const char* name, const char* title, Double_t factorSol, Double_t factorDip,
@@ -102,8 +108,8 @@ MagneticField::MagneticField(const char* name, const char* title, Double_t facto
     mBeamEnergy(be),
     mDefaultIntegration(integ),
     mPrecisionInteg(1),
-    mMultipicativeFactorSolenoid(factorSol),
-    mMultipicativeFactorDipole(factorDip),
+    mMultipicativeFactorSolenoid(1.),
+    mMultipicativeFactorDipole(1.),
     mMaxField(fmax),
     mDipoleOnOffFlag(factorDip == 0.),
     mQuadrupoleGradient(0),
@@ -116,8 +122,12 @@ MagneticField::MagneticField(const char* name, const char* title, Double_t facto
   /*
    * Constructor for human readable params
    */
-
+  setFactorSolenoid(factorSol);
+  setFactorDipole(factorDip);
   setDataFileName(path.c_str());
+  if (!gOriginBias) {
+    checkOriginBias();
+  }
   CreateField();
 }
 
@@ -131,8 +141,8 @@ MagneticField::MagneticField(const MagFieldParam& param)
     mBeamEnergy(param.GetBeamEnergy()),
     mDefaultIntegration(param.GetDefInt()),
     mPrecisionInteg(1),
-    mMultipicativeFactorSolenoid(param.GetFactorSol()), // temporary
-    mMultipicativeFactorDipole(param.GetFactorDip()),   // temporary
+    mMultipicativeFactorSolenoid(1.),
+    mMultipicativeFactorDipole(1.),
     mMaxField(param.GetMaxField()),
     mDipoleOnOffFlag(param.GetFactorDip() == 0.),
     mQuadrupoleGradient(0),
@@ -145,8 +155,12 @@ MagneticField::MagneticField(const MagFieldParam& param)
   /*
    * Constructor for FairParam derived params
    */
-
+  setFactorSolenoid(param.GetFactorSol());
+  setFactorDipole(param.GetFactorDip());
   setDataFileName(param.GetMapPath());
+  if (!gOriginBias) {
+    checkOriginBias();
+  }
   CreateField();
 }
 
@@ -225,8 +239,11 @@ void MagneticField::CreateField()
 
   loadParameterization();
   initializeMachineField(mBeamType, mBeamEnergy);
-  setFactorSolenoid(mMultipicativeFactorSolenoid);
-  setFactorDipole(mMultipicativeFactorDipole);
+  // The scaling factors are left alone: they already carry the polarity convention, and
+  // re-applying it would invert a field re-initialized after being read back from a file.
+  if (mFastField) {
+    mFastField->setFactorSol(getFactorSolenoid());
+  }
   double xyz[3] = {0., 0., 0.};
   mSolenoid = getBz(xyz);
   Print("a");
@@ -261,12 +278,12 @@ Bool_t MagneticField::loadParameterization()
   return kTRUE;
 }
 
-void MagneticField::Field(const Double_t* __restrict__ xyz, Double_t* __restrict__ b)
+void MagneticField::Field(const Double_t* __restrict__ xyzExt, Double_t* __restrict__ b)
 {
   /*
    * query field value at point
    */
-
+  double xyz[3] = {xyzExt[0] - gOriginBias->x, xyzExt[1] - gOriginBias->y, xyzExt[2] - gOriginBias->z};
   //  b[0]=b[1]=b[2]=0.0;
   if (mFastField && mFastField->Field(xyz, b)) {
     return;
@@ -288,12 +305,12 @@ void MagneticField::Field(const Double_t* __restrict__ xyz, Double_t* __restrict
   }
 }
 
-Double_t MagneticField::getBz(const Double_t* xyz) const
+Double_t MagneticField::getBz(const Double_t* xyzExt) const
 {
   /*
    * query field Bz component at point
    */
-
+  double xyz[3] = {xyzExt[0] - gOriginBias->x, xyzExt[1] - gOriginBias->y, xyzExt[2] - gOriginBias->z};
   if (mFastField) {
     double bz = 0;
     if (mFastField->GetBz(xyz, bz)) {
@@ -727,4 +744,15 @@ void MagneticField::AllowFastField(bool v)
   } else {
     mFastField.reset(nullptr);
   }
+}
+
+//_____________________________________________________________________________
+void MagneticField::checkOriginBias()
+{
+  // posibility to globally bias all data members with the proper env.var
+  if (const auto* biasString = std::getenv("O2_DPL_FIELDORIGINBIAS"); biasString && *biasString) {
+    o2::conf::ConfigurableParam::updateFromString(biasString);
+  }
+  gOriginBias = &FieldOriginBiasParam::Instance();
+  LOGP(info, "Field origin is set to: XYZ: {:.4f},{:.4f},{:.4f}", gOriginBias->x, gOriginBias->y, gOriginBias->z);
 }

@@ -42,9 +42,9 @@ class Ray
 
  public:
   using vecF3 = float[3];
-  static constexpr float MinDistToConsider = 1e-4; // treat as 0 lenght distance below this
-  static constexpr float InvalidT = -1e9;
-  static constexpr float Tiny = 1e-9;
+  static GPUglobalconstexpr() float MinDistToConsider = 1e-4; // treat as 0 lenght distance below this
+  static GPUglobalconstexpr() float InvalidT = -1e9;
+  static GPUglobalconstexpr() float Tiny = 1e-9;
 
   GPUd() Ray() : mP{0.f}, mD{0.f}, mDistXY2(0.f), mDistXY2i(0.f), mDistXYZ(0.f), mXDxPlusYDy(0.f), mXDxPlusYDyRed(0.f), mXDxPlusYDy2(0.f), mR02(0.f), mR12(0.f)
   {
@@ -79,7 +79,7 @@ class Ray
 
   GPUd() float getPhi(float t) const
   {
-    float p = o2::gpu::CAMath::ATan2(mP[1] + t * mD[1], mP[0] + t * mD[0]);
+    float p = o2::math_utils::fastATan2(mP[1] + t * mD[1], mP[0] + t * mD[0]); // instead of float p = o2::gpu::CAMath::ATan2(mP[1] + t * mD[1], mP[0] + t * mD[0]);
     o2::math_utils::bringTo02Pi(p);
     return p;
   }

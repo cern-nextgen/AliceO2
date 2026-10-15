@@ -99,11 +99,23 @@ class Generator : public FairGenerator
   const std::vector<TParticle>& getParticles() const { return mParticles; }; //!
   static unsigned int getTotalNEvents() { return gTotalNEvents; };
 
+  // Check if simulation is running in Hyperloop mode
+  static bool isHyperloop();
+
+  // Number of parallel sub-generator clones a Hyperloop-aware generator expands into
+  // (currently used by the external-generator-to-hybrid expansion in GeneratorFactory).
+  // 8 matches the standard core counts of Grid/Hyperloop nodes
+  static constexpr int NHyperloopParallelGenerators = 8;
+
   /** other **/
   void clearParticles() { mParticles.clear(); };
 
   /** notification methods **/
   virtual void notifyEmbedding(const o2::dataformats::MCEventHeader* eventHeader){};
+
+  /** Release external resources (forked subprocesses, open files, ...) once
+   * the generator is no longer needed, without relying on destructor timing **/
+  virtual void stop() {}
 
   void setTriggerOkHook(std::function<void(std::vector<TParticle> const& p, int eventCount)> f) { mTriggerOkHook = f; }
   void setTriggerFalseHook(std::function<void(std::vector<TParticle> const& p, int eventCount)> f) { mTriggerFalseHook = f; }

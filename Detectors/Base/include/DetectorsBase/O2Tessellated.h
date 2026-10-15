@@ -88,6 +88,10 @@ class O2Tessellated : public TGeoBBox
   const TBuffer3D& GetBuffer3D(int reqSections, Bool_t localFrame) const override;
   void GetMeshNumbers(int& nvert, int& nsegs, int& npols) const override;
   int GetNmeshVertices() const override { return fNvert; }
+
+  /// Fill \a array with \a npoints points on this solid's boundary: every vertex, then deterministic R2 samples on facet interiors.
+  Bool_t GetPointsOnSegments(Int_t npoints, Double_t* array) const override;
+
   void InspectShape() const override {}
   TBuffer3D* MakeBuffer3D() const override;
   void Print(Option_t* option = "") const override;
@@ -132,6 +136,14 @@ class O2Tessellated : public TGeoBBox
   // a safety kernel used in multiple implementations
   template <bool closest_facet = false>
   Double_t SafetyKernel(const Double_t* point, bool in, int* closest_facet_id = nullptr) const;
+
+  // cached values for safety
+  mutable float mLast_x;
+  mutable float mLast_y;
+  mutable float mLast_z;
+  mutable float mCachedSafety;
+  mutable size_t cached_counter = 0;
+  mutable size_t call_counter = 0;
 
   ClassDefOverride(O2Tessellated, 1) // tessellated shape class
 };

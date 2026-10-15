@@ -26,11 +26,11 @@
 
 #include <oneapi/tbb/task_arena.h>
 
-#include "ITStracking/Constants.h"
+#include "ITSMFTTracking/Constants.h"
 #include "ITStracking/Configuration.h"
 #include "ITStracking/TimeFrame.h"
 #include "ITStracking/VertexerTraits.h"
-#include "ITStracking/BoundedAllocator.h"
+#include "ITSMFTTracking/BoundedAllocator.h"
 
 namespace o2::its
 {
@@ -99,6 +99,7 @@ class Vertexer
 
  private:
   std::uint32_t mTimeFrameCounter = 0;
+  double mTotalTime{0};
 
   VertexerTraitsN* mTraits = nullptr; /// Observer pointer, not owned by this class
   TimeFrameN* mTimeFrame = nullptr;   /// Observer pointer, not owned by this class
@@ -125,6 +126,10 @@ template <typename... T>
 float Vertexer<NLayers>::evaluateTask(void (Vertexer<NLayers>::*task)(T...), std::string_view taskName, int iteration, LogFunc& logger, T&&... args)
 {
   float diff{0.f};
+
+  if (mVertParams[iteration].PrintMemory) {
+    mMemoryPool->resetPeakMemory();
+  }
 
   if constexpr (constants::DoTimeBenchmarks) {
     auto start = std::chrono::high_resolution_clock::now();
@@ -160,6 +165,7 @@ float Vertexer<NLayers>::evaluateTask(void (Vertexer<NLayers>::*task)(T...), std
     LOGP(info, "iter:{}:{}: {}", iteration, StateNames[mCurStep], mMemoryPool->asString());
   }
 
+  mTotalTime += diff;
   return diff;
 }
 
