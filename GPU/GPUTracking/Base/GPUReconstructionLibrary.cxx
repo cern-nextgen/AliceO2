@@ -21,6 +21,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #endif
+#include <mutex>
 
 #include "GPUReconstruction.h"
 #include "GPUReconstructionAvailableBackends.h"
@@ -102,6 +103,14 @@ std::shared_ptr<GPUReconstruction::LibraryLoader>* GPUReconstruction::GetLibrary
 #ifdef OPENCL_ENABLED
     return &sLibOCL;
 #endif
+  } else if (type == DeviceType::METAL) {
+#ifdef METAL_ENABLED
+    return &sLibMETAL;
+#endif
+  } else if (type == DeviceType::CPUDEVICE) {
+#ifdef CPUDEVICE_ENABLED
+    return &sLibCPUDEVICE;
+#endif
   } else {
     GPUError("Error: Invalid device type %u", (uint32_t)type);
     return nullptr;
@@ -125,6 +134,8 @@ GPUReconstruction* GPUReconstruction::CreateInstance(const char* type, bool forc
 std::shared_ptr<GPUReconstruction::LibraryLoader> GPUReconstruction::sLibCUDA(new GPUReconstruction::LibraryLoader("lib" LIBRARY_PREFIX "GPUTrackingCUDA" LIBRARY_EXTENSION, "GPUReconstruction_Create_CUDA"));
 std::shared_ptr<GPUReconstruction::LibraryLoader> GPUReconstruction::sLibHIP(new GPUReconstruction::LibraryLoader("lib" LIBRARY_PREFIX "GPUTrackingHIP" LIBRARY_EXTENSION, "GPUReconstruction_Create_HIP"));
 std::shared_ptr<GPUReconstruction::LibraryLoader> GPUReconstruction::sLibOCL(new GPUReconstruction::LibraryLoader("lib" LIBRARY_PREFIX "GPUTrackingOCL" LIBRARY_EXTENSION, "GPUReconstruction_Create_OCL"));
+std::shared_ptr<GPUReconstruction::LibraryLoader> GPUReconstruction::sLibMETAL(new GPUReconstruction::LibraryLoader("lib" LIBRARY_PREFIX "GPUTrackingMETAL" LIBRARY_EXTENSION, "GPUReconstruction_Create_METAL"));
+std::shared_ptr<GPUReconstruction::LibraryLoader> GPUReconstruction::sLibCPUDEVICE(new GPUReconstruction::LibraryLoader("lib" LIBRARY_PREFIX "GPUTrackingCPUDevice" LIBRARY_EXTENSION, "GPUReconstruction_Create_CPUDEVICE"));
 
 GPUReconstruction::LibraryLoader::LibraryLoader(const char* lib, const char* func) : mLibName(lib), mFuncName(func), mGPULib(nullptr), mGPUEntry(nullptr) {}
 

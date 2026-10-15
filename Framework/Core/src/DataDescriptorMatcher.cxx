@@ -17,7 +17,9 @@
 #include "Framework/RuntimeError.h"
 #include "Headers/DataHeader.h"
 #include "Headers/Stack.h"
+#include <array>
 #include <iostream>
+#include <memory_resource>
 
 namespace o2::framework::data_matcher
 {
@@ -154,7 +156,8 @@ DataDescriptorMatcher::DataDescriptorMatcher(DataDescriptorMatcher const& other)
   } else if (auto pval2 = std::get_if<SubSpecificationTypeValueMatcher>(&other.mLeft)) {
     mLeft = *pval2;
   } else if (auto pval3 = std::get_if<std::unique_ptr<DataDescriptorMatcher>>(&other.mLeft)) {
-    mLeft = std::move(std::make_unique<DataDescriptorMatcher>(*pval3->get()));
+    // A moved-from node keeps the unique_ptr alternative, only null.
+    mLeft = *pval3 ? std::make_unique<DataDescriptorMatcher>(**pval3) : nullptr;
   } else if (auto pval4 = std::get_if<ConstantValueMatcher>(&other.mLeft)) {
     mLeft = *pval4;
   } else if (auto pval5 = std::get_if<StartTimeValueMatcher>(&other.mLeft)) {
@@ -171,7 +174,8 @@ DataDescriptorMatcher::DataDescriptorMatcher(DataDescriptorMatcher const& other)
   } else if (auto pval2 = std::get_if<SubSpecificationTypeValueMatcher>(&other.mRight)) {
     mRight = *pval2;
   } else if (auto pval3 = std::get_if<std::unique_ptr<DataDescriptorMatcher>>(&other.mRight)) {
-    mRight = std::move(std::make_unique<DataDescriptorMatcher>(*pval3->get()));
+    // A moved-from node keeps the unique_ptr alternative, only null.
+    mRight = *pval3 ? std::make_unique<DataDescriptorMatcher>(**pval3) : nullptr;
   } else if (auto pval4 = std::get_if<ConstantValueMatcher>(&other.mRight)) {
     mRight = *pval4;
   } else if (auto pval5 = std::get_if<StartTimeValueMatcher>(&other.mRight)) {
@@ -202,9 +206,10 @@ bool DataDescriptorMatcher::match(ConcreteDataMatcher const& matcher, VariableCo
   dh.dataOrigin = matcher.origin;
   dh.dataDescription = matcher.description;
   dh.subSpecification = matcher.subSpec;
-  DataProcessingHeader dph;
-  dph.startTime = 0;
-  header::Stack s{dh, dph};
+  DataProcessingHeader dph{0, 0, 0};
+  alignas(std::max_align_t) std::array<std::byte, sizeof(header::DataHeader) + sizeof(DataProcessingHeader) + alignof(std::max_align_t)> buffer;
+  std::pmr::monotonic_buffer_resource resource{buffer.data(), buffer.size(), std::pmr::null_memory_resource()};
+  header::Stack s{header::Stack::allocator_type{&resource}, dh, dph};
 
   return this->match(reinterpret_cast<char const*>(s.data()), context);
 }
@@ -217,9 +222,10 @@ bool DataDescriptorMatcher::match(ConcreteDataTypeMatcher const& matcher, Variab
   dh.dataOrigin = matcher.origin;
   dh.dataDescription = matcher.description;
   dh.subSpecification = 0;
-  DataProcessingHeader dph;
-  dph.startTime = 0;
-  header::Stack s{dh, dph};
+  DataProcessingHeader dph{0, 0, 0};
+  alignas(std::max_align_t) std::array<std::byte, sizeof(header::DataHeader) + sizeof(DataProcessingHeader) + alignof(std::max_align_t)> buffer;
+  std::pmr::monotonic_buffer_resource resource{buffer.data(), buffer.size(), std::pmr::null_memory_resource()};
+  header::Stack s{header::Stack::allocator_type{&resource}, dh, dph};
 
   return this->match(reinterpret_cast<char const*>(s.data()), context);
 }

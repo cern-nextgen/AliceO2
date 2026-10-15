@@ -49,7 +49,7 @@ using namespace o2::tpc;
 
 GPUd() bool GPUTPCGMTrackParam::Fit(GPUTPCGMMerger* GPUrestrict() merger, int32_t iTrk, GPUTPCGMMergedTrackHit* GPUrestrict() clusters, int32_t& GPUrestrict() N, int32_t& GPUrestrict() NTolerated, float& GPUrestrict() Alpha, int32_t attempt, float maxSinPhi, GPUTPCGMMergedTrack& GPUrestrict() track)
 {
-  static constexpr float kDeg2Rad = M_PI / 180.f;
+  constexpr float kDeg2Rad = M_PI / 180.f;
   CADEBUG(static constexpr float kSectAngle = 2 * M_PI / 18.f);
 
   const GPUParam& GPUrestrict() param = merger->Param();
@@ -294,7 +294,7 @@ GPUd() bool GPUTPCGMTrackParam::Fit(GPUTPCGMMerger* GPUrestrict() merger, int32_
               const int32_t clusterCount = (ihit - ihitMergeFirst) * wayDirection + 1;
               for (int32_t iTmp = ihitMergeFirst; iTmp != ihit + wayDirection; iTmp += wayDirection) {
                 const ClusterNative& cl = merger->GetConstantMem()->ioPtrs.clustersNative->clustersLinear[cluster.num];
-                qtot += cl.qTot;
+                qtot += cl.getQtot();
                 qmax = CAMath::Max<float>(qmax, cl.qMax);
                 pad += cl.getPad();
                 relTime += cl.getTime();
@@ -366,8 +366,8 @@ GPUd() bool GPUTPCGMTrackParam::Fit(GPUTPCGMMerger* GPUrestrict() merger, int32_
 
 GPUdni() void GPUTPCGMTrackParam::MoveToReference(GPUTPCGMPropagator& prop, const GPUParam& param, float& Alpha)
 {
-  static constexpr float kDeg2Rad = M_PI / 180.f;
-  static constexpr float kSectAngle = 2 * M_PI / 18.f;
+  constexpr float kDeg2Rad = M_PI / 180.f;
+  constexpr float kSectAngle = 2 * M_PI / 18.f;
 
   if (param.rec.tpc.trackReferenceX <= 500) {
     GPUTPCGMTrackParam save = *this;
@@ -441,7 +441,7 @@ GPUd() int32_t GPUTPCGMTrackParam::MergeDoubleRowClusters(int32_t& ihit, int32_t
     clusterState = 0;
     while (true) {
       const ClusterNative& GPUrestrict() cl = merger->GetConstantMem()->ioPtrs.clustersNative->clustersLinear[clusters[ihit].num];
-      float clamp = cl.qTot;
+      float clamp = cl.getQtot();
       float clx, cly, clz;
       merger->GetConstantMem()->calibObjects.fastTransform->Transform(clusters[ihit].sector, clusters[ihit].row, cl.getPad(), cl.getTime(), clx, cly, clz, mTOffset);
       float dy = cly - projY;
@@ -575,7 +575,7 @@ GPUd() float GPUTPCGMTrackParam::AttachClusters(const GPUTPCGMMerger* GPUrestric
 
 GPUd() bool GPUTPCGMTrackParam::AttachClustersPropagate(const GPUTPCGMMerger* GPUrestrict() Merger, int32_t sector, int32_t lastRow, int32_t toRow, int32_t iTrack, bool goodLeg, GPUTPCGMPropagator& GPUrestrict() prop, bool inFlyDirection, float maxSinPhi, bool dodEdx)
 {
-  static constexpr float kSectAngle = 2 * M_PI / 18.f;
+  constexpr float kSectAngle = 2 * M_PI / 18.f;
   if (Merger->Param().rec.tpc.disableRefitAttachment & 2) {
     return dodEdx;
   }
@@ -678,7 +678,7 @@ GPUdi() void GPUTPCGMTrackParam::AttachClustersLooperFollow(const GPUTPCGMMerger
   float toX = mX;
   bool inFlyDirection = (Merger->MergedTracks()[iTrack].Leg() & 1) ^ up;
 
-  static constexpr float kSectAngle = 2 * M_PI / 18.f;
+  constexpr float kSectAngle = 2 * M_PI / 18.f;
   const GPUParam& GPUrestrict() param = Merger->Param();
   bool right = (mP[2] < 0) ^ up;
   const int32_t sectorSide = sector >= (int32_t)(GPUTPCGeometry::NSECTORS / 2) ? (GPUTPCGeometry::NSECTORS / 2) : 0;
@@ -744,7 +744,7 @@ GPUdi() void GPUTPCGMTrackParam::AttachClustersLooperFollow(const GPUTPCGMMerger
 
 GPUdi() void GPUTPCGMTrackParam::AttachClustersLooper(const GPUTPCGMMerger* GPUrestrict() Merger, int32_t sector, int32_t iRow, int32_t iTrack, bool outwards, GPUTPCGMPropagator& GPUrestrict() prop)
 {
-  static constexpr float kSectAngle = 2 * M_PI / 18.f;
+  constexpr float kSectAngle = 2 * M_PI / 18.f;
   // Note that the coordinate system is rotated by 90 degree swapping X and Y!
   float X = mP[2] > 0 ? mP[0] : -mP[0];
   float Y = mP[2] > 0 ? -mX : mX;

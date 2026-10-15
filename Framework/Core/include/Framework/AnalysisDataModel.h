@@ -26,6 +26,9 @@
 #include "SimulationDataFormat/MCGenProperties.h"
 #include "Framework/PID.h"
 
+#include <fairmq/Version.h>
+#include <fairmq/shmem/Common.h>
+
 namespace o2
 {
 namespace aod
@@ -105,6 +108,8 @@ DECLARE_SOA_TABLE_VERSIONED(Collisions_001, "AOD", "COLLISION", 1, //! Time and 
                             collision::Flags, collision::Chi2, collision::NumContrib,
                             collision::CollisionTime, collision::CollisionTimeRes);
 
+template <aod::is_origin_hash O>
+using CollisionsFrom = Collisions_001From<O>;
 using Collisions = Collisions_001; // current version
 using Collision = Collisions::iterator;
 
@@ -396,6 +401,18 @@ DECLARE_SOA_DYNAMIC_COLUMN(TPCDeltaTBwd, tpcDeltaTBwd, //! Delta Backward of tra
 
 } // namespace v001
 
+namespace
+{
+inline uint16_t fixTPCNClsFindable(uint8_t tpcNClsFindable, int8_t tpcNClsFindableMinusFound)
+{
+  uint16_t res = tpcNClsFindable;
+  if (tpcNClsFindable <= tpcNClsFindableMinusFound) {
+    res += 256;
+  }
+  return res;
+}
+} // namespace
+
 DECLARE_SOA_DYNAMIC_COLUMN(HasITS, hasITS, //! Flag to check if track has a ITS match
                            [](uint8_t detectorMap) -> bool { return detectorMap & o2::aod::track::ITS; });
 DECLARE_SOA_DYNAMIC_COLUMN(HasTPC, hasTPC, //! Flag to check if track has a TPC match
@@ -419,9 +436,17 @@ DECLARE_SOA_DYNAMIC_COLUMN(HasTPCBothSides, hasTPCBothSides, //! Run 3: Has this
 DECLARE_SOA_DYNAMIC_COLUMN(PIDForTracking, pidForTracking, //! PID hypothesis used during tracking. See the constants in the class PID in PID.h
                            [](uint32_t flags) -> uint32_t { return flags >> 28; });
 DECLARE_SOA_DYNAMIC_COLUMN(TPCNClsFound, tpcNClsFound, //! Number of found TPC clusters
-                           [](uint8_t tpcNClsFindable, int8_t tpcNClsFindableMinusFound) -> int16_t { return (int16_t)tpcNClsFindable - tpcNClsFindableMinusFound; });
+                           [](uint8_t tpcNClsFindable, int8_t tpcNClsFindableMinusFound) -> int16_t {
+                             return fixTPCNClsFindable(tpcNClsFindable, tpcNClsFindableMinusFound) - tpcNClsFindableMinusFound;
+                           });
 DECLARE_SOA_DYNAMIC_COLUMN(TPCNClsPID, tpcNClsPID, //! Number of found TPC clusters used for PID
-                           [](uint8_t tpcNClsFindable, int8_t tpcNClsFindableMinusPID) -> int16_t { return (int16_t)tpcNClsFindable - tpcNClsFindableMinusPID; });
+                           [](uint8_t tpcNClsFindable, int8_t tpcNClsFindableMinusPID, int8_t tpcNClsFindableMinusFound) -> int16_t {
+                             return fixTPCNClsFindable(tpcNClsFindable, tpcNClsFindableMinusFound) - tpcNClsFindableMinusPID;
+                           });
+DECLARE_SOA_DYNAMIC_COLUMN(TPCNClsCrossedRows_fix, tpcNClsCrossedRows, //! Number of crossed TPC Rows
+                           [](uint8_t tpcNClsFindable, int8_t TPCNClsFindableMinusCrossedRows, int8_t tpcNClsFindableMinusFound) -> int16_t {
+                             return fixTPCNClsFindable(tpcNClsFindable, tpcNClsFindableMinusFound) - TPCNClsFindableMinusCrossedRows;
+                           });
 DECLARE_SOA_DYNAMIC_COLUMN(TPCNClsCrossedRows, tpcNClsCrossedRows, //! Number of crossed TPC Rows
                            [](uint8_t tpcNClsFindable, int8_t TPCNClsFindableMinusCrossedRows) -> int16_t { return (int16_t)tpcNClsFindable - TPCNClsFindableMinusCrossedRows; });
 DECLARE_SOA_DYNAMIC_COLUMN(ITSNCls, itsNCls, //! Number of ITS clusters
@@ -456,8 +481,14 @@ DECLARE_SOA_DYNAMIC_COLUMN(ITSNSharedCls, itsNSharedCls, //! Number of shared IT
                            });
 DECLARE_SOA_DYNAMIC_COLUMN(TPCFoundOverFindableCls, tpcFoundOverFindableCls, //! Ratio of found over findable clusters
                            [](uint8_t tpcNClsFindable, int8_t tpcNClsFindableMinusFound) -> float {
-                             int16_t tpcNClsFound = (int16_t)tpcNClsFindable - tpcNClsFindableMinusFound;
-                             return (float)tpcNClsFound / (float)tpcNClsFindable;
+                             int16_t tpcNClsFound = fixTPCNClsFindable(tpcNClsFindable, tpcNClsFindableMinusFound) - tpcNClsFindableMinusFound;
+                             return (float)tpcNClsFound / (float)fixTPCNClsFindable(tpcNClsFindable, tpcNClsFindableMinusFound);
+                           });
+
+DECLARE_SOA_DYNAMIC_COLUMN(TPCCrossedRowsOverFindableCls_fix, tpcCrossedRowsOverFindableCls, //! Ratio  crossed rows over findable clusters
+                           [](uint8_t tpcNClsFindable, int8_t tpcNClsFindableMinusCrossedRows, int8_t tpcNClsFindableMinusFound) -> float {
+                             int16_t tpcNClsCrossedRows = fixTPCNClsFindable(tpcNClsFindable, tpcNClsFindableMinusFound) - tpcNClsFindableMinusCrossedRows;
+                             return (float)tpcNClsCrossedRows / (float)fixTPCNClsFindable(tpcNClsFindable, tpcNClsFindableMinusFound);
                            });
 
 DECLARE_SOA_DYNAMIC_COLUMN(TPCCrossedRowsOverFindableCls, tpcCrossedRowsOverFindableCls, //! Ratio  crossed rows over findable clusters
@@ -468,7 +499,7 @@ DECLARE_SOA_DYNAMIC_COLUMN(TPCCrossedRowsOverFindableCls, tpcCrossedRowsOverFind
 
 DECLARE_SOA_DYNAMIC_COLUMN(TPCFractionSharedCls, tpcFractionSharedCls, //! Fraction of shared TPC clusters
                            [](uint8_t tpcNClsShared, uint8_t tpcNClsFindable, int8_t tpcNClsFindableMinusFound) -> float {
-                             int16_t tpcNClsFound = (int16_t)tpcNClsFindable - tpcNClsFindableMinusFound;
+                             int16_t tpcNClsFound = fixTPCNClsFindable(tpcNClsFindable, tpcNClsFindableMinusFound) - tpcNClsFindableMinusFound;
                              return (float)tpcNClsShared / (float)tpcNClsFound;
                            });
 
@@ -577,7 +608,7 @@ DECLARE_SOA_TABLE_FULL(StoredTracksExtra_000, "TracksExtra", "AOD", "TRACKEXTRA"
                        track::HasITS<track::DetectorMap>, track::HasTPC<track::DetectorMap>,
                        track::HasTRD<track::DetectorMap>, track::HasTOF<track::DetectorMap>,
                        track::TPCNClsFound<track::TPCNClsFindable, track::TPCNClsFindableMinusFound>,
-                       track::TPCNClsCrossedRows<track::TPCNClsFindable, track::TPCNClsFindableMinusCrossedRows>,
+                       track::TPCNClsCrossedRows_fix<track::TPCNClsFindable, track::TPCNClsFindableMinusCrossedRows, track::TPCNClsFindableMinusFound>,
                        track::TOFExpTimeEl<track::Length, track::TOFExpMom>,
                        track::TOFExpTimeMu<track::Length, track::TOFExpMom>,
                        track::TOFExpTimePi<track::Length, track::TOFExpMom>,
@@ -588,7 +619,7 @@ DECLARE_SOA_TABLE_FULL(StoredTracksExtra_000, "TracksExtra", "AOD", "TRACKEXTRA"
                        track::TOFExpTimeHe<track::Length, track::TOFExpMom>,
                        track::TOFExpTimeAl<track::Length, track::TOFExpMom>,
                        track::ITSNCls<track::ITSClusterMap>, track::ITSNClsInnerBarrel<track::ITSClusterMap>,
-                       track::TPCCrossedRowsOverFindableCls<track::TPCNClsFindable, track::TPCNClsFindableMinusCrossedRows>,
+                       track::TPCCrossedRowsOverFindableCls_fix<track::TPCNClsFindable, track::TPCNClsFindableMinusCrossedRows, track::TPCNClsFindableMinusFound>,
                        track::TPCFoundOverFindableCls<track::TPCNClsFindable, track::TPCNClsFindableMinusFound>,
                        track::TPCFractionSharedCls<track::TPCNClsShared, track::TPCNClsFindable, track::TPCNClsFindableMinusFound>,
                        track::TRDHasCrossing<track::TRDPattern>, track::TRDHasNeighbor<track::TRDPattern>, track::TRDNTracklets<track::TRDPattern>,
@@ -605,7 +636,7 @@ DECLARE_SOA_TABLE_FULL_VERSIONED(StoredTracksExtra_001, "TracksExtra", "AOD", "T
                                  track::HasITS<track::v001::DetectorMap>, track::HasTPC<track::v001::DetectorMap>,
                                  track::HasTRD<track::v001::DetectorMap>, track::HasTOF<track::v001::DetectorMap>,
                                  track::TPCNClsFound<track::TPCNClsFindable, track::TPCNClsFindableMinusFound>,
-                                 track::TPCNClsCrossedRows<track::TPCNClsFindable, track::TPCNClsFindableMinusCrossedRows>,
+                                 track::TPCNClsCrossedRows_fix<track::TPCNClsFindable, track::TPCNClsFindableMinusCrossedRows, track::TPCNClsFindableMinusFound>,
                                  track::v001::ITSClusterMap<track::ITSClusterSizes>, track::v001::ITSNCls<track::ITSClusterSizes>, track::v001::ITSNClsInnerBarrel<track::ITSClusterSizes>,
                                  track::v001::ITSClsSizeInLayer<track::ITSClusterSizes>,
                                  track::v001::IsITSAfterburner<track::v001::DetectorMap, track::ITSChi2NCl>,
@@ -618,7 +649,7 @@ DECLARE_SOA_TABLE_FULL_VERSIONED(StoredTracksExtra_001, "TracksExtra", "AOD", "T
                                  track::TOFExpTimeTr<track::Length, track::TOFExpMom>,
                                  track::TOFExpTimeHe<track::Length, track::TOFExpMom>,
                                  track::TOFExpTimeAl<track::Length, track::TOFExpMom>,
-                                 track::TPCCrossedRowsOverFindableCls<track::TPCNClsFindable, track::TPCNClsFindableMinusCrossedRows>,
+                                 track::TPCCrossedRowsOverFindableCls_fix<track::TPCNClsFindable, track::TPCNClsFindableMinusCrossedRows, track::TPCNClsFindableMinusFound>,
                                  track::TPCFoundOverFindableCls<track::TPCNClsFindable, track::TPCNClsFindableMinusFound>,
                                  track::TPCFractionSharedCls<track::TPCNClsShared, track::TPCNClsFindable, track::TPCNClsFindableMinusFound>,
                                  track::TRDHasCrossing<track::TRDPattern>, track::TRDHasNeighbor<track::TRDPattern>, track::TRDNTracklets<track::TRDPattern>,
@@ -635,8 +666,8 @@ DECLARE_SOA_TABLE_FULL_VERSIONED(StoredTracksExtra_002, "TracksExtra", "AOD", "T
                                  track::HasITS<track::v001::DetectorMap>, track::HasTPC<track::v001::DetectorMap>,
                                  track::HasTRD<track::v001::DetectorMap>, track::HasTOF<track::v001::DetectorMap>,
                                  track::TPCNClsFound<track::TPCNClsFindable, track::TPCNClsFindableMinusFound>,
-                                 track::TPCNClsPID<track::TPCNClsFindable, track::TPCNClsFindableMinusPID>,
-                                 track::TPCNClsCrossedRows<track::TPCNClsFindable, track::TPCNClsFindableMinusCrossedRows>,
+                                 track::TPCNClsPID<track::TPCNClsFindable, track::TPCNClsFindableMinusPID, track::TPCNClsFindableMinusFound>,
+                                 track::TPCNClsCrossedRows_fix<track::TPCNClsFindable, track::TPCNClsFindableMinusCrossedRows, track::TPCNClsFindableMinusFound>,
                                  track::v001::ITSClusterMap<track::ITSClusterSizes>, track::v001::ITSNCls<track::ITSClusterSizes>, track::v001::ITSNClsInnerBarrel<track::ITSClusterSizes>,
                                  track::v001::ITSClsSizeInLayer<track::ITSClusterSizes>,
                                  track::v001::IsITSAfterburner<track::v001::DetectorMap, track::ITSChi2NCl>,
@@ -649,7 +680,7 @@ DECLARE_SOA_TABLE_FULL_VERSIONED(StoredTracksExtra_002, "TracksExtra", "AOD", "T
                                  track::TOFExpTimeTr<track::Length, track::TOFExpMom>,
                                  track::TOFExpTimeHe<track::Length, track::TOFExpMom>,
                                  track::TOFExpTimeAl<track::Length, track::TOFExpMom>,
-                                 track::TPCCrossedRowsOverFindableCls<track::TPCNClsFindable, track::TPCNClsFindableMinusCrossedRows>,
+                                 track::TPCCrossedRowsOverFindableCls_fix<track::TPCNClsFindable, track::TPCNClsFindableMinusCrossedRows, track::TPCNClsFindableMinusFound>,
                                  track::TPCFoundOverFindableCls<track::TPCNClsFindable, track::TPCNClsFindableMinusFound>,
                                  track::TPCFractionSharedCls<track::TPCNClsShared, track::TPCNClsFindable, track::TPCNClsFindableMinusFound>,
                                  track::TRDHasCrossing<track::TRDPattern>, track::TRDHasNeighbor<track::TRDPattern>, track::TRDNTracklets<track::TRDPattern>,
@@ -668,6 +699,8 @@ DECLARE_SOA_TABLE_VERSIONED(Run2TrackExtras_001, "AOD", "RUN2TRACKEXTRA", 1, //!
                             track::ITSSignal, track::ITSSharedClusterMap,
                             track::ITSNSharedCls<track::ITSSharedClusterMap>);
 
+template <aod::is_origin_hash O>
+using TracksExtraFrom = TracksExtra_002From<O>;
 using StoredTracksExtra = StoredTracksExtra_002;
 using TracksExtra = TracksExtra_002;
 
@@ -1915,6 +1948,8 @@ DECLARE_SOA_TABLE_VERSIONED(McCollisions_001, "AOD", "MCCOLLISION", 1, //! MC co
                             mccollision::GetSubGeneratorId<mccollision::GeneratorsID>,
                             mccollision::GetSourceId<mccollision::GeneratorsID>);
 
+template <aod::is_origin_hash O>
+using McCollisionsFrom = McCollisions_001From<O>;
 using McCollisions = McCollisions_001;
 using McCollision = McCollisions::iterator;
 
@@ -1984,34 +2019,52 @@ DECLARE_SOA_EXPRESSION_COLUMN(Y, y, float, //! Particle rapidity, conditionally 
                                                  (aod::mcparticle::e - aod::mcparticle::pz))));
 } // namespace mcparticle
 
+namespace mcparticle_v2
+{
+// for improved getters with protection against incorrect physical primary tagging
+// note: this has to be declared in a separate namespace so it does not conflict with existing
+// derived data table declarations in O2Physics
+DECLARE_SOA_DYNAMIC_COLUMN(IsPhysicalPrimary, isPhysicalPrimary, //! True if particle is considered a physical primary according to the ALICE definition
+                           [](uint8_t input_flags, float vx, float vy) -> bool { return (o2::aod::mcparticle::Tools::removeIsPhysicalPrimaryBit(input_flags, vx, vy) & o2::aod::mcparticle::enums::PhysicalPrimary) == o2::aod::mcparticle::enums::PhysicalPrimary; });
+
+// avoid that the stored flags are provided unprotected via
+// the getter '.flags': analysers will get the correct bit map transparently
+DECLARE_SOA_COLUMN(Flags, storedFlags, uint8_t);  //! ALICE specific flags, see MCParticleFlags. Do not use directly. Use the dynamic columns, e.g. producedByGenerator()
+DECLARE_SOA_DYNAMIC_COLUMN(ProtectedFlags, flags, //! protected against
+                           [](uint8_t input_flags, float vx, float vy) -> uint8_t { return o2::aod::mcparticle::Tools::removeIsPhysicalPrimaryBit(input_flags, vx, vy); });
+
+} // namespace mcparticle_v2
+
 DECLARE_SOA_TABLE_FULL(StoredMcParticles_000, "McParticles", "AOD", "MCPARTICLE", //! MC particle table, version 000
                        o2::soa::Index<>, mcparticle::McCollisionId,
-                       mcparticle::PdgCode, mcparticle::StatusCode, mcparticle::Flags,
+                       mcparticle::PdgCode, mcparticle::StatusCode, mcparticle_v2::Flags,
                        mcparticle::Mother0Id, mcparticle::Mother1Id,
                        mcparticle::Daughter0Id, mcparticle::Daughter1Id, mcparticle::Weight,
                        mcparticle::Px, mcparticle::Py, mcparticle::Pz, mcparticle::E,
                        mcparticle::Vx, mcparticle::Vy, mcparticle::Vz, mcparticle::Vt,
                        mcparticle::PVector<mcparticle::Px, mcparticle::Py, mcparticle::Pz>,
-                       mcparticle::ProducedByGenerator<mcparticle::Flags>,
-                       mcparticle::FromBackgroundEvent<mcparticle::Flags>,
-                       mcparticle::GetGenStatusCode<mcparticle::Flags, mcparticle::StatusCode>,
-                       mcparticle::GetHepMCStatusCode<mcparticle::Flags, mcparticle::StatusCode>,
-                       mcparticle::GetProcess<mcparticle::Flags, mcparticle::StatusCode>,
-                       mcparticle::IsPhysicalPrimary<mcparticle::Flags>);
+                       mcparticle::ProducedByGenerator<mcparticle_v2::Flags>,
+                       mcparticle::FromBackgroundEvent<mcparticle_v2::Flags>,
+                       mcparticle::GetGenStatusCode<mcparticle_v2::Flags, mcparticle::StatusCode>,
+                       mcparticle::GetHepMCStatusCode<mcparticle_v2::Flags, mcparticle::StatusCode>,
+                       mcparticle::GetProcess<mcparticle_v2::Flags, mcparticle::StatusCode>,
+                       mcparticle_v2::ProtectedFlags<mcparticle_v2::Flags, mcparticle::Vx, mcparticle::Vy>,
+                       mcparticle_v2::IsPhysicalPrimary<mcparticle_v2::Flags, mcparticle::Vx, mcparticle::Vy>);
 
 DECLARE_SOA_TABLE_FULL_VERSIONED(StoredMcParticles_001, "McParticles", "AOD", "MCPARTICLE", 1, //! MC particle table, version 001
                                  o2::soa::Index<>, mcparticle::McCollisionId,
-                                 mcparticle::PdgCode, mcparticle::StatusCode, mcparticle::Flags,
+                                 mcparticle::PdgCode, mcparticle::StatusCode, mcparticle_v2::Flags,
                                  mcparticle::MothersIds, mcparticle::DaughtersIdSlice, mcparticle::Weight,
                                  mcparticle::Px, mcparticle::Py, mcparticle::Pz, mcparticle::E,
                                  mcparticle::Vx, mcparticle::Vy, mcparticle::Vz, mcparticle::Vt,
                                  mcparticle::PVector<mcparticle::Px, mcparticle::Py, mcparticle::Pz>,
-                                 mcparticle::ProducedByGenerator<mcparticle::Flags>,
-                                 mcparticle::FromBackgroundEvent<mcparticle::Flags>,
-                                 mcparticle::GetGenStatusCode<mcparticle::Flags, mcparticle::StatusCode>,
-                                 mcparticle::GetHepMCStatusCode<mcparticle::Flags, mcparticle::StatusCode>,
-                                 mcparticle::GetProcess<mcparticle::Flags, mcparticle::StatusCode>,
-                                 mcparticle::IsPhysicalPrimary<mcparticle::Flags>);
+                                 mcparticle::ProducedByGenerator<mcparticle_v2::Flags>,
+                                 mcparticle::FromBackgroundEvent<mcparticle_v2::Flags>,
+                                 mcparticle::GetGenStatusCode<mcparticle_v2::Flags, mcparticle::StatusCode>,
+                                 mcparticle::GetHepMCStatusCode<mcparticle_v2::Flags, mcparticle::StatusCode>,
+                                 mcparticle::GetProcess<mcparticle_v2::Flags, mcparticle::StatusCode>,
+                                 mcparticle_v2::ProtectedFlags<mcparticle_v2::Flags, mcparticle::Vx, mcparticle::Vy>,
+                                 mcparticle_v2::IsPhysicalPrimary<mcparticle_v2::Flags, mcparticle::Vx, mcparticle::Vy>);
 
 DECLARE_SOA_EXTENDED_TABLE(McParticles_000, StoredMcParticles_000, "EXMCPARTICLE", 0, //! Basic MC particle properties
                            mcparticle::Phi,
@@ -2026,6 +2079,9 @@ DECLARE_SOA_EXTENDED_TABLE(McParticles_001, StoredMcParticles_001, "EXMCPARTICLE
                            mcparticle::Pt,
                            mcparticle::P,
                            mcparticle::Y);
+
+template <aod::is_origin_hash O>
+using McParticlesFrom = McParticles_001From<O>;
 
 using StoredMcParticles = StoredMcParticles_001;
 using McParticles = McParticles_001;

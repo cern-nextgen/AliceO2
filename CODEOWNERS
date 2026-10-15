@@ -34,7 +34,7 @@
 /DataFormats/Detectors/GlobalTracking          @shahor02
 /DataFormats/Detectors/GlobalTrackingWorkflow  @shahor02
 /DataFormats/Detectors/HMPID                   @gvolpe79
-/DataFormats/Detectors/ITSMFT                  @fprino @mcoquet642 @shahor02
+/DataFormats/Detectors/ITSMFT                  @f3sch @fprino @mcoquet642 @shahor02
 /DataFormats/Detectors/MUON                    @AliceO2Group/muon-experts @shahor02
 /DataFormats/Detectors/PHOS                    @peressounko @kharlov
 /DataFormats/Detectors/Passive                 @sawenzel
@@ -65,7 +65,7 @@
 /Detectors/GlobalTracking          @shahor02
 /Detectors/GlobalTrackingWorkflow  @shahor02
 /Detectors/HMPID                   @gvolpe79
-/Detectors/ITSMFT                  @fprino @mcoquet642 @mconcas @shahor02
+/Detectors/ITSMFT                  @f3sch @fprino @mcoquet642 @mconcas @shahor02
 /Detectors/MUON                    @AliceO2Group/muon-experts @shahor02
 /Detectors/PHOS                    @peressounko @kharlov
 /Detectors/Passive                 @sawenzel
@@ -73,7 +73,7 @@
 /Detectors/TPC                     @davidrohr @wiechula @shahor02
 /Detectors/TRD                     @f3sch @bazinski @wille10
 /Detectors/Upgrades                @mconcas
-/Detectors/Upgrades/ALICE3         @mconcas @njacazio @fcolamar
+/Detectors/Upgrades/ALICE3         @mconcas @njacazio @fcolamar @pbutti
 /Detectors/Upgrades/ITS3           @fgrosa @arossi81 @mconcas @f3sch
 /Detectors/ZDC                     @coppedis @cortesep
 /Detectors/CTF                     @shahor02

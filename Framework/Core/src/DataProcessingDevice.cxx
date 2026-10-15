@@ -587,7 +587,7 @@ auto decongestionCallbackLate = [](AsyncTask& task, size_t aid) -> void {
 // the inputs which are shared between this device and others
 // to the next one in the daisy chain.
 // FIXME: do it in a smarter way than O(N^2)
-static auto forwardInputs = [](ServiceRegistryRef registry, TimesliceSlot slot, std::vector<std::vector<fair::mq::MessagePtr>>& currentSetOfInputs,
+static auto forwardInputs = [](ServiceRegistryRef registry, TimesliceSlot slot, std::vector<std::span<fair::mq::MessagePtr>>& currentSetOfInputs,
                                TimesliceIndex::OldestOutputInfo oldestTimeslice, bool copy, bool consume = true) {
   auto& proxy = registry.get<FairMQDeviceProxy>();
 
@@ -619,7 +619,7 @@ static auto forwardInputs = [](ServiceRegistryRef registry, TimesliceSlot slot, 
   O2_SIGNPOST_END(forwarding, sid, "forwardInputs", "Forwarding done");
 };
 
-static auto cleanEarlyForward = [](ServiceRegistryRef registry, TimesliceSlot slot, std::vector<std::vector<fair::mq::MessagePtr>>& currentSetOfInputs,
+static auto cleanEarlyForward = [](ServiceRegistryRef registry, TimesliceSlot slot, std::vector<std::span<fair::mq::MessagePtr>>& currentSetOfInputs,
                                    TimesliceIndex::OldestOutputInfo oldestTimeslice, bool copy, bool consume = true) {
   auto& proxy = registry.get<FairMQDeviceProxy>();
 
@@ -629,8 +629,7 @@ static auto cleanEarlyForward = [](ServiceRegistryRef registry, TimesliceSlot sl
   // Always copy them, because we do not want to actually send them.
   // We merely need the side effect of the consume, if applicable.
   for (size_t ii = 0, ie = currentSetOfInputs.size(); ii < ie; ++ii) {
-    auto span = std::span<fair::mq::MessagePtr>(currentSetOfInputs[ii]);
-    DataProcessingHelpers::cleanForwardedMessages(span, consume);
+    DataProcessingHelpers::cleanForwardedMessages(currentSetOfInputs[ii], consume);
   }
 
   O2_SIGNPOST_END(forwarding, sid, "forwardInputs", "Cleaning done");
@@ -1278,7 +1277,7 @@ void DataProcessingDevice::Run()
       // - we can trigger further events from the queue
       // - we can guarantee this is the last thing we do in the loop (
       //   assuming no one else is adding to the queue before this point).
-      auto onDrop = [&registry = mServiceRegistry, lid](TimesliceSlot slot, std::vector<std::vector<fair::mq::MessagePtr>>& dropped, TimesliceIndex::OldestOutputInfo oldestOutputInfo) {
+      auto onDrop = [&registry = mServiceRegistry, lid](TimesliceSlot slot, std::vector<std::span<fair::mq::MessagePtr>>& dropped, TimesliceIndex::OldestOutputInfo oldestOutputInfo) {
         O2_SIGNPOST_START(device, lid, "run_loop", "Dropping message from slot %" PRIu64 ". Forwarding as needed.", (uint64_t)slot.index);
         ServiceRegistryRef ref{registry};
         ref.get<AsyncQueue>();
@@ -1378,11 +1377,47 @@ void DataProcessingDevice::Run()
       bool enough = ref.get<ComputingQuotaEvaluator>().selectOffer(streamRef.index, spec.resourcePolicy.request, uv_now(state.loop), &accumulated);
 
       struct SchedulingStats {
+        // minWarnDelay: stalls shorter than this are never worth warning about.
+        // healthToForget: uninterrupted health needed to halve the threshold, as a
+        // multiple of the threshold itself.
+        // minHealthToForget: no decay at all below this much health, so a storm of
+        // short hiccups separated by short recoveries never re-arms the warning.
+        enum : size_t { minWarnDelay = 50,
+                        healthToForget = 3,
+                        minHealthToForget = 60000 };
         std::atomic<size_t> lastScheduled = 0;
         std::atomic<size_t> numberOfUnscheduledSinceLastScheduled = 0;
         std::atomic<size_t> numberOfUnscheduled = 0;
         std::atomic<size_t> numberOfScheduled = 0;
-        std::atomic<size_t> nextWarnAt = 1;
+        // Longest stall already warned about, doubled, so a stall no worse than an
+        // earlier one stays silent.
+        std::atomic<size_t> warnAboveDelay = minWarnDelay;
+        // Start of the current uninterrupted healthy stretch, 0 until we first
+        // recover from a stall.
+        std::atomic<size_t> healthySince = 0;
+
+        // Halve the threshold for every healthToForget x threshold of health, down
+        // to minWarnDelay, so a later and smaller stall is reported again instead
+        // of being hidden by an older and worse one. The healthy stretch is spent
+        // in one go at the start of a stall: letting it apply again mid-stall would
+        // undo each backoff step and warn on every poll.
+        void decayWarnThreshold(size_t now)
+        {
+          size_t const since = healthySince.exchange(0);
+          if (since == 0) {
+            return;
+          }
+          size_t healthy = now - since;
+          if (healthy < minHealthToForget) {
+            return;
+          }
+          size_t threshold = warnAboveDelay;
+          while (threshold > minWarnDelay && healthy >= healthToForget * threshold) {
+            healthy -= healthToForget * threshold;
+            threshold = std::max<size_t>(threshold / 2, minWarnDelay);
+          }
+          warnAboveDelay = threshold;
+        }
       };
       static SchedulingStats schedulingStats;
       O2_SIGNPOST_ID_GENERATE(sid, scheduling);
@@ -1392,8 +1427,10 @@ void DataProcessingDevice::Run()
         stream.registry = &mServiceRegistry;
         schedulingStats.lastScheduled = uv_now(state.loop);
         schedulingStats.numberOfScheduled++;
+        if (schedulingStats.numberOfUnscheduledSinceLastScheduled != 0) {
+          schedulingStats.healthySince = schedulingStats.lastScheduled.load();
+        }
         schedulingStats.numberOfUnscheduledSinceLastScheduled = 0;
-        schedulingStats.nextWarnAt = 1;
         O2_SIGNPOST_EVENT_EMIT(scheduling, sid, "Run", "Enough resources to schedule computation on stream %d", streamRef.index);
         if (dplEnableMultithreding) [[unlikely]] {
           stream.task = &handle;
@@ -1422,27 +1459,23 @@ void DataProcessingDevice::Run()
           }
           return missingInfo.empty() ? std::string(" (policy: ") + spec.resourcePolicy.name + ")" : " -" + missingInfo;
         };
-        auto const timeSinceLastScheduled = lastSched ? uv_now(state.loop) - lastSched : 0;
-        if (schedulingStats.numberOfUnscheduledSinceLastScheduled >= schedulingStats.nextWarnAt) {
-          auto const missingStr = buildMissingInfo();
-          if (timeSinceLastScheduled >= 50) {
-            O2_SIGNPOST_EVENT_EMIT_WARN(scheduling, sid, "Run",
-                                        "Not enough resources to schedule computation on stream %d. %zu consecutive skips%s. Missing:%s. Data is not lost and it will be scheduled again.",
-                                        streamRef.index,
-                                        schedulingStats.numberOfUnscheduledSinceLastScheduled.load(),
-                                        schedInfo.c_str(),
-                                        missingStr.c_str());
-          } else {
-            O2_SIGNPOST_EVENT_EMIT(scheduling, sid, "Run",
-                                   "Not enough resources to schedule computation on stream %d. %zu consecutive skips%s. Missing:%s. Data is not lost and it will be scheduled again.",
-                                   streamRef.index,
-                                   schedulingStats.numberOfUnscheduledSinceLastScheduled.load(),
-                                   schedInfo.c_str(),
-                                   missingStr.c_str());
-          }
-          schedulingStats.nextWarnAt = schedulingStats.nextWarnAt * 2;
+        size_t const now = uv_now(state.loop);
+        schedulingStats.decayWarnThreshold(now);
+        size_t const timeSinceLastScheduled = lastSched ? now - lastSched : 0;
+        // A single skip is the normal cadence of a rate limited reader, so a stall
+        // has to be seen at least twice before it is worth a warning.
+        bool const warn = schedulingStats.numberOfUnscheduledSinceLastScheduled != 0 &&
+                          timeSinceLastScheduled >= schedulingStats.warnAboveDelay;
+        auto const missingStr = buildMissingInfo();
+        if (warn) {
+          schedulingStats.warnAboveDelay = timeSinceLastScheduled * 2;
+          O2_SIGNPOST_EVENT_EMIT_WARN(scheduling, sid, "Run",
+                                      "Not enough resources to schedule computation on stream %d. %zu consecutive skips%s. Missing:%s. Data is not lost and it will be scheduled again.",
+                                      streamRef.index,
+                                      schedulingStats.numberOfUnscheduledSinceLastScheduled.load(),
+                                      schedInfo.c_str(),
+                                      missingStr.c_str());
         } else {
-          auto const missingStr = buildMissingInfo();
           O2_SIGNPOST_EVENT_EMIT(scheduling, sid, "Run",
                                  "Not enough resources to schedule computation on stream %d. %zu consecutive skips%s. Missing:%s. Data is not lost and it will be scheduled again.",
                                  streamRef.index,
@@ -1985,7 +2018,7 @@ void DataProcessingDevice::handleData(ServiceRegistryRef ref, InputChannelInfo& 
             nPayloadsPerHeader = 1;
             ii += (nMessages / 2) - 1;
           }
-          auto onDrop = [ref](TimesliceSlot slot, std::vector<std::vector<fair::mq::MessagePtr>>& dropped, TimesliceIndex::OldestOutputInfo oldestOutputInfo) {
+          auto onDrop = [ref](TimesliceSlot slot, std::vector<std::span<fair::mq::MessagePtr>>& dropped, TimesliceIndex::OldestOutputInfo oldestOutputInfo) {
             O2_SIGNPOST_ID_GENERATE(cid, async_queue);
             O2_SIGNPOST_EVENT_EMIT(async_queue, cid, "onDrop", "Dropping message from slot %zu. Forwarding as needed. Timeslice %zu",
                                    slot.index, oldestOutputInfo.timeslice.value);
@@ -2163,15 +2196,20 @@ bool DataProcessingDevice::tryDispatchComputation(ServiceRegistryRef ref, std::v
   // want to support multithreaded dispatching of operations, I can simply
   // move these to some thread local store and the rest of the lambdas
   // should work just fine.
-  std::vector<std::vector<fair::mq::MessagePtr>> currentSetOfInputs;
+  std::vector<std::span<fair::mq::MessagePtr>> currentSetOfInputs;
+  std::vector<std::vector<fair::mq::MessagePtr>> ownedInputs;
 
   //
-  auto getInputSpan = [ref, &currentSetOfInputs](TimesliceSlot slot, bool consume = true) {
+  auto getInputSpan = [ref, &currentSetOfInputs, &ownedInputs](TimesliceSlot slot, bool consume = true) {
     auto& relayer = ref.get<DataRelayer>();
     if (consume) {
-      currentSetOfInputs = relayer.consumeAllInputsForTimeslice(slot);
+      ownedInputs = relayer.consumeAllInputsForTimeslice(slot);
     } else {
-      currentSetOfInputs = relayer.consumeExistingInputsForTimeslice(slot);
+      ownedInputs = relayer.consumeExistingInputsForTimeslice(slot);
+    }
+    currentSetOfInputs.resize(ownedInputs.size());
+    for (size_t i = 0; i < ownedInputs.size(); ++i) {
+      currentSetOfInputs[i] = std::span(ownedInputs[i]);
     }
     // Convert raw message indices directly to a DataRef in O(1).
     // Used both by the sequential PartIterator and as the fallback for positional access.
@@ -2203,7 +2241,14 @@ bool DataProcessingDevice::tryDispatchComputation(ServiceRegistryRef ref, std::v
       auto next = currentSetOfInputs[i] | get_next_pair{current};
       return next.headerIdx < currentSetOfInputs[i].size() ? next : DataRefIndices{size_t(-1), size_t(-1)};
     };
-    return InputSpan{nofPartsGetter, refCountGetter, indicesGetter, nextIndicesGetter, currentSetOfInputs.size()};
+    auto payloadGetter = [&currentSetOfInputs](size_t i, DataRefIndices current) -> fair::mq::Message* {
+      auto const& msgs = currentSetOfInputs[i];
+      if (msgs.size() <= current.payloadIdx || !msgs[current.payloadIdx]) {
+        return nullptr;
+      }
+      return msgs[current.payloadIdx].get();
+    };
+    return InputSpan{nofPartsGetter, refCountGetter, indicesGetter, nextIndicesGetter, payloadGetter, currentSetOfInputs.size()};
   };
 
   auto markInputsAsDone = [ref](TimesliceSlot slot) -> void {
@@ -2245,7 +2290,7 @@ bool DataProcessingDevice::tryDispatchComputation(ServiceRegistryRef ref, std::v
   // to avoid double counting them.
   // This was actually the easiest solution we could find for
   // O2-646.
-  auto cleanTimers = [&currentSetOfInputs](TimesliceSlot slot, InputRecord& record) {
+  auto cleanTimers = [&currentSetOfInputs, &ownedInputs](TimesliceSlot slot, InputRecord& record) {
     assert(record.size() == currentSetOfInputs.size());
     for (size_t ii = 0, ie = record.size(); ii < ie; ++ii) {
       // assuming that for timer inputs we do have exactly one PartRef object
@@ -2258,8 +2303,10 @@ bool DataProcessingDevice::tryDispatchComputation(ServiceRegistryRef ref, std::v
       if (input.header == nullptr) {
         continue;
       }
-      // This will hopefully delete the message.
-      currentSetOfInputs[ii].clear();
+      // For the consume=false (Process) path, ownedInputs holds the actual
+      // message vectors and the span points into them.
+      ownedInputs[ii].clear();
+      currentSetOfInputs[ii] = {};
     }
   };
 

@@ -9,6 +9,7 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
+#include "CommonUtils/NameConf.h"
 #include <SimConfig/SimConfig.h>
 #include <SimConfig/DetectorLists.h>
 #include <DetectorsCommonDataFormats/DetID.h>
@@ -69,13 +70,14 @@ void SimConfig::initOptions(boost::program_options::options_description& options
     "field", bpo::value<std::string>()->default_value("-5"), "L3 field rounded to kGauss, allowed values +-2,+-5 and 0; +-<intKGaus>U for uniform field; \"ccdb\" for taking it from CCDB ")("vertexMode", bpo::value<std::string>()->default_value("kDiamondParam"), "Where the beam-spot vertex should come from. Must be one of kNoVertex, kDiamondParam, kCCDB")(
     "nworkers,j", bpo::value<int>()->default_value(nsimworkersdefault), "number of parallel simulation workers (only for parallel mode)")(
     "noemptyevents", "only writes events with at least one hit")(
-    "CCDBUrl", bpo::value<std::string>()->default_value("http://alice-ccdb.cern.ch"), "URL for CCDB to be used.")(
+    "CCDBUrl", bpo::value<std::string>()->default_value(o2::base::NameConf::getCCDBServer()), "URL for CCDB to be used.")(
     "timestamp", bpo::value<uint64_t>(), "global timestamp value in ms (for anchoring) - default is now ... or beginning of run if ALICE run number was given")(
     "run", bpo::value<int>()->default_value(-1), "ALICE run number")(
     "asservice", bpo::value<bool>()->default_value(false), "run in service/server mode")(
     "noGeant", bpo::bool_switch(), "prohibits any Geant transport/physics (by using tight cuts)")(
     "forwardKine", bpo::bool_switch(), "forward kinematics on a FairMQ channel")(
-    "noDiscOutput", bpo::bool_switch(), "switch off writing sim results to disc (useful in combination with forwardKine)");
+    "noDiscOutput", bpo::bool_switch(), "switch off writing sim results to disc (useful in combination with forwardKine)")(
+    "extGeomFile", bpo::value<std::string>()->default_value(""), "Path to a JSON file describing external (CAD) geometry modules to inject (see Detectors/Passive ExternalModule). Modules are added when their 'name' is part of the active module list.");
   options.add_options()("fromCollContext", bpo::value<std::string>()->default_value(""), "Use a pregenerated collision context to infer number of events to simulate, how to embedd them, the vertex position etc. Takes precedence of other options such as \"--nEvents\". The format is COLLISIONCONTEXTFILE.root[:SIGNALNAME] where SIGNALNAME is the event part in the context which is relevant.");
 }
 
@@ -354,6 +356,7 @@ bool SimConfig::resetFromParsedMap(boost::program_options::variables_map const& 
   if (vm.count("noemptyevents")) {
     mConfigData.mFilterNoHitEvents = true;
   }
+  mConfigData.mExtGeomFile = vm["extGeomFile"].as<std::string>();
   mConfigData.mFromCollisionContext = vm["fromCollContext"].as<std::string>();
   auto collcontext_simprefix = getCollContextFilenameAndEventPrefix();
   adjustFromCollContext(collcontext_simprefix.first, collcontext_simprefix.second);

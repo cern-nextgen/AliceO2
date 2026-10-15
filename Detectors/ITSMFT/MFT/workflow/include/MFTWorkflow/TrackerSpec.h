@@ -44,12 +44,13 @@ class TrackerDPL : public o2::framework::Task
 
  private:
   void updateTimeDependentParams(framework::ProcessingContext& pc);
+  void storeConfigs(framework::ProcessingContext& pc);
   ///< MFT readout mode
   bool mMFTTriggered = false; ///< MFT readout is triggered
 
   ///< set MFT ROFrame duration in microseconds
   void setMFTROFrameLengthMUS(float fums);
-  ///< set MFT ROFrame duration in BC (continuous mode only)
+  ///< Set MFT ROFrame duration in BC for continuous mode.
   void setMFTROFrameLengthInBC(int nbc);
   int mMFTROFrameLengthInBC = 0;       ///< MFT RO frame in BC (for MFT cont. mode only)
   float mMFTROFrameLengthMUS = -1.;    ///< MFT RO frame in \mus

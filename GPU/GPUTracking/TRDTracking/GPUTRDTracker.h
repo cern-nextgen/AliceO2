@@ -69,7 +69,10 @@ class GPUTRDTracker_t : public GPUProcessor
   enum EGPUTRDTracker { kNLayers = 6,
                         kNStacks = 5,
                         kNSectors = 18,
-                        kNChambers = 540 };
+                        kNChambers = 540,
+                        kNPadRows = 16,
+                        kNPadColumns = 144,
+                        kNPads = 1244160 };
 
   struct HelperTrackAttributes {
     // additional TRD track attributes which are transient
@@ -115,13 +118,14 @@ class GPUTRDTracker_t : public GPUProcessor
   GPUd() bool AdjustSector(PROP* prop, TRDTRK* t) const;
   GPUd() int32_t GetSector(float alpha) const;
   GPUd() float GetAlphaOfSector(const int32_t sec) const;
-  GPUd() float GetAngularPull(float dYtracklet, float snp) const;
-  GPUd() void RecalcTrkltCov(const float tilt, const float snp, const float rowSize, float (&cov)[3]);
-  GPUd() void RecalcTrkltCovDy(const float tilt, const float snp, float (&cov)[6]);
+  GPUd() float GetAngularPull(float dYtracklet, float snp, int occupancy) const;
+  GPUd() void RecalcTrkltCov(const float tilt, const float snp, const float rowSize, const float pull, const int occupancy, float (&cov)[3]);
+  GPUd() void RecalcTrkltCovDy(const float tilt, const float snp, const float pull, const int occupancy, float (&cov)[6]);
   GPUd() bool InvertCov(float (&cov)[6]);
   GPUd() void FindChambersInRoad(const TRDTRK* t, const float roadY, const float roadZ, const int32_t iLayer, int32_t* det, const float zMax, const float alpha, const float zShiftTrk) const;
   GPUd() bool IsGeoFindable(const TRDTRK* t, const int32_t layer, const float alpha, const float zShiftTrk) const;
   GPUd() void InsertHypothesis(Hypothesis hypo, int32_t& nCurrHypothesis, int32_t idxOffset);
+  GPUd() int GetNtrackletsChamber(int32_t collisionId, int32_t detector) const;
 
   // settings
   GPUd() void SetGenerateSpacePoints(bool flag) { mGenerateSpacePoints = flag; }
@@ -132,6 +136,13 @@ class GPUTRDTracker_t : public GPUProcessor
   GPUd() void SetRoadZ(float roadZ) { mRoadZ = roadZ; }
   GPUd() void SetTPCVdrift(float vDrift) { mTPCVdrift = vDrift; }
   GPUd() void SetTPCTDriftOffset(float t) { mTPCTDriftOffset = t; }
+  GPUd() void SetFT0TriggeredBC(int32_t* t, int32_t n)
+  {
+    mFT0TriggeredBC = t;
+    mNFT0BC = n;
+  }
+  GPUd() void SetChamberStatus(int iDet, bool status) { mChamberStatus[iDet] = status; }
+  // GPUd() void SetPadStatus(int iPad, bool status) { mPadStatus[iPad] = status; }
 
   GPUd() bool GetIsDebugOutputOn() const { return mDebugOutput; }
   GPUd() float GetMaxEta() const { return mMaxEta; }
@@ -170,18 +181,22 @@ class GPUTRDTracker_t : public GPUProcessor
   // the array has (kNChambers + 1) * numberOfCollisions entries
   // note, that for collision iColl one has to add an offset corresponding to the index of the first tracklet of iColl to the index stored in mTrackletIndexArray
   int32_t* mTrackletIndexArray;
-  Hypothesis* mHypothesis;        // array with multiple track hypothesis
-  TRDTRK* mCandidates;            // array of tracks for multiple hypothesis tracking
-  GPUTRDSpacePoint* mSpacePoints; // array with tracklet coordinates in global tracking frame
-  const GPUTRDGeometry* mGeo;     // TRD geometry
-  const GPUTRDRecoParam* mRecoParam;                  // TRD RecoParam
-  bool mDebugOutput;                                  // store debug output
-  static constexpr const float sRadialOffset = -0.1f; // due to (possible) mis-calibration of t0 -> will become obsolete when tracklet conversion is done outside of the tracker
-  float mMaxEta;                                      // TPC tracks with higher eta are ignored
-  float mRoadZ;                                       // in z, a constant search road is used
-  float mTPCVdrift;                                   // TPC drift velocity used for shifting TPC tracks along Z
-  float mTPCTDriftOffset;                             // TPC drift time additive offset
-  GPUTRDTrackerDebug<TRDTRK>* mDebug;                 // debug output
+  int32_t* mFT0TriggeredBC;                                      // arrays with the FT0 triggered BCs, in number of BCs since the beginning of the TF
+  int32_t mNFT0BC;                                               // number of FT0 BCs
+  Hypothesis* mHypothesis;                                       // array with multiple track hypothesis
+  TRDTRK* mCandidates;                                           // array of tracks for multiple hypothesis tracking
+  GPUTRDSpacePoint* mSpacePoints;                                // array with tracklet coordinates in global tracking frame
+  const GPUTRDGeometry* mGeo;                                    // TRD geometry
+  const GPUTRDRecoParam* mRecoParam;                             // TRD RecoParam
+  bool mDebugOutput;                                             // store debug output
+  static GPUglobalconstexpr() const float sRadialOffset = -0.1f; // due to (possible) mis-calibration of t0 -> will become obsolete when tracklet conversion is done outside of the tracker
+  float mMaxEta;                                                 // TPC tracks with higher eta are ignored
+  float mRoadZ;                                                  // in z, a constant search road is used
+  float mTPCVdrift;                                              // TPC drift velocity used for shifting TPC tracks along Z
+  float mTPCTDriftOffset;                                        // TPC drift time additive offset
+  GPUTRDTrackerDebug<TRDTRK>* mDebug;                            // debug output
+  bool mChamberStatus[kNChambers] = {};                          // good (0) or bad (1) chamber from the CCDB, used for determining whether a track is findable
+  // bool mPadStatus[kNPads] = {};                               // whether pad is masked or not in hardware, from the CCDB, used for determining if a track is findable
 };
 } // namespace o2::gpu
 

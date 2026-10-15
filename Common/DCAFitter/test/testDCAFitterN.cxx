@@ -56,11 +56,21 @@ float checkResults(o2::utils::TreeStreamRedirector& outs, std::string& treeName,
     double dst = TMath::Sqrt(df[0] * df[0] + df[1] * df[1] + df[2] * df[2]);
     distMin = dst < distMin ? dst : distMin;
     auto parentTrack = fitter.createParentTrackParCov(ic);
-    //    float genX
+    const std::array<float, 3> genPos{static_cast<float>(vgen[0]), static_cast<float>(vgen[1]), static_cast<float>(vgen[2])};
+    const std::array<float, 3> genMom{static_cast<float>(genPar.Px()), static_cast<float>(genPar.Py()), static_cast<float>(genPar.Pz())};
+    o2::track::TrackPar genParentTrack(genPos, genMom, parentTrack.getCharge(), false);
+    genParentTrack.rotateParam(parentTrack.getAlpha());
+    std::array<float, o2::track::kLabCovMatSize> parentCovGlo{};
+    const bool hasParentCovGlo = parentTrack.getCovXYZPxPyPzGlo(parentCovGlo);
+    const double pullX = hasParentCovGlo && parentCovGlo[0] > 0.f ? df[0] / TMath::Sqrt(parentCovGlo[0]) : 0.;
+    const double pullY = hasParentCovGlo && parentCovGlo[2] > 0.f ? df[1] / TMath::Sqrt(parentCovGlo[2]) : 0.;
+    const double pullZ = hasParentCovGlo && parentCovGlo[5] > 0.f ? df[2] / TMath::Sqrt(parentCovGlo[5]) : 0.;
     outs << treeName.c_str() << "cand=" << ic << "ncand=" << nCand << "nIter=" << nIter << "chi2=" << chi2
          << "genPart=" << genPar << "recPart=" << moth
          << "genX=" << vgen[0] << "genY=" << vgen[1] << "genZ=" << vgen[2]
          << "dx=" << df[0] << "dy=" << df[1] << "dz=" << df[2] << "dst=" << dst
+         << "pullX=" << pullX << "pullY=" << pullY << "pullZ=" << pullZ
+         << "genParentTrack=" << genParentTrack
          << "useAbsDCA=" << absDCA << "useWghDCA=" << useWghDCA << "parent=" << parentTrack;
     for (int i = 0; i < fitter.getNProngs(); i++) {
       outs << treeName.c_str() << fmt::format("prong{}=", i).c_str() << fitter.getTrack(i, ic);
@@ -161,6 +171,7 @@ inline void printStat(const FitStatusArray& a)
 
 BOOST_AUTO_TEST_CASE(DCAFitterNProngs)
 {
+  constexpr bool oldMode = false; // if true, use the old mode of DCAFitterN, which is less correct but faster
   constexpr int NTest = 10000;
   o2::utils::TreeStreamRedirector outStream("dcafitterNTest.root");
 
@@ -186,6 +197,7 @@ BOOST_AUTO_TEST_CASE(DCAFitterNProngs)
     std::memset(fitstat.data(), 0, sizeof(fitstat));
 
     o2::vertexing::DCAFitterN<2> ft; // 2 prong fitter
+    ft.setOldMode(oldMode);          // use the old mode of DCAFitterN
     ft.setBz(bz);
     ft.setPropagateToPCA(true);  // After finding the vertex, propagate tracks to the DCA. This is default anyway
     ft.setMaxR(200);             // do not consider V0 seeds with 2D circles crossing above this R. This is default anyway
@@ -270,6 +282,7 @@ BOOST_AUTO_TEST_CASE(DCAFitterNProngs)
     std::memset(fitstat.data(), 0, sizeof(fitstat));
 
     o2::vertexing::DCAFitterN<2> ft; // 2 prong fitter
+    ft.setOldMode(oldMode);          // use the old mode of DCAFitterN
     ft.setBz(bz);
     ft.setPropagateToPCA(true);  // After finding the vertex, propagate tracks to the DCA. This is default anyway
     ft.setMaxR(200);             // do not consider V0 seeds with 2D circles crossing above this R. This is default anyway
@@ -356,6 +369,7 @@ BOOST_AUTO_TEST_CASE(DCAFitterNProngs)
     std::memset(fitstat.data(), 0, sizeof(fitstat));
 
     o2::vertexing::DCAFitterN<2> ft; // 2 prong fitter
+    ft.setOldMode(oldMode);          // use the old mode of DCAFitterN
     ft.setBz(bz);
     ft.setPropagateToPCA(true);  // After finding the vertex, propagate tracks to the DCA. This is default anyway
     ft.setMaxR(200);             // do not consider V0 seeds with 2D circles crossing above this R. This is default anyway
@@ -441,6 +455,7 @@ BOOST_AUTO_TEST_CASE(DCAFitterNProngs)
     std::memset(fitstat.data(), 0, sizeof(fitstat));
 
     o2::vertexing::DCAFitterN<2> ft; // 2 prong fitter
+    ft.setOldMode(oldMode);          // use the old mode of DCAFitterN
     ft.setBz(bz);
     ft.setPropagateToPCA(true);  // After finding the vertex, propagate tracks to the DCA. This is default anyway
     ft.setMaxR(200);             // do not consider V0 seeds with 2D circles crossing above this R. This is default anyway
@@ -525,6 +540,7 @@ BOOST_AUTO_TEST_CASE(DCAFitterNProngs)
     std::memset(fitstat.data(), 0, sizeof(fitstat));
 
     o2::vertexing::DCAFitterN<3> ft; // 3 prong fitter
+    ft.setOldMode(oldMode);          // use the old mode of DCAFitterN
     ft.setBz(bz);
     ft.setPropagateToPCA(true);  // After finding the vertex, propagate tracks to the DCA. This is default anyway
     ft.setMaxR(200);             // do not consider V0 seeds with 2D circles crossing above this R. This is default anyway

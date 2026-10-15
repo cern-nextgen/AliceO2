@@ -12,6 +12,10 @@
 #ifndef O2_FRAMEWORK_ASOA_H_
 #define O2_FRAMEWORK_ASOA_H_
 
+#if defined(__CLING__)
+#error "Please do not include this file in ROOT dictionary generation"
+#endif
+#include "Framework/Concepts.h" // IWYU pragma: export
 #include "Framework/ConcreteDataMatcher.h"
 #include "Framework/Pack.h"                   // IWYU pragma: export
 #include "Framework/FunctionalHelpers.h"      // IWYU pragma: export
@@ -24,6 +28,7 @@
 #include "Framework/ArrowTableSlicingCache.h" // IWYU pragma: export
 #include "Framework/SliceCache.h"             // IWYU pragma: export
 #include "Framework/VariantHelpers.h"         // IWYU pragma: export
+#include <fairmq/Version.h>
 #include <arrow/array/array_binary.h>
 #include <arrow/table.h>              // IWYU pragma: export
 #include <arrow/array.h>              // IWYU pragma: export
@@ -36,9 +41,15 @@
 #include <cstring>
 #include <gsl/span> // IWYU pragma: export
 
+namespace fair::mq::shmem
+{
+struct MetaHeader;
+}
+
 namespace o2::framework
 {
 using ListVector = std::vector<std::vector<int64_t>>;
+using PointerReconstructor = std::function<std::byte*(fair::mq::shmem::MetaHeader&&)>;
 
 std::string cutString(std::string&& str);
 std::string strToUpper(std::string&& str);
@@ -53,6 +64,14 @@ void dereferenceWithWrongType(const char* getter, const char* target);
 void missingFilterDeclaration(int hash, int ai);
 void notBoundTable(const char* tableName);
 void* extractCCDBPayload(char* payload, size_t size, TClass const* cl, const char* what);
+
+// ASCII-only lowercase. Column labels are plain identifiers, so we deliberately
+// avoid the locale-aware std::tolower: it goes through the C locale facet on
+// every character and dominated getIndexFromLabel in profiles.
+constexpr inline char asciiToLower(char c)
+{
+  return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c;
+}
 
 template <typename... C>
 auto createFieldsFromColumns(framework::pack<C...>)
@@ -112,41 +131,41 @@ struct TableRef {
 template <size_t N1, size_t N2, std::array<TableRef, N1> ar1, std::array<TableRef, N2> ar2>
 consteval auto merge()
 {
-  constexpr const int duplicates = std::ranges::count_if(ar2.begin(), ar2.end(), [&](TableRef const& a) { return std::any_of(ar1.begin(), ar1.end(), [&](TableRef const& e) { return e == a; }); });
+  constexpr const int duplicates = std::ranges::count_if(ar2.begin(), ar2.end(), [&](TableRef const& a) consteval { return std::any_of(ar1.begin(), ar1.end(), [&](TableRef const& e) { return e == a; }); });
   std::array<TableRef, N1 + N2 - duplicates> out;
 
   auto pos = std::copy(ar1.begin(), ar1.end(), out.begin());
-  std::copy_if(ar2.begin(), ar2.end(), pos, [&](TableRef const& a) { return std::none_of(ar1.begin(), ar1.end(), [&](TableRef const& e) { return e == a; }); });
+  std::copy_if(ar2.begin(), ar2.end(), pos, [&](TableRef const& a) consteval { return std::none_of(ar1.begin(), ar1.end(), [&](TableRef const& e) { return e == a; }); });
   return out;
 }
 
 template <size_t N1, size_t N2, std::array<TableRef, N1> ar1, std::array<TableRef, N2> ar2, typename L>
 consteval auto merge_if(L l)
 {
-  constexpr const int to_remove = std::ranges::count_if(ar1.begin(), ar1.end(), [&](TableRef const& a) { return !l(a); });
-  constexpr const int duplicates = std::ranges::count_if(ar2.begin(), ar2.end(), [&](TableRef const& a) { return std::any_of(ar1.begin(), ar1.end(), [&](TableRef const& e) { return e == a; }) || !l(a); });
+  constexpr const int to_remove = std::ranges::count_if(ar1.begin(), ar1.end(), [&](TableRef const& a) consteval { return !l(a); });
+  constexpr const int duplicates = std::ranges::count_if(ar2.begin(), ar2.end(), [&](TableRef const& a) consteval { return std::any_of(ar1.begin(), ar1.end(), [&](TableRef const& e) { return e == a; }) || !l(a); });
   std::array<TableRef, N1 + N2 - duplicates - to_remove> out;
 
-  auto pos = std::copy_if(ar1.begin(), ar1.end(), out.begin(), [&](TableRef const& a) { return l(a); });
-  std::copy_if(ar2.begin(), ar2.end(), pos, [&](TableRef const& a) { return std::none_of(ar1.begin(), ar1.end(), [&](TableRef const& e) { return e == a; }) && l(a); });
+  auto pos = std::copy_if(ar1.begin(), ar1.end(), out.begin(), [&](TableRef const& a) consteval { return l(a); });
+  std::copy_if(ar2.begin(), ar2.end(), pos, [&](TableRef const& a) consteval { return std::none_of(ar1.begin(), ar1.end(), [&](TableRef const& e) { return e == a; }) && l(a); });
   return out;
 }
 
 template <size_t N, std::array<TableRef, N> ar, typename L>
 consteval auto remove_if(L l)
 {
-  constexpr const int to_remove = std::ranges::count_if(ar.begin(), ar.end(), [&l](TableRef const& e) { return l(e); });
+  constexpr const int to_remove = std::ranges::count_if(ar.begin(), ar.end(), [&l](TableRef const& e) consteval { return l(e); });
   std::array<TableRef, N - to_remove> out;
-  std::copy_if(ar.begin(), ar.end(), out.begin(), [&l](TableRef const& e) { return !l(e); });
+  std::copy_if(ar.begin(), ar.end(), out.begin(), [&l](TableRef const& e) consteval { return !l(e); });
   return out;
 }
 
 template <size_t N1, size_t N2, std::array<TableRef, N1> ar1, std::array<TableRef, N2> ar2>
 consteval auto intersect()
 {
-  constexpr const int duplicates = std::ranges::count_if(ar2.begin(), ar2.end(), [&](TableRef const& a) { return std::any_of(ar1.begin(), ar1.end(), [&](TableRef const& e) { return e == a; }); });
+  constexpr const int duplicates = std::ranges::count_if(ar2.begin(), ar2.end(), [&](TableRef const& a) consteval { return std::any_of(ar1.begin(), ar1.end(), [&](TableRef const& e) { return e == a; }); });
   std::array<TableRef, duplicates> out;
-  std::copy_if(ar1.begin(), ar1.end(), out.begin(), [](TableRef const& a) { return std::find(ar2.begin(), ar2.end(), a) != ar2.end(); });
+  std::copy_if(ar1.begin(), ar1.end(), out.begin(), [](TableRef const& a) consteval { return std::find(ar2.begin(), ar2.end(), a) != ar2.end(); });
   return out;
 }
 
@@ -185,29 +204,12 @@ consteval auto intersectOriginals()
 
 namespace o2::soa
 {
-struct Binding;
-
-template <typename T>
-concept not_void = requires { !std::same_as<T, void>; };
-
-/// column identification concepts
-template <typename C>
-concept is_persistent_column = requires(C c) { c.mColumnIterator; };
-
+/// column identification
 template <typename C>
 constexpr bool is_persistent_v = is_persistent_column<C>;
 
 template <typename C>
 using is_persistent_column_t = std::conditional_t<is_persistent_column<C>, std::true_type, std::false_type>;
-
-template <typename C>
-concept is_self_index_column = not_void<typename C::self_index_t> && std::same_as<typename C::self_index_t, std::true_type>;
-
-template <typename C>
-concept is_index_column = !is_self_index_column<C> && requires(C c, o2::soa::Binding b) {
-  { c.setCurrentRaw(b) } -> std::same_as<bool>;
-  requires std::same_as<decltype(c.mBinding), o2::soa::Binding>;
-};
 
 template <typename C>
 using is_external_index_t = typename std::conditional_t<is_index_column<C>, std::true_type, std::false_type>;
@@ -235,6 +237,7 @@ static consteval int getIndexPosToKey_impl()
 /// Base type for table metadata
 template <typename D, typename... Cs>
 struct TableMetadata {
+  static constexpr void isTableMetadata() {};
   using columns = framework::pack<Cs...>;
   using persistent_columns_t = framework::selected_pack<soa::is_persistent_column_t, Cs...>;
   using external_index_columns_t = framework::selected_pack<soa::is_external_index_t, Cs...>;
@@ -243,7 +246,7 @@ struct TableMetadata {
   template <typename Key, typename... PCs>
   static consteval std::array<bool, sizeof...(PCs)> getMap(framework::pack<PCs...>)
   {
-    return std::array<bool, sizeof...(PCs)>{[]() {
+    return std::array<bool, sizeof...(PCs)>{[]() consteval {
       if constexpr (requires { PCs::index_targets.size(); }) {
         return Key::template isIndexTargetOf<PCs::index_targets.size(), PCs::index_targets>();
       } else {
@@ -266,6 +269,7 @@ struct TableMetadata {
 
 template <typename D>
 struct MetadataTrait {
+  static constexpr void isMetadataTrait() {};
   using metadata = void;
 };
 
@@ -273,6 +277,7 @@ struct MetadataTrait {
 /// type signature
 template <uint32_t H>
 struct Hash {
+  static constexpr void isHash() {};
   static constexpr uint32_t hash = H;
   static constexpr char const* const str{""};
 };
@@ -281,12 +286,12 @@ struct Hash {
 template <size_t N, std::array<soa::TableRef, N> ar, typename Key>
 consteval auto filterForKey()
 {
-  constexpr std::array<bool, N> test = []<size_t... Is>(std::index_sequence<Is...>) {
+  constexpr std::array<bool, N> test = []<size_t... Is>(std::index_sequence<Is...>) consteval {
     return std::array<bool, N>{(Key::template hasOriginal<ar[Is]>() || (o2::aod::MetadataTrait<o2::aod::Hash<ar[Is].desc_hash>>::metadata::template getIndexPosToKey<Key>() >= 0))...};
   }(std::make_index_sequence<N>());
   constexpr int correct = std::ranges::count(test.begin(), test.end(), true);
   std::array<soa::TableRef, correct> out;
-  std::ranges::copy_if(ar.begin(), ar.end(), out.begin(), [&test](soa::TableRef const& r) { return test[std::distance(ar.begin(), std::find(ar.begin(), ar.end(), r))]; });
+  std::ranges::copy_if(ar.begin(), ar.end(), out.begin(), [&test](soa::TableRef const& r) consteval { return test[std::distance(ar.begin(), std::find(ar.begin(), ar.end(), r))]; });
   return out;
 }
 
@@ -294,6 +299,7 @@ consteval auto filterForKey()
 #define O2HASH(_Str_)                              \
   template <>                                      \
   struct Hash<_Str_ ""_h> {                        \
+    static constexpr void isHash() {};             \
     static constexpr uint32_t hash = _Str_ ""_h;   \
     static constexpr char const* const str{_Str_}; \
   };
@@ -302,6 +308,8 @@ consteval auto filterForKey()
 #define O2ORIGIN(_Str_)                                \
   template <>                                          \
   struct Hash<_Str_ ""_h> {                            \
+    static constexpr void isHash() {};                 \
+    static constexpr void isOriginHash() {};           \
     static constexpr header::DataOrigin origin{_Str_}; \
     static constexpr uint32_t hash = _Str_ ""_h;       \
     static constexpr char const* const str{_Str_};     \
@@ -382,13 +390,6 @@ constexpr framework::ConcreteDataMatcher matcher()
   return {origin<R>(), description(signature<R>()), R.version};
 }
 
-/// hash identification concepts
-template <typename T>
-concept is_aod_hash = requires(T t) { t.hash; t.str; };
-
-template <typename T>
-concept is_origin_hash = is_aod_hash<T> && requires(T t) { t.origin; };
-
 /// convert TableRef to a DPL source specification
 template <soa::TableRef R>
 static constexpr auto sourceSpec()
@@ -441,27 +442,6 @@ struct Binding {
 };
 
 using SelectionVector = std::vector<int64_t>;
-
-template <typename T>
-concept has_parent_t = not_void<typename T::parent_t>;
-
-template <typename T>
-concept is_metadata = framework::base_of_template<aod::TableMetadata, T>;
-
-template <typename T>
-concept is_metadata_trait = framework::specialization_of_template<aod::MetadataTrait, T>;
-
-template <typename T>
-concept has_metadata = is_metadata_trait<T> && not_void<typename T::metadata>;
-
-template <typename T>
-concept has_extension = is_metadata<T> && not_void<typename T::extension_table_t>;
-
-template <typename T>
-concept has_configurable_extension = has_extension<T> && requires(T t) { typename T::configurable_t; requires std::same_as<std::true_type, typename T::configurable_t>; };
-
-template <typename T>
-concept is_spawnable_column = std::same_as<typename T::spawnable_t, std::true_type>;
 
 template <typename B, typename E>
 struct EquivalentIndex {
@@ -529,13 +509,13 @@ class ColumnIterator : ChunkingPolicy
     : mColumn{column},
       mCurrent{nullptr},
       mCurrentPos{nullptr},
+      mGlobalOffset{nullptr},
       mLast{nullptr},
       mFirstIndex{0},
-      mCurrentChunk{0},
-      mOffset{0}
+      mCurrentChunk{0}
   {
     auto array = getCurrentArray();
-    mCurrent = reinterpret_cast<unwrap_t<T> const*>(array->values()->data()) + (mOffset >> SCALE_FACTOR);
+    mCurrent = reinterpret_cast<unwrap_t<T> const*>(array->values()->data());
     mLast = mCurrent + array->length();
   }
 
@@ -551,10 +531,9 @@ class ColumnIterator : ChunkingPolicy
   {
     auto previousArray = getCurrentArray();
     mFirstIndex += previousArray->length();
-
     mCurrentChunk++;
     auto array = getCurrentArray();
-    mCurrent = reinterpret_cast<unwrap_t<T> const*>(array->values()->data()) + (mOffset >> SCALE_FACTOR) - (mFirstIndex >> SCALE_FACTOR);
+    mCurrent = reinterpret_cast<unwrap_t<T> const*>(array->values()->data()) - (mFirstIndex >> SCALE_FACTOR);
     mLast = mCurrent + array->length() + (mFirstIndex >> SCALE_FACTOR);
   }
 
@@ -562,10 +541,9 @@ class ColumnIterator : ChunkingPolicy
   {
     auto previousArray = getCurrentArray();
     mFirstIndex -= previousArray->length();
-
     mCurrentChunk--;
     auto array = getCurrentArray();
-    mCurrent = reinterpret_cast<unwrap_t<T> const*>(array->values()->data()) + (mOffset >> SCALE_FACTOR) - (mFirstIndex >> SCALE_FACTOR);
+    mCurrent = reinterpret_cast<unwrap_t<T> const*>(array->values()->data()) - (mFirstIndex >> SCALE_FACTOR);
     mLast = mCurrent + array->length() + (mFirstIndex >> SCALE_FACTOR);
   }
 
@@ -588,7 +566,7 @@ class ColumnIterator : ChunkingPolicy
     mCurrentChunk = mColumn->num_chunks() - 1;
     auto array = getCurrentArray();
     mFirstIndex = mColumn->length() - array->length();
-    mCurrent = reinterpret_cast<unwrap_t<T> const*>(array->values()->data()) + (mOffset >> SCALE_FACTOR) - (mFirstIndex >> SCALE_FACTOR);
+    mCurrent = reinterpret_cast<unwrap_t<T> const*>(array->values()->data()) - (mFirstIndex >> SCALE_FACTOR);
     mLast = mCurrent + array->length() + (mFirstIndex >> SCALE_FACTOR);
   }
 
@@ -596,7 +574,7 @@ class ColumnIterator : ChunkingPolicy
     requires std::same_as<bool, std::decay_t<T>>
   {
     checkSkipChunk();
-    return (*(mCurrent - (mOffset >> SCALE_FACTOR) + ((*mCurrentPos + mOffset) >> SCALE_FACTOR)) & (1 << ((*mCurrentPos + mOffset) & 0x7))) != 0;
+    return (*(mCurrent + ((*mCurrentPos + *mGlobalOffset) >> SCALE_FACTOR)) & (1 << ((*mCurrentPos + *mGlobalOffset) & ((1 << SCALE_FACTOR) - 1)))) != 0;
   }
 
   auto operator*() const
@@ -604,8 +582,8 @@ class ColumnIterator : ChunkingPolicy
   {
     checkSkipChunk();
     auto list = std::static_pointer_cast<arrow::ListArray>(mColumn->chunk(mCurrentChunk));
-    auto offset = list->value_offset(*mCurrentPos - mFirstIndex);
-    auto length = list->value_length(*mCurrentPos - mFirstIndex);
+    auto offset = list->value_offset(*mCurrentPos + *mGlobalOffset - mFirstIndex);
+    auto length = list->value_length(*mCurrentPos + *mGlobalOffset - mFirstIndex);
     return gsl::span<unwrap_t<T> const>{mCurrent + mFirstIndex + offset, mCurrent + mFirstIndex + (offset + length)};
   }
 
@@ -614,14 +592,14 @@ class ColumnIterator : ChunkingPolicy
   {
     checkSkipChunk();
     auto array = std::static_pointer_cast<arrow::BinaryViewArray>(mColumn->chunk(mCurrentChunk));
-    return array->GetView(*mCurrentPos - mFirstIndex);
+    return array->GetView(*mCurrentPos + *mGlobalOffset - mFirstIndex);
   }
 
   decltype(auto) operator*() const
     requires((!std::same_as<bool, std::decay_t<T>>) && !std::same_as<arrow_array_for_t<T>, arrow::ListArray> && !std::same_as<arrow_array_for_t<T>, arrow::BinaryViewArray>)
   {
     checkSkipChunk();
-    return *(mCurrent + (*mCurrentPos >> SCALE_FACTOR));
+    return *(mCurrent + ((*mCurrentPos + *mGlobalOffset) >> SCALE_FACTOR));
   }
 
   // Move to the chunk which containts element pos
@@ -633,18 +611,18 @@ class ColumnIterator : ChunkingPolicy
 
   mutable unwrap_t<T> const* mCurrent;
   int64_t const* mCurrentPos;
+  uint64_t const* mGlobalOffset;
   mutable unwrap_t<T> const* mLast;
   arrow::ChunkedArray const* mColumn;
   mutable int mFirstIndex;
   mutable int mCurrentChunk;
-  mutable int mOffset;
 
  private:
   void checkSkipChunk() const
     requires((ChunkingPolicy::chunked == true) && std::same_as<arrow_array_for_t<T>, arrow::ListArray>)
   {
     auto list = std::static_pointer_cast<arrow::ListArray>(mColumn->chunk(mCurrentChunk));
-    if (O2_BUILTIN_UNLIKELY(*mCurrentPos - mFirstIndex >= list->length())) {
+    if (O2_BUILTIN_UNLIKELY(*mCurrentPos + *mGlobalOffset - mFirstIndex >= list->length())) {
       nextChunk();
     }
   }
@@ -652,7 +630,7 @@ class ColumnIterator : ChunkingPolicy
   void checkSkipChunk() const
     requires((ChunkingPolicy::chunked == true) && !std::same_as<arrow_array_for_t<T>, arrow::ListArray>)
   {
-    if (O2_BUILTIN_UNLIKELY(((mCurrent + (*mCurrentPos >> SCALE_FACTOR)) >= mLast))) {
+    if (O2_BUILTIN_UNLIKELY(((mCurrent + ((*mCurrentPos + *mGlobalOffset) >> SCALE_FACTOR)) >= mLast))) {
       nextChunk();
     }
   }
@@ -666,7 +644,6 @@ class ColumnIterator : ChunkingPolicy
     requires(std::same_as<arrow_array_for_t<T>, arrow::FixedSizeListArray>)
   {
     std::shared_ptr<arrow::Array> chunkToUse = mColumn->chunk(mCurrentChunk);
-    mOffset = chunkToUse->offset();
     chunkToUse = std::dynamic_pointer_cast<arrow::FixedSizeListArray>(chunkToUse)->values();
     return std::static_pointer_cast<arrow_array_for_t<value_for_t<T>>>(chunkToUse);
   }
@@ -675,9 +652,7 @@ class ColumnIterator : ChunkingPolicy
     requires(std::same_as<arrow_array_for_t<T>, arrow::ListArray>)
   {
     std::shared_ptr<arrow::Array> chunkToUse = mColumn->chunk(mCurrentChunk);
-    mOffset = chunkToUse->offset();
     chunkToUse = std::dynamic_pointer_cast<arrow::ListArray>(chunkToUse)->values();
-    mOffset = chunkToUse->offset();
     return std::static_pointer_cast<arrow_array_for_t<value_for_t<T>>>(chunkToUse);
   }
 
@@ -685,13 +660,14 @@ class ColumnIterator : ChunkingPolicy
     requires(!std::same_as<arrow_array_for_t<T>, arrow::FixedSizeListArray> && !std::same_as<arrow_array_for_t<T>, arrow::ListArray>)
   {
     std::shared_ptr<arrow::Array> chunkToUse = mColumn->chunk(mCurrentChunk);
-    mOffset = chunkToUse->offset();
     return std::static_pointer_cast<arrow_array_for_t<T>>(chunkToUse);
   }
 };
 
 template <typename T, typename INHERIT>
 struct Column {
+  static constexpr void isIteratableColumn() {};
+
   using inherited_t = INHERIT;
   Column(ColumnIterator<T> const& it)
     : mColumnIterator{it}
@@ -726,6 +702,7 @@ struct Column {
 /// method call.
 template <typename F, typename INHERIT>
 struct DynamicColumn {
+  static constexpr void isDynamicColumn() {};
   using inherited_t = INHERIT;
 
   static constexpr const char* const& columnLabel() { return INHERIT::mLabel; }
@@ -733,6 +710,7 @@ struct DynamicColumn {
 
 template <typename INHERIT>
 struct IndexColumn {
+  static constexpr void isEnumeratingColumn() {};
   using inherited_t = INHERIT;
   static constexpr const uint32_t hash = 0;
 
@@ -741,6 +719,7 @@ struct IndexColumn {
 
 template <typename INHERIT>
 struct MarkerColumn {
+  static constexpr void isMarkingColumn() {};
   using inherited_t = INHERIT;
   static constexpr const uint32_t hash = 0;
 
@@ -842,29 +821,6 @@ struct Index : o2::soa::IndexColumn<Index<START, END>> {
   std::tuple<uint64_t const*> rowOffsets;
 };
 
-template <typename C>
-concept is_indexing_column = requires(C& c) {
-  c.rowIndices;
-  c.rowOffsets;
-};
-
-template <typename C>
-concept is_dynamic_column = requires(C& c) {
-  c.boundIterators;
-};
-
-template <typename C>
-concept is_marker_column = requires { &C::mark; };
-
-template <typename T>
-using is_dynamic_t = std::conditional_t<is_dynamic_column<T>, std::true_type, std::false_type>;
-
-template <typename T>
-concept is_column = is_persistent_column<T> || is_dynamic_column<T> || is_indexing_column<T> || is_marker_column<T>;
-
-template <typename T>
-using is_indexing_t = std::conditional_t<is_indexing_column<T>, std::true_type, std::false_type>;
-
 struct IndexPolicyBase {
   /// Position inside the current table
   int64_t mRowIndex = 0;
@@ -873,10 +829,12 @@ struct IndexPolicyBase {
 };
 
 struct RowViewSentinel {
+  static constexpr void isRowViewSentinel() {};
   int64_t const index;
 };
 
 struct FilteredIndexPolicy : IndexPolicyBase {
+  static constexpr void isFilteredIndexPolicy();
   // We use -1 in the IndexPolicyBase to indicate that the index is
   // invalid. What will validate the index is the this->setCursor()
   // which happens below which will properly setup the first index
@@ -982,6 +940,7 @@ struct FilteredIndexPolicy : IndexPolicyBase {
 };
 
 struct DefaultIndexPolicy : IndexPolicyBase {
+  static constexpr void isDefaultIndexPolicy() {};
   /// Needed to be able to copy the policy
   DefaultIndexPolicy() = default;
   DefaultIndexPolicy(DefaultIndexPolicy&&) = default;
@@ -1056,15 +1015,6 @@ struct DefaultIndexPolicy : IndexPolicyBase {
   int64_t mMaxRow = 0;
 };
 
-// template <OriginEnc ORIGIN, typename... C>
-// class Table;
-
-template <aod::is_aod_hash L, aod::is_aod_hash D, aod::is_origin_hash O, typename... T>
-class Table;
-
-template <typename T>
-concept is_table = framework::specialization_of_template<soa::Table, T> || framework::base_of_template<soa::Table, T>;
-
 /// Similar to a pair but not a pair, to avoid
 /// exposing the second type everywhere.
 template <typename C>
@@ -1073,24 +1023,20 @@ struct ColumnDataHolder {
   arrow::ChunkedArray* second;
 };
 
-template <typename T, typename B>
-concept can_bind = requires(T&& t) {
-  { t.B::mColumnIterator };
-};
-
-template <typename... C>
-concept has_index = (is_indexing_column<C> || ...);
+template <typename C>
+concept needs_ptr_rec = C::needs_ptr_rec;
 
 template <typename D, typename O, typename IP, typename... C>
 struct TableIterator : IP, C... {
  public:
+  static constexpr void isTableIterator() {};
   using self_t = TableIterator<D, O, IP, C...>;
   using policy_t = IP;
   using all_columns = framework::pack<C...>;
   using persistent_columns_t = framework::selected_pack<soa::is_persistent_column_t, C...>;
   using external_index_columns_t = framework::selected_pack<soa::is_external_index_t, C...>;
   using internal_index_columns_t = framework::selected_pack<soa::is_self_index_t, C...>;
-  using bindings_pack_t = decltype([]<typename... Cs>(framework::pack<Cs...>) -> framework::pack<typename Cs::binding_t...> {}(external_index_columns_t{})); // decltype(extractBindings(external_index_columns_t{}));
+  using bindings_pack_t = decltype([]<typename... Cs>(framework::pack<Cs...>) consteval -> framework::pack<typename Cs::binding_t...> {}(external_index_columns_t{})); // decltype(extractBindings(external_index_columns_t{}));
 
   TableIterator(arrow::ChunkedArray* columnData[sizeof...(C)], IP&& policy)
     : IP{policy},
@@ -1249,6 +1195,20 @@ struct TableIterator : IP, C... {
     doSetCurrentInternal(internal_index_columns_t{}, table);
   }
 
+  void setPointerReconstructor(framework::PointerReconstructor const& pointerReconstructor)
+  {
+    [&pointerReconstructor, this]<typename... Cs>(framework::pack<Cs...>) {
+      ([&pointerReconstructor, this]<typename CC>() {
+        if constexpr (needs_ptr_rec<CC>) {
+          if (pointerReconstructor) {
+            CC::ptrRec = &pointerReconstructor;
+          }
+        }
+      }.template operator()<Cs>(),
+       ...);
+    }(all_columns{});
+  }
+
  private:
   /// Helper to move at the end of columns which actually have an iterator.
   template <typename... PC>
@@ -1263,7 +1223,7 @@ struct TableIterator : IP, C... {
   {
     using namespace o2::soa;
     auto f = framework::overloaded{
-      [this]<soa::is_persistent_column T>(T*) -> void { T::mColumnIterator.mCurrentPos = &this->mRowIndex; },
+      [this]<soa::is_persistent_column T>(T*) -> void { T::mColumnIterator.mCurrentPos = &this->mRowIndex; T::mColumnIterator.mGlobalOffset = &this->mOffset; },
       [this]<soa::is_dynamic_column T>(T*) -> void { bindDynamicColumn<T>(typename T::bindings_t{}); },
       [this]<typename T>(T*) -> void {},
     };
@@ -1291,7 +1251,6 @@ struct TableIterator : IP, C... {
   {
     static_assert(std::same_as<decltype(&(static_cast<B*>(this)->mColumnIterator)), std::decay_t<decltype(B::mColumnIterator)>*>, "foo");
     return &(static_cast<B*>(this)->mColumnIterator);
-    // return static_cast<std::decay_t<decltype(B::mColumnIterator)>*>(nullptr);
   }
 
   template <typename B>
@@ -1302,65 +1261,27 @@ struct TableIterator : IP, C... {
 };
 
 struct ArrowHelpers {
-  static std::shared_ptr<arrow::Table> joinTables(std::vector<std::shared_ptr<arrow::Table>>&& tables);
-  static std::shared_ptr<arrow::Table> joinTables(std::vector<std::shared_ptr<arrow::Table>>&& tables, std::span<const char* const> labels);
-  static std::shared_ptr<arrow::Table> joinTables(std::vector<std::shared_ptr<arrow::Table>>&& tables, std::span<const std::string> labels);
-  static std::shared_ptr<arrow::Table> concatTables(std::vector<std::shared_ptr<arrow::Table>>&& tables);
-};
-
-//! Helper to check if a type T is an iterator
-template <typename T>
-concept is_iterator = framework::base_of_template<TableIterator, T> || framework::specialization_of_template<TableIterator, T>;
-
-template <typename T>
-concept is_table_or_iterator = is_table<T> || is_iterator<T>;
-
-template <typename T>
-concept with_originals = requires {
-  T::originals.size();
-};
-
-template <typename T>
-concept with_sources = requires {
-  T::sources.size();
-};
-
-template <typename T>
-concept with_sources_generator = requires(T t) {
-  t.template generateSources<o2::aod::Hash<"AOD"_h>>();
-};
-
-template <typename T>
-concept with_ccdb_urls = requires {
-  T::ccdb_urls.size();
-};
-
-template <typename T>
-concept with_base_table = requires {
-  typename aod::MetadataTrait<o2::aod::Hash<T::originals[T::originals.size() - 1].desc_hash>>::metadata::base_table_t;
-};
-
-template <typename T>
-concept with_expression_pack = requires {
-  typename T::expression_pack_t{};
-};
-
-template <typename T>
-concept with_index_pack = requires {
-  typename T::index_pack_t{};
+  static o2::soa::ArrowTableRef joinTables(std::vector<std::shared_ptr<arrow::Table>>&& tables);
+  static o2::soa::ArrowTableRef joinTables(std::vector<o2::soa::ArrowTableRef>&& tables);
+  static o2::soa::ArrowTableRef joinTables(std::vector<o2::soa::ArrowTableRef>&& tables, std::span<const char* const> labels);
+  static o2::soa::ArrowTableRef joinTables(std::vector<o2::soa::ArrowTableRef>&& tables, std::span<const std::string> labels);
+  static o2::soa::ArrowTableRef joinTables(std::vector<std::shared_ptr<arrow::Table>>&& tables, std::span<const char* const> labels);
+  static o2::soa::ArrowTableRef joinTables(std::vector<std::shared_ptr<arrow::Table>>&& tables, std::span<const std::string> labels);
+  static o2::soa::ArrowTableRef concatTables(std::vector<o2::soa::ArrowTableRef>&& tables);
+  static o2::soa::ArrowTableRef concatTables(std::vector<std::shared_ptr<arrow::Table>>&& tables);
 };
 
 template <size_t N1, std::array<TableRef, N1> os1, size_t N2, std::array<TableRef, N2> os2>
 consteval bool is_compatible()
 {
-  return []<size_t... Is>(std::index_sequence<Is...>) {
-    return ([]<size_t... Ks>(std::index_sequence<Ks...>) {
+  return []<size_t NN2, size_t... Is>(std::index_sequence<Is...>) consteval {
+    return ([]<size_t... Ks>(std::index_sequence<Ks...>) consteval {
       constexpr auto h = os1[Is].desc_hash;
       using H = o2::aod::Hash<h>;
       return (((h == os2[Ks].desc_hash) || is_ng_index_equivalent_v<H, o2::aod::Hash<os2[Ks].desc_hash>>) || ...);
-    }(std::make_index_sequence<N2>()) ||
+    }(std::make_index_sequence<NN2>()) ||
             ...);
-  }(std::make_index_sequence<N1>());
+  }.template operator()<N2>(std::make_index_sequence<N1>());
 }
 
 template <with_originals T, with_originals B>
@@ -1371,12 +1292,6 @@ consteval bool is_binding_compatible_v()
 
 template <typename T, typename B>
 using is_binding_compatible = std::conditional_t<is_binding_compatible_v<T, typename B::binding_t>(), std::true_type, std::false_type>;
-
-template <typename L, typename D, typename O, typename Key, typename H, typename... Ts>
-struct IndexTable;
-
-template <typename T>
-concept is_index_table = framework::specialization_of_template<o2::soa::IndexTable, T>;
 
 template <soa::is_table T>
 static constexpr std::string getLabelForTable()
@@ -1416,8 +1331,8 @@ static constexpr auto hasColumnForKey(framework::pack<C...>, std::string_view ke
     return std::ranges::equal(
       str1, str2,
       [](char c1, char c2) {
-        return std::tolower(static_cast<unsigned char>(c1)) ==
-               std::tolower(static_cast<unsigned char>(c2));
+        return asciiToLower(static_cast<unsigned char>(c1)) ==
+               asciiToLower(static_cast<unsigned char>(c2));
       });
   };
   return (caseInsensitiveCompare(C::inherited_t::mLabel, key) || ...);
@@ -1505,6 +1420,7 @@ namespace o2::framework
 {
 /// tracks origin in bindingKey matcher to handle the correct arguments
 struct PreslicePolicyBase {
+  static constexpr void isPreslicePolicy() {};
   const std::string binding;
   Entry bindingKey;
 
@@ -1516,12 +1432,7 @@ struct PreslicePolicySorted : public PreslicePolicyBase {
   void updateSliceInfo(SliceInfoPtr&& si);
 
   SliceInfoPtr sliceInfo;
-  std::shared_ptr<arrow::Table> getSliceFor(int value, std::shared_ptr<arrow::Table> const& input, uint64_t& offset) const;
-  // One-slot cache for the empty (0-row) slice, so that empty groups do not
-  // slice every column only to produce 0 rows (the common case for sparse
-  // grouping, e.g. candidates per collision). Keyed by the input table, which
-  // changes with every dataframe.
-  mutable std::pair<arrow::Table const*, std::shared_ptr<arrow::Table>> emptySlice{nullptr, nullptr};
+  o2::soa::ArrowTableRef getSliceFor(int value, o2::soa::ArrowTableRef const& input) const;
 };
 
 struct PreslicePolicyGeneral : public PreslicePolicyBase {
@@ -1531,11 +1442,9 @@ struct PreslicePolicyGeneral : public PreslicePolicyBase {
   std::span<const int64_t> getSliceFor(int value) const;
 };
 
-template <typename T>
-concept is_preslice_policy = std::derived_from<T, PreslicePolicyBase>;
-
 template <soa::is_table T, is_preslice_policy Policy, bool OPT = false>
 struct PresliceBase : public Policy {
+  static constexpr void isPresliceContainer() {};
   constexpr static bool optional = OPT;
   using target_t = T;
   using policy_t = Policy;
@@ -1546,14 +1455,14 @@ struct PresliceBase : public Policy {
   {
   }
 
-  std::shared_ptr<arrow::Table> getSliceFor(int value, std::shared_ptr<arrow::Table> const& input, uint64_t& offset) const
+  o2::soa::ArrowTableRef getSliceFor(int value, o2::soa::ArrowTableRef const& input) const
   {
     if constexpr (OPT) {
       if (Policy::isMissing()) {
-        return nullptr;
+        return {nullptr, {0, 0}};
       }
     }
-    return Policy::getSliceFor(value, input, offset);
+    return Policy::getSliceFor(value, input);
   }
 
   std::span<const int64_t> getSliceFor(int value) const
@@ -1576,13 +1485,6 @@ using Preslice = PresliceBase<T, PreslicePolicySorted, false>;
 template <soa::is_table T>
 using PresliceOptional = PresliceBase<T, PreslicePolicySorted, true>;
 
-template <typename T>
-concept is_preslice = std::derived_from<T, PreslicePolicyBase>&&
-  requires(T)
-{
-  T::optional;
-};
-
 /// Can be user to group together a number of Preslice declaration
 /// to avoid the limit of 100 data members per task
 ///
@@ -1596,11 +1498,8 @@ concept is_preslice = std::derived_from<T, PreslicePolicyBase>&&
 ///
 /// preslices.perCol;
 struct PresliceGroup {
+  static constexpr void isPresliceGroup() {};
 };
-
-template <typename T>
-concept is_preslice_group = std::derived_from<T, PresliceGroup>;
-
 } // namespace o2::framework
 
 namespace o2::soa
@@ -1610,24 +1509,9 @@ class FilteredBase;
 template <typename T>
 class Filtered;
 
-template <typename T>
-concept has_filtered_policy = not_void<typename T::policy_t> && std::same_as<typename T::policy_t, soa::FilteredIndexPolicy>;
-
-template <typename T>
-concept is_filtered_iterator = is_iterator<T> && has_filtered_policy<T>;
-
-template <typename T>
-concept is_filtered_table = framework::base_of_template<soa::FilteredBase, T>;
-
 // FIXME: compatbility declaration to be removed
 template <typename T>
 constexpr bool is_soa_filtered_v = is_filtered_table<T>;
-
-template <typename T>
-concept is_filtered = is_filtered_table<T> || is_filtered_iterator<T>;
-
-template <typename T>
-concept is_not_filtered_table = is_table<T> && !is_filtered_table<T>;
 
 /// Helper function to extract bound indices
 template <typename... Is>
@@ -1647,9 +1531,8 @@ auto doSliceBy(T const* table, o2::framework::PresliceBase<C, Policy, OPT> const
       missingOptionalPreslice(getLabelFromType<std::decay_t<T>>().data(), container.bindingKey.key.c_str());
     }
   }
-  uint64_t offset = 0;
-  auto out = container.getSliceFor(value, table->asArrowTable(), offset);
-  auto t = typename T::self_t({out}, offset);
+  auto out = container.getSliceFor(value, table->asArrowTableRef());
+  auto t = typename T::self_t({out});
   if (t.tableSize() != 0) {
     table->copyIndexBindings(t);
     t.bindInternalIndicesTo(table);
@@ -1660,7 +1543,7 @@ auto doSliceBy(T const* table, o2::framework::PresliceBase<C, Policy, OPT> const
 template <soa::is_filtered_table T>
 auto doSliceByHelper(T const* table, std::span<const int64_t> const& selection)
 {
-  auto t = soa::Filtered<typename T::base_t>({table->asArrowTable()}, selection);
+  auto t = soa::Filtered<typename T::base_t>({table->asArrowTableRef()}, selection);
   if (t.tableSize() != 0) {
     table->copyIndexBindings(t);
     t.bindInternalIndicesTo(table);
@@ -1673,7 +1556,7 @@ template <soa::is_table T>
   requires(!soa::is_filtered_table<T>)
 auto doSliceByHelper(T const* table, std::span<const int64_t> const& selection)
 {
-  auto t = soa::Filtered<T>({table->asArrowTable()}, selection);
+  auto t = soa::Filtered<T>({table->asArrowTableRef()}, selection);
   if (t.tableSize() != 0) {
     table->copyIndexBindings(t);
     t.bindInternalIndicesTo(table);
@@ -1697,17 +1580,17 @@ auto doSliceBy(T const* table, o2::framework::PresliceBase<C, Policy, OPT> const
 SelectionVector sliceSelection(std::span<int64_t const> const& mSelectedRows, int64_t nrows, uint64_t offset);
 
 template <soa::is_filtered_table T>
-auto prepareFilteredSlice(T const* table, std::shared_ptr<arrow::Table> slice, uint64_t offset)
+auto prepareFilteredSlice(T const* table, o2::soa::ArrowTableRef slice)
 {
-  if (offset >= static_cast<uint64_t>(table->tableSize())) {
-    Filtered<typename T::base_t> fresult{{{slice}}, SelectionVector{}, 0};
+  if (slice.range.offset >= static_cast<uint64_t>(table->tableSize())) {
+    Filtered<typename T::base_t> fresult{{slice}, SelectionVector{}};
     if (fresult.tableSize() != 0) {
       table->copyIndexBindings(fresult);
     }
     return fresult;
   }
-  auto slicedSelection = sliceSelection(table->getSelectedRows(), slice->num_rows(), offset);
-  Filtered<typename T::base_t> fresult{{{slice}}, std::move(slicedSelection), offset};
+  auto slicedSelection = sliceSelection(table->getSelectedRows(), slice.range.size, slice.range.offset);
+  Filtered<typename T::base_t> fresult{{slice}, std::move(slicedSelection)};
   if (fresult.tableSize() != 0) {
     table->copyIndexBindings(fresult);
   }
@@ -1723,9 +1606,8 @@ auto doFilteredSliceBy(T const* table, o2::framework::PresliceBase<C, framework:
       missingOptionalPreslice(getLabelFromType<T>().data(), container.bindingKey.key.c_str());
     }
   }
-  uint64_t offset = 0;
-  auto slice = container.getSliceFor(value, table->asArrowTable(), offset);
-  return prepareFilteredSlice(table, slice, offset);
+  auto slice = container.getSliceFor(value, table->asArrowTableRef());
+  return prepareFilteredSlice(table, slice);
 }
 
 std::function<framework::ConcreteDataMatcher(framework::ConcreteDataMatcher&&)> originReplacement(header::DataOrigin newOrigin);
@@ -1736,10 +1618,7 @@ auto doSliceByCached(T const* table, framework::expressions::BindingNode const& 
   auto localCache = cache.ptr->getCacheFor({"", originReplacement(cache.ptr->newOrigin)(o2::soa::getMatcherFromTypeForKey<T>(node.name)),
                                             node.name});
   auto [offset, count] = localCache.getSliceFor(value);
-  // Empty group: reuse a cached empty (0-row) table instead of slicing every column.
-  auto slice = count == 0 ? cache.ptr->getEmptySliceFor(table->asArrowTable())
-                          : table->asArrowTable()->Slice(static_cast<uint64_t>(offset), count);
-  auto t = typename T::self_t({slice}, static_cast<uint64_t>(offset));
+  auto t = typename T::self_t({table->asArrowTableRef().slice({static_cast<uint64_t>(offset), count})});
   if (t.tableSize() != 0) {
     table->copyIndexBindings(t);
   }
@@ -1752,10 +1631,7 @@ auto doFilteredSliceByCached(T const* table, framework::expressions::BindingNode
   auto localCache = cache.ptr->getCacheFor({"", originReplacement(cache.ptr->newOrigin)(o2::soa::getMatcherFromTypeForKey<T>(node.name)),
                                             node.name});
   auto [offset, count] = localCache.getSliceFor(value);
-  // Empty group: reuse a cached empty (0-row) table instead of slicing every column.
-  auto slice = count == 0 ? cache.ptr->getEmptySliceFor(table->asArrowTable())
-                          : table->asArrowTable()->Slice(static_cast<uint64_t>(offset), count);
-  return prepareFilteredSlice(table, slice, offset);
+  return prepareFilteredSlice(table, table->asArrowTableRef().slice({static_cast<uint64_t>(offset), count}));
 }
 
 template <soa::is_table T>
@@ -1764,14 +1640,14 @@ auto doSliceByCachedUnsorted(T const* table, framework::expressions::BindingNode
   auto localCache = cache.ptr->getCacheUnsortedFor({"", originReplacement(cache.ptr->newOrigin)(o2::soa::getMatcherFromTypeForKey<T>(node.name)),
                                                     node.name});
   if constexpr (soa::is_filtered_table<T>) {
-    auto t = typename T::self_t({table->asArrowTable()}, localCache.getSliceFor(value));
+    auto t = typename T::self_t({table->asArrowTableRef()}, localCache.getSliceFor(value));
     if (t.tableSize() != 0) {
       t.intersectWithSelection(table->getSelectedRows());
       table->copyIndexBindings(t);
     }
     return t;
   } else {
-    auto t = Filtered<T>({table->asArrowTable()}, localCache.getSliceFor(value));
+    auto t = Filtered<T>({table->asArrowTableRef()}, localCache.getSliceFor(value));
     if (t.tableSize() != 0) {
       table->copyIndexBindings(t);
     }
@@ -1782,7 +1658,7 @@ auto doSliceByCachedUnsorted(T const* table, framework::expressions::BindingNode
 template <with_originals T>
 auto select(T const& t, framework::expressions::Filter const& f)
 {
-  return Filtered<T>({t.asArrowTable()}, selectionToVector(framework::expressions::createSelection(t.asArrowTable(), f)));
+  return Filtered<T>({t.asArrowTableRef()}, selectionToVector(framework::expressions::createSelection(t.asArrowTable(), f)));
 }
 
 arrow::ChunkedArray* getIndexFromLabel(arrow::Table* table, std::string_view label);
@@ -1791,7 +1667,6 @@ template <typename D, typename O, typename IP, typename... C>
 consteval auto base_iter(framework::pack<C...>&&) -> TableIterator<D, O, IP, C...>
 {
 }
-
 template <TableRef ref, typename... Ts>
   requires((sizeof...(Ts) > 0) && (soa::is_column<Ts> && ...))
 consteval auto getColumns()
@@ -1840,15 +1715,16 @@ template <aod::is_aod_hash L, aod::is_aod_hash D, aod::is_origin_hash O, typenam
 class Table
 {
  public:
+  static constexpr void isSOATable() {};
   static constexpr const auto ref = TableRef{L::hash, D::hash, O::hash, o2::aod::version(D::str)};
   using self_t = Table<L, D, O, Ts...>;
   using table_t = self_t;
 
   static constexpr const auto originals = computeOriginals<ref, Ts...>();
-  static constexpr const auto originalLabels = []<size_t N, std::array<TableRef, N> refs, size_t... Is>(std::index_sequence<Is...>) {
+  static constexpr const auto originalLabels = []<size_t N, std::array<TableRef, N> refs, size_t... Is>(std::index_sequence<Is...>) consteval {
     return std::array<const char*, N>{o2::aod::label<refs[Is]>()...};
   }.template operator()<originals.size(), originals>(std::make_index_sequence<originals.size()>());
-  static constexpr const uint32_t binding_origin = originals[0].origin_hash; // commonOrigin<originals.size(), originals>();
+  static constexpr const uint32_t binding_origin = originals[0].origin_hash;
   static constexpr header::DataOrigin binding_origin_ = o2::aod::Hash<binding_origin>::origin;
 
   template <size_t N, std::array<TableRef, N> bindings>
@@ -1863,7 +1739,7 @@ class Table
   static consteval auto isIndexTargetOf()
   {
     return std::ranges::any_of(self_t::originals,
-                               [](TableRef const& r) {
+                               [](TableRef const& r) consteval {
                                  return std::ranges::any_of(bindings, [&r](TableRef const& b) { return b == r; });
                                });
   }
@@ -1878,16 +1754,22 @@ class Table
   template <TableRef r>
   static consteval bool hasOriginal()
   {
-    return std::ranges::any_of(originals, [](TableRef const& o) { return o.desc_hash == r.desc_hash; });
+    return std::ranges::any_of(originals, [](TableRef const& o) consteval { return o.desc_hash == r.desc_hash; });
   }
 
   using columns_t = decltype(getColumns<ref, Ts...>());
 
-  using persistent_columns_t = decltype([]<typename... C>(framework::pack<C...>&&) -> framework::selected_pack<soa::is_persistent_column_t, C...> {}(columns_t{}));
-  using column_types = decltype([]<typename... C>(framework::pack<C...>) -> framework::pack<typename C::type...> {}(persistent_columns_t{}));
+  static constexpr auto column_hashes = []<typename... C>(framework::pack<C...>) consteval {
+    auto hashes = std::array{C::hash...};
+    std::ranges::sort(hashes);
+    return hashes;
+  }(columns_t{});
 
-  using external_index_columns_t = decltype([]<typename... C>(framework::pack<C...>&&) -> framework::selected_pack<soa::is_external_index_t, C...> {}(columns_t{}));
-  using internal_index_columns_t = decltype([]<typename... C>(framework::pack<C...>&&) -> framework::selected_pack<soa::is_self_index_t, C...> {}(columns_t{}));
+  using persistent_columns_t = decltype([]<typename... C>(framework::pack<C...>&&) consteval -> framework::selected_pack<soa::is_persistent_column_t, C...> {}(columns_t{}));
+  using column_types = decltype([]<typename... C>(framework::pack<C...>) consteval -> framework::pack<typename C::type...> {}(persistent_columns_t{}));
+
+  using external_index_columns_t = decltype([]<typename... C>(framework::pack<C...>&&) consteval -> framework::selected_pack<soa::is_external_index_t, C...> {}(columns_t{}));
+  using internal_index_columns_t = decltype([]<typename... C>(framework::pack<C...>&&) consteval -> framework::selected_pack<soa::is_self_index_t, C...> {}(columns_t{}));
   template <typename IP>
   using base_iterator = decltype(base_iter<D, O, IP>(columns_t{}));
 
@@ -1895,8 +1777,7 @@ class Table
   struct TableIteratorBase : base_iterator<IP> {
     using columns_t = typename Parent::columns_t;
     using external_index_columns_t = typename Parent::external_index_columns_t;
-    using bindings_pack_t = decltype([]<typename... C>(framework::pack<C...>) -> framework::pack<typename C::binding_t...> {}(external_index_columns_t{}));
-    // static constexpr const std::array<TableRef, sizeof...(T)> originals{T::ref...};
+    using bindings_pack_t = decltype([]<typename... C>(framework::pack<C...>) consteval -> framework::pack<typename C::binding_t...> {}(external_index_columns_t{}));
     static constexpr auto originals = Parent::originals;
     using policy_t = IP;
     using parent_t = Parent;
@@ -2048,8 +1929,7 @@ class Table
   using iterator_template = TableIteratorBase<IP, Parent, T...>;
 
   template <typename IP, typename Parent>
-  static consteval auto full_iter()
-  {
+  using iterator_template_o = decltype([]() {
     if constexpr (sizeof...(Ts) == 0) {
       return iterator_template<IP, Parent>{};
     } else {
@@ -2059,10 +1939,7 @@ class Table
         return iterator_template<IP, Parent, Ts...>{};
       }
     }
-  }
-
-  template <typename IP, typename Parent>
-  using iterator_template_o = decltype(full_iter<IP, Parent>());
+  }());
 
   using iterator = iterator_template_o<DefaultIndexPolicy, table_t>;
   using filtered_iterator = iterator_template_o<FilteredIndexPolicy, table_t>;
@@ -2071,17 +1948,11 @@ class Table
   using const_iterator = iterator;
   using unfiltered_const_iterator = unfiltered_iterator;
 
-  static constexpr auto hashes()
+  Table(o2::soa::ArrowTableRef tableRef)
+    : mArrowTableRef(tableRef),
+      mEnd{tableRef.range.size}
   {
-    return []<typename... C>(framework::pack<C...>) { return std::set{{C::hash...}}; }(columns_t{});
-  }
-
-  Table(std::shared_ptr<arrow::Table> table, uint64_t offset = 0)
-    : mTable(table),
-      mOffset(offset),
-      mEnd{table->num_rows()}
-  {
-    if (mTable->num_rows() == 0) {
+    if (mArrowTableRef.tablePtr->num_rows() == 0) {
       for (size_t ci = 0; ci < framework::pack_size(columns_t{}); ++ci) {
         mColumnChunks[ci] = nullptr;
       }
@@ -2091,27 +1962,44 @@ class Table
       for (size_t ci = 0; ci < framework::pack_size(columns_t{}); ++ci) {
         mColumnChunks[ci] = lookups[ci];
       }
-      mBegin = unfiltered_iterator{mColumnChunks, {table->num_rows(), offset}};
+      mBegin = unfiltered_iterator{mColumnChunks, {mEnd.index, mArrowTableRef.range.offset}};
       mBegin.bindInternalIndices(this);
     }
   }
 
-  Table(std::vector<std::shared_ptr<arrow::Table>>&& tables, uint64_t offset = 0)
-    requires(ref.origin_hash != "CONC"_h)
-    : Table(ArrowHelpers::joinTables(std::move(tables), std::span{originalLabels}), offset)
+  Table(std::shared_ptr<arrow::Table> table)
+    : Table(o2::soa::ArrowTableRef{table})
   {
   }
 
-  Table(std::vector<std::shared_ptr<arrow::Table>>&& tables, uint64_t offset = 0)
+  Table(std::vector<o2::soa::ArrowTableRef>&& tables)
+    requires(ref.origin_hash != "CONC"_h)
+    : Table(ArrowHelpers::joinTables(std::forward<std::vector<o2::soa::ArrowTableRef>>(tables), std::span{originalLabels}))
+  {
+  }
+
+  Table(std::vector<o2::soa::ArrowTableRef>&& tables)
     requires(ref.origin_hash == "CONC"_h)
-    : Table(ArrowHelpers::concatTables(std::move(tables)), offset)
+    : Table(ArrowHelpers::concatTables(std::forward<std::vector<o2::soa::ArrowTableRef>>(tables)))
+  {
+  }
+
+  Table(std::vector<std::shared_ptr<arrow::Table>>&& tables)
+    requires(ref.origin_hash != "CONC"_h)
+    : Table(ArrowHelpers::joinTables(std::forward<std::vector<std::shared_ptr<arrow::Table>>>(tables)))
+  {
+  }
+
+  Table(std::vector<std::shared_ptr<arrow::Table>>&& tables)
+    requires(ref.origin_hash == "CONC"_h)
+    : Table(ArrowHelpers::concatTables(std::forward<std::vector<std::shared_ptr<arrow::Table>>>(tables)))
   {
   }
 
   template <typename Key>
   inline arrow::ChunkedArray* getIndexToKey()
   {
-    constexpr auto map = []<typename... Cs>(framework::pack<Cs...>) {
+    constexpr auto map = []<typename... Cs>(framework::pack<Cs...>) consteval {
       return std::array<bool, sizeof...(Cs)>{[]() {
         if constexpr (requires { Cs::index_targets.size(); }) {
           return Key::template isIndexTargetOf<Cs::index_targets.size(), Cs::index_targets>();
@@ -2154,7 +2042,7 @@ class Table
     // is held by the table, so we are safe passing the bare pointer. If it does it
     // means that the iterator on a table is outliving the table itself, which is
     // a bad idea.
-    return filtered_iterator(mColumnChunks, {selection, mTable->num_rows(), mOffset});
+    return filtered_iterator(mColumnChunks, {selection, mArrowTableRef.tablePtr->num_rows(), mArrowTableRef.range.offset});
   }
 
   iterator iteratorAt(uint64_t i) const
@@ -2182,17 +2070,27 @@ class Table
   /// Return a type erased arrow table backing store for / the type safe table.
   [[nodiscard]] std::shared_ptr<arrow::Table> asArrowTable() const
   {
-    return mTable;
+    return mArrowTableRef.tablePtr;
+  }
+
+  [[nodiscard]] std::shared_ptr<arrow::Table> asArrowTableConstrained() const
+  {
+    return mArrowTableRef.tablePtr->Slice(mArrowTableRef.range.offset, mArrowTableRef.range.size);
+  }
+
+  [[nodiscard]] ArrowTableRef asArrowTableRef() const
+  {
+    return mArrowTableRef;
   }
   /// Return offset
   auto offset() const
   {
-    return mOffset;
+    return mArrowTableRef.range.offset;
   }
   /// Size of the table, in rows.
   [[nodiscard]] int64_t size() const
   {
-    return mTable->num_rows();
+    return mArrowTableRef.range.size;
   }
 
   [[nodiscard]] int64_t tableSize() const
@@ -2278,27 +2176,35 @@ class Table
 
   auto rawSlice(uint64_t start, uint64_t end) const
   {
-    return self_t{mTable->Slice(start, end - start + 1), start};
+    return self_t{mArrowTableRef.slice({start, static_cast<int64_t>(end - start + 1)})};
   }
 
   auto emptySlice() const
   {
-    return self_t{mTable->Slice(0, 0), 0};
+    return self_t{mArrowTableRef.makeEmpty()};
+  }
+
+  void setPointerReconstructor(framework::PointerReconstructor const& pointerReconstructor)
+  {
+    mBegin.setPointerReconstructor(pointerReconstructor);
   }
 
  private:
   template <typename T>
   arrow::ChunkedArray* lookupColumn()
   {
-    if constexpr (soa::is_persistent_column<T>) {
-      auto label = T::columnLabel();
-      return getIndexFromLabel(mTable.get(), label);
-    } else {
-      return nullptr;
-    }
+    return nullptr;
   }
-  std::shared_ptr<arrow::Table> mTable = nullptr;
-  uint64_t mOffset = 0;
+
+  template <soa::is_persistent_column T>
+  arrow::ChunkedArray* lookupColumn()
+  {
+    return getIndexFromLabel(mArrowTableRef.tablePtr.get(), T::columnLabel());
+  }
+
+  ArrowTableRef mArrowTableRef;
+  // std::shared_ptr<arrow::Table> mTable = nullptr;
+  // uint64_t mOffset = 0;
   // Cached pointers to the ChunkedArray associated to a column
   arrow::ChunkedArray* mColumnChunks[framework::pack_size(columns_t{})];
   RowViewSentinel mEnd;
@@ -2333,7 +2239,7 @@ concept dynamic_with_common_getter = is_dynamic_column<T> &&
                                      };
 
 template <typename T, typename R>
-concept persistent_with_common_getter = is_persistent_v<T> && requires(T t) {
+concept persistent_with_common_getter = is_persistent_column<T> && requires(T t) {
   { t.get() } -> std::convertible_to<R>;
 };
 
@@ -2401,13 +2307,14 @@ namespace o2::aod
 O2ORIGIN("AOD");
 O2ORIGIN("AOD1");
 O2ORIGIN("AOD2");
-// O2ORIGIN("DYN");
-// O2ORIGIN("IDX");
-// O2ORIGIN("ATIM");
+O2ORIGIN("EMB");
+
 O2ORIGIN("JOIN");
 O2HASH("JOIN/0");
+
 O2ORIGIN("CONC");
 O2HASH("CONC/0");
+
 O2ORIGIN("TEST");
 O2HASH("TEST/0");
 } // namespace o2::aod
@@ -2464,51 +2371,82 @@ consteval static std::string_view namespace_prefix()
   };                                                                                                                                                                              \
   [[maybe_unused]] static constexpr o2::framework::expressions::BindingNode _Getter_ { _Label_, _Name_::hash, o2::framework::expressions::selectArrowType<_Type_>() }
 
-#define DECLARE_SOA_CCDB_COLUMN_FULL(_Name_, _Label_, _Getter_, _ConcreteType_, _CCDBQuery_)                      \
-  struct _Name_ : o2::soa::Column<std::span<std::byte>, _Name_> {                                                 \
-    static constexpr const char* mLabel = _Label_;                                                                \
-    static constexpr const char* query = _CCDBQuery_;                                                             \
-    static constexpr const uint32_t hash = crc32(namespace_prefix<_Name_>(), std::string_view{#_Getter_});        \
-    using base = o2::soa::Column<std::span<std::byte>, _Name_>;                                                   \
-    using type = std::span<std::byte>;                                                                            \
-    using column_t = _Name_;                                                                                      \
-    _Name_(arrow::ChunkedArray const* column)                                                                     \
-      : o2::soa::Column<std::span<std::byte>, _Name_>(o2::soa::ColumnIterator<std::span<std::byte>>(column))      \
-    {                                                                                                             \
-    }                                                                                                             \
-                                                                                                                  \
-    _Name_() = default;                                                                                           \
-    _Name_(_Name_ const& other) = default;                                                                        \
-    _Name_& operator=(_Name_ const& other) = default;                                                             \
-                                                                                                                  \
-    decltype(auto) _Getter_() const                                                                               \
-    {                                                                                                             \
-      if constexpr (std::same_as<_ConcreteType_, std::span<std::byte>>) {                                         \
-        return *mColumnIterator;                                                                                  \
-      } else {                                                                                                    \
-        static std::byte* payload = nullptr;                                                                      \
-        static _ConcreteType_* deserialised = nullptr;                                                            \
-        static TClass* c = TClass::GetClass(#_ConcreteType_);                                                     \
-        auto span = *mColumnIterator;                                                                             \
-        if (payload != (std::byte*)span.data()) {                                                                 \
-          payload = (std::byte*)span.data();                                                                      \
-          delete deserialised;                                                                                    \
-          TBufferFile f(TBufferFile::EMode::kRead, span.size(), (char*)span.data(), kFALSE);                      \
-          deserialised = (_ConcreteType_*)soa::extractCCDBPayload((char*)payload, span.size(), c, "ccdb_object"); \
-        }                                                                                                         \
-        return *deserialised;                                                                                     \
-      }                                                                                                           \
-    }                                                                                                             \
-                                                                                                                  \
-    decltype(auto)                                                                                                \
-      get() const                                                                                                 \
-    {                                                                                                             \
-      return _Getter_();                                                                                          \
-    }                                                                                                             \
+#define DECLARE_SOA_CCDB_COLUMN_FULL(_Name_, _Label_, _Getter_, _ConcreteType_, _CCDBQuery_, _RunDependent_, ...)      \
+  struct _Name_ : o2::soa::Column<int64_t[3], _Name_> {                                                                \
+    static constexpr const char* mLabel = _Label_;                                                                     \
+    static constexpr const char* query = _CCDBQuery_;                                                                  \
+    /* How the object is keyed in CCDB: 0 queries by timestamp alone, 1 additionally sends */                          \
+    /* the run number as "runNumber" metadata (o2::ccdb run-dependent objects), 2 uses the */                          \
+    /* run number in place of the timestamp. A non-zero value needs the column's table to  */                          \
+    /* be uniform in the run number, since that is where the run comes from.               */                          \
+    static constexpr int run_dependent = _RunDependent_;                                                               \
+    static constexpr const uint32_t hash = compile_time_hash(namespace_prefix<_Name_>(), std::string_view{#_Getter_}); \
+    static constexpr bool needs_ptr_rec = true;                                                                        \
+    /* Post-deserialisation fixup for objects which are not usable straight out of the ROOT */                         \
+    /* streamer, e.g. FlatObjects whose internal pointers must be rectified first. Runs on   */                        \
+    /* the receiving device, once per (re)deserialisation, before the object is ever handed  */                        \
+    /* out. Returns the object to cache: a finaliser returning a different instance owns     */                        \
+    /* disposing of the one it was given.                                                    */                        \
+    using finaliser_t = _ConcreteType_* (*)(_ConcreteType_*);                                                          \
+    static constexpr finaliser_t finalise = __VA_ARGS__;                                                               \
+    std::function<std::byte*(fair::mq::shmem::MetaHeader&&)> const* ptrRec = nullptr;                                  \
+    using base = o2::soa::Column<int64_t[3], _Name_>;                                                                  \
+    using type = int64_t[3];                                                                                           \
+    using column_t = _Name_;                                                                                           \
+    _Name_(arrow::ChunkedArray const* column)                                                                          \
+      : o2::soa::Column<int64_t[3], _Name_>(o2::soa::ColumnIterator<int64_t[3]>(column))                               \
+    {                                                                                                                  \
+    }                                                                                                                  \
+                                                                                                                       \
+    _Name_() = default;                                                                                                \
+    _Name_(_Name_ const& other) = default;                                                                             \
+    _Name_& operator=(_Name_ const& other) = default;                                                                  \
+                                                                                                                       \
+    decltype(auto) _Getter_() const                                                                                    \
+    {                                                                                                                  \
+      auto& [handle, segment, size] = *mColumnIterator;                                                                \
+      auto span = std::span<std::byte>{(*ptrRec)(fair::mq::shmem::MetaHeader{                                          \
+                                         static_cast<size_t>(size),                                                    \
+                                         0, handle, 0, 0,                                                              \
+                                         static_cast<uint16_t>(segment), true}),                                       \
+                                       static_cast<size_t>(size)};                                                     \
+      if constexpr (std::same_as<_ConcreteType_, std::span<std::byte>>) {                                              \
+        return span;                                                                                                   \
+      } else {                                                                                                         \
+        static std::byte* payload = nullptr;                                                                           \
+        static _ConcreteType_* deserialised = nullptr;                                                                 \
+        static TClass* c = TClass::GetClass(#_ConcreteType_);                                                          \
+        if (payload != (std::byte*)span.data()) {                                                                      \
+          payload = (std::byte*)span.data();                                                                           \
+          delete deserialised;                                                                                         \
+          TBufferFile f(TBufferFile::EMode::kRead, span.size(), (char*)span.data(), kFALSE);                           \
+          auto* streamed = (_ConcreteType_*)soa::extractCCDBPayload((char*)payload, span.size(), c, "ccdb_object");    \
+          if (!streamed) {                                                                                             \
+            LOGP(fatal,                                                                                                \
+                 "Could not deserialise a {} from the CCDB payload for {} ({} bytes). Check the configured "           \
+                 "path (option \"ccdb:{}\") and that the object exists for this timestamp.",                           \
+                 #_ConcreteType_, _CCDBQuery_, span.size(), _Label_);                                                  \
+          }                                                                                                            \
+          deserialised = finalise(streamed);                                                                           \
+        }                                                                                                              \
+        return *deserialised;                                                                                          \
+      }                                                                                                                \
+    }                                                                                                                  \
+                                                                                                                       \
+    decltype(auto)                                                                                                     \
+      get() const                                                                                                      \
+    {                                                                                                                  \
+      return _Getter_();                                                                                               \
+    }                                                                                                                  \
   };
 
-#define DECLARE_SOA_CCDB_COLUMN(_Name_, _Getter_, _ConcreteType_, _CCDBQuery_) \
-  DECLARE_SOA_CCDB_COLUMN_FULL(_Name_, "f" #_Name_, _Getter_, _ConcreteType_, _CCDBQuery_)
+/* Conventional label, and the object used exactly as the ROOT streamer produced it. Reach
+   for DECLARE_SOA_CCDB_COLUMN_FULL when it needs finalising first — a FlatObject whose
+   pointers must be rectified, say. Its finaliser is the trailing argument, so commas in a
+   lambda body are absorbed by __VA_ARGS__. */
+#define DECLARE_SOA_CCDB_COLUMN(_Name_, _Getter_, _ConcreteType_, _CCDBQuery_)                \
+  DECLARE_SOA_CCDB_COLUMN_FULL(_Name_, "f" #_Name_, _Getter_, _ConcreteType_, _CCDBQuery_, 0, \
+                               [](_ConcreteType_* ccdbObject) { return ccdbObject; })
 
 #define DECLARE_SOA_COLUMN(_Name_, _Getter_, _Type_) \
   DECLARE_SOA_COLUMN_FULL(_Name_, _Getter_, _Type_, "f" #_Name_)
@@ -2585,7 +2523,7 @@ consteval static std::string_view namespace_prefix()
   [[maybe_unused]] static constexpr o2::framework::expressions::BindingNode _Getter_ { _Label_, _Name_::hash, o2::framework::expressions::selectArrowType<_Type_>() }
 
 #define DECLARE_SOA_EXPRESSION_COLUMN(_Name_, _Getter_, _Type_, _Expression_) \
-  DECLARE_SOA_EXPRESSION_COLUMN_FULL(_Name_, _Getter_, _Type_, "f" #_Name_, _Expression_);
+  DECLARE_SOA_EXPRESSION_COLUMN_FULL(_Name_, _Getter_, _Type_, "f" #_Name_, _Expression_)
 
 /// A configurable 'expression' column. i.e. a column that can be calculated from other
 /// columns with gandiva based on dynamically supplied C++ expression or a string definition.
@@ -3237,6 +3175,7 @@ consteval auto getIndexTargets()
 #define DECLARE_SOA_TABLE_METADATA_TRAIT(_Name_, _Desc_, _Version_) \
   template <>                                                       \
   struct MetadataTrait<Hash<_Desc_ "/" #_Version_ ""_h>> {          \
+    static constexpr void isMetadataTrait() {};                     \
     using metadata = _Name_##Metadata;                              \
   };
 
@@ -3247,6 +3186,7 @@ consteval auto getIndexTargets()
   using _Name_ = _Name_##From<Hash<_Origin_ ""_h>>;                                             \
   template <>                                                                                   \
   struct MetadataTrait<Hash<_Desc_ "/" #_Version_ ""_h>> {                                      \
+    static constexpr void isMetadataTrait() {};                                                 \
     using metadata = _Name_##Metadata;                                                          \
   };
 
@@ -3268,8 +3208,8 @@ consteval auto getIndexTargets()
   DECLARE_SOA_TABLE_FULL(_Name_, #_Name_, _Origin_, _Desc_, __VA_ARGS__)
 
 #define DECLARE_SOA_TABLE_VERSIONED(_Name_, _Origin_, _Desc_, _Version_, ...) \
-  O2HASH(#_Name_);                                                            \
-  DECLARE_SOA_TABLE_METADATA(_Name_, _Desc_, _Version_, __VA_ARGS__);         \
+  O2HASH(#_Name_)                                                             \
+  DECLARE_SOA_TABLE_METADATA(_Name_, _Desc_, _Version_, __VA_ARGS__)          \
   DECLARE_SOA_TABLE_FULL_VERSIONED_(_Name_, #_Name_, _Origin_, _Desc_, _Version_)
 
 #define DECLARE_SOA_TABLE_STAGED_VERSIONED(_BaseName_, _Desc_, _Version_, ...) \
@@ -3280,7 +3220,8 @@ consteval auto getIndexTargets()
   using Stored##_BaseName_##Metadata = _BaseName_##Metadata;                   \
   DECLARE_SOA_TABLE_METADATA_TRAIT(_BaseName_, _Desc_, _Version_);             \
   DECLARE_SOA_STAGE(_BaseName_, "AOD", _Desc_, _Version_);                     \
-  DECLARE_SOA_STAGE(Stored##_BaseName_, "AOD1", _Desc_, _Version_);
+  DECLARE_SOA_STAGE(Stored##_BaseName_, "AOD1", _Desc_, _Version_);            \
+  using StoredEMB##_BaseName_ = Stored##_BaseName_##From<o2::aod::Hash<"EMB"_h>>;
 
 #define DECLARE_SOA_TABLE_STAGED(_BaseName_, _Desc_, ...) \
   DECLARE_SOA_TABLE_STAGED_VERSIONED(_BaseName_, _Desc_, 0, __VA_ARGS__);
@@ -3306,6 +3247,7 @@ consteval auto getIndexTargets()
   };                                                                                                                            \
   template <>                                                                                                                   \
   struct MetadataTrait<o2::aod::Hash<_Desc_ "/" #_Version_ ""_h>> {                                                             \
+    static constexpr void isMetadataTrait() {};                                                                                 \
     using metadata = _Name_##ExtensionMetadata;                                                                                 \
   };                                                                                                                            \
   template <typename O>                                                                                                         \
@@ -3340,6 +3282,7 @@ consteval auto getIndexTargets()
   };                                                                                                                                  \
   template <>                                                                                                                         \
   struct MetadataTrait<o2::aod::Hash<_Desc_ "/" #_Version_ ""_h>> {                                                                   \
+    static constexpr void isMetadataTrait() {};                                                                                       \
     using metadata = _Name_##CfgExtensionMetadata;                                                                                    \
   };                                                                                                                                  \
   template <typename O>                                                                                                               \
@@ -3361,13 +3304,13 @@ consteval auto getIndexTargets()
     template <o2::aod::is_origin_hash O = o2::aod::Hash<"AOD"_h>>                                                                                   \
     static consteval auto generateSources()                                                                                                         \
     {                                                                                                                                               \
-      return []<soa::is_index_column... Cs>(framework::pack<Cs...>) {                                                                               \
+      return []<soa::is_index_column... Cs>(framework::pack<Cs...>) consteval {                                                                     \
         constexpr auto first = o2::soa::mergeOriginals<typename Cs::binding_t...>();                                                                \
         constexpr auto second = o2::aod::filterForKey<first.size(), first, Key>();                                                                  \
         return o2::aod::replaceOrigin<second.size(), second, O>();                                                                                  \
       }(framework::pack<__VA_ARGS__>{});                                                                                                            \
     }                                                                                                                                               \
-    static constexpr auto N = []<typename... Cs>(framework::pack<Cs...>) {                                                                          \
+    static constexpr auto N = []<typename... Cs>(framework::pack<Cs...>) consteval {                                                                \
       constexpr auto a = o2::soa::mergeOriginals<typename Cs::binding_t...>();                                                                      \
       return o2::aod::filterForKey<a.size(), a, Key>();                                                                                             \
     }(framework::pack<__VA_ARGS__>{})                                                                                                               \
@@ -3375,6 +3318,7 @@ consteval auto getIndexTargets()
   };                                                                                                                                                \
   template <>                                                                                                                                       \
   struct MetadataTrait<o2::aod::Hash<_Desc_ "/" #_Version_ ""_h>> {                                                                                 \
+    static constexpr void isMetadataTrait() {};                                                                                                     \
     using metadata = _Name_##Metadata;                                                                                                              \
   };                                                                                                                                                \
   template <o2::aod::is_origin_hash O>                                                                                                              \
@@ -3398,69 +3342,91 @@ consteval auto getIndexTargets()
 //
 // The columns of this table have to be CCDB_COLUMNS so that for each timestamp, we get a row
 // which points to the specified CCDB objectes described by those columns.
-#define DECLARE_SOA_TIMESTAMPED_TABLE_FULL(_Name_, _Label_, _TimestampSource_, _TimestampColumn_, _Version_, _Desc_, ...) \
-  O2HASH(_Desc_ "/" #_Version_);                                                                                          \
-  template <typename O>                                                                                                   \
-  using _Name_##TimestampFrom = soa::Table<o2::aod::Hash<_Label_ ""_h>, o2::aod::Hash<_Desc_ "/" #_Version_ ""_h>, O>;    \
-  using _Name_##Timestamp = _Name_##TimestampFrom<o2::aod::Hash<                                                          \
-    "AOD"                                                                                                                 \
-    ""_h>>;                                                                                                               \
-  struct _Name_##TimestampMetadata : TableMetadata<o2::aod::Hash<_Desc_ "/" #_Version_ ""_h>, __VA_ARGS__> {              \
-    template <typename O = o2::aod::Hash<"AOD"                                                                            \
-                                         ""_h>>                                                                           \
-    using base_table_t = _TimestampSource_##From<O>;                                                                      \
-    template <typename O = o2::aod::Hash<"AOD"                                                                            \
-                                         ""_h>>                                                                           \
-    using extension_table_t = _Name_##TimestampFrom<O>;                                                                   \
-    static constexpr const auto ccdb_urls = []<typename... Cs>(framework::pack<Cs...>) {                                  \
-      return std::array<std::string_view, sizeof...(Cs)>{Cs::query...};                                                   \
-    }(framework::pack<__VA_ARGS__>{});                                                                                    \
-    static constexpr const auto ccdb_bindings = []<typename... Cs>(framework::pack<Cs...>) {                              \
-      return std::array<std::string_view, sizeof...(Cs)>{Cs::mLabel...};                                                  \
-    }(framework::pack<__VA_ARGS__>{});                                                                                    \
-    static constexpr auto N = _TimestampSource_::originals.size();                                                        \
-    template <o2::aod::is_origin_hash O = o2::aod::Hash<"AOD"_h>>                                                         \
-    static consteval auto generateSources()                                                                               \
-    {                                                                                                                     \
-      return _TimestampSource_##From<O>::originals;                                                                       \
-    }                                                                                                                     \
-    static constexpr auto timestamp_column_label = _TimestampColumn_::mLabel;                                             \
-    /*static constexpr auto timestampColumn = _TimestampColumn_;*/                                                        \
-  };                                                                                                                      \
-  template <>                                                                                                             \
-  struct MetadataTrait<o2::aod::Hash<_Desc_ "/" #_Version_ ""_h>> {                                                       \
-    using metadata = _Name_##TimestampMetadata;                                                                           \
-  };                                                                                                                      \
-  template <typename O>                                                                                                   \
-  using _Name_##From = o2::soa::Join<_TimestampSource_, _Name_##TimestampFrom<O>>;                                        \
-  using _Name_ = _Name_##From<o2::aod::Hash<                                                                              \
-    "AOD"                                                                                                                 \
+#define DECLARE_SOA_TIMESTAMPED_TABLE_FULL(_Name_, _Label_, _TimestampSource_, _TimestampColumn_, _UniformitySource_, _UniformityColumn_, _Version_, _Desc_, ...) \
+  O2HASH(_Desc_ "/" #_Version_);                                                                                                                                  \
+  template <typename O>                                                                                                                                           \
+  using _Name_##TimestampFrom = soa::Table<o2::aod::Hash<_Label_ ""_h>, o2::aod::Hash<_Desc_ "/" #_Version_ ""_h>, O>;                                            \
+  using _Name_##Timestamp = _Name_##TimestampFrom<o2::aod::Hash<                                                                                                  \
+    "AOD"                                                                                                                                                         \
+    ""_h>>;                                                                                                                                                       \
+  struct _Name_##TimestampMetadata : TableMetadata<o2::aod::Hash<_Desc_ "/" #_Version_ ""_h>, __VA_ARGS__> {                                                      \
+    template <typename O = o2::aod::Hash<"AOD"                                                                                                                    \
+                                         ""_h>>                                                                                                                   \
+    using base_table_t = _TimestampSource_##From<O>;                                                                                                              \
+    template <typename O = o2::aod::Hash<"AOD"                                                                                                                    \
+                                         ""_h>>                                                                                                                   \
+    using extension_table_t = _Name_##TimestampFrom<O>;                                                                                                           \
+    static constexpr const auto ccdb_urls = []<typename... Cs>(framework::pack<Cs...>) consteval {                                                                \
+      return std::array<std::string_view, sizeof...(Cs)>{Cs::query...};                                                                                           \
+    }(framework::pack<__VA_ARGS__>{});                                                                                                                            \
+    static constexpr const auto ccdb_bindings = []<typename... Cs>(framework::pack<Cs...>) consteval {                                                            \
+      return std::array<std::string_view, sizeof...(Cs)>{Cs::mLabel...};                                                                                          \
+    }(framework::pack<__VA_ARGS__>{});                                                                                                                            \
+    static constexpr const auto ccdb_run_dependent = []<typename... Cs>(framework::pack<Cs...>) consteval {                                                       \
+      return std::array<int, sizeof...(Cs)>{Cs::run_dependent...};                                                                                                \
+    }(framework::pack<__VA_ARGS__>{});                                                                                                                            \
+    /* The uniformity column may live in a table other than the timestamp source (the run  */                                                                     \
+    /* number is on aod::BCs, the timestamp on aod::Timestamps). Both are handed to the     */                                                                    \
+    /* fetcher, which reads them positionally — sound because the two are row-aligned.      */                                                                    \
+    /* Row alignment cannot be checked here: ASoA encodes no type-level relation between  */                                                                      \
+    /* two tables that happen to have equal row counts (aod::BCs and aod::Timestamps have  */                                                                     \
+    /* disjoint originals). The CCDB fetcher verifies the lengths match before reading.    */                                                                     \
+    static constexpr auto N = o2::soa::mergeOriginals<_TimestampSource_, _UniformitySource_>().size();                                                            \
+    template <o2::aod::is_origin_hash O = o2::aod::Hash<"AOD"_h>>                                                                                                 \
+    static consteval auto generateSources()                                                                                                                       \
+    {                                                                                                                                                             \
+      return o2::soa::mergeOriginals<_TimestampSource_##From<O>, _UniformitySource_##From<O>>();                                                                  \
+    }                                                                                                                                                             \
+    static constexpr auto timestamp_column_label = _TimestampColumn_::mLabel;                                                                                     \
+    /* Rows sharing a uniformity value resolve to the same CCDB object, so the fetcher    */                                                                      \
+    /* need only query once per distinct value. Defaults to the timestamp column, i.e.    */                                                                      \
+    /* every distinct timestamp may yield a different object — the pre-existing behaviour.*/                                                                      \
+    static constexpr auto uniformity_column_label = _UniformityColumn_::mLabel;                                                                                   \
+    /*static constexpr auto timestampColumn = _TimestampColumn_;*/                                                                                                \
+  };                                                                                                                                                              \
+  template <>                                                                                                                                                     \
+  struct MetadataTrait<o2::aod::Hash<_Desc_ "/" #_Version_ ""_h>> {                                                                                               \
+    static constexpr void isMetadataTrait() {};                                                                                                                   \
+    using metadata = _Name_##TimestampMetadata;                                                                                                                   \
+  };                                                                                                                                                              \
+  template <typename O>                                                                                                                                           \
+  using _Name_##From = o2::soa::Join<_TimestampSource_, _Name_##TimestampFrom<O>>;                                                                                \
+  using _Name_ = _Name_##From<o2::aod::Hash<                                                                                                                      \
+    "AOD"                                                                                                                                                         \
     ""_h>>;
 
+/* Uniformity defaults to the timestamp column of the timestamp source: each distinct
+   timestamp may resolve to a different object, which is the pre-existing behaviour.
+   Pass an explicit uniformity source + column (e.g. aod::BCs / aod::bc::RunNumber) when
+   the object is constant across a coarser key: the fetcher then queries once per distinct
+   value instead of once per row. The uniformity source must be row-aligned with the
+   timestamp source, which is checked. */
 #define DECLARE_SOA_TIMESTAMPED_TABLE(_Name_, _TimestampSource_, _TimestampColumn_, _Version_, _Desc_, ...) \
   O2HASH(#_Name_ "Timestamped");                                                                            \
-  DECLARE_SOA_TIMESTAMPED_TABLE_FULL(_Name_, #_Name_ "Timestamped", _TimestampSource_, _TimestampColumn_, _Version_, _Desc_, __VA_ARGS__)
+  DECLARE_SOA_TIMESTAMPED_TABLE_FULL(_Name_, #_Name_ "Timestamped", _TimestampSource_, _TimestampColumn_, _TimestampSource_, _TimestampColumn_, _Version_, _Desc_, __VA_ARGS__)
+
+/* Short form for a table with a coarser uniformity key; unlike the CCDB column macros the
+   short form is worth keeping, because going through _FULL would also make every caller
+   hand-write the O2HASH of the label. */
+#define DECLARE_SOA_UNIFORM_TABLE(_Name_, _TimestampSource_, _TimestampColumn_, _UniformitySource_, _UniformityColumn_, _Version_, _Desc_, ...) \
+  O2HASH(#_Name_ "Timestamped");                                                                                                                \
+  DECLARE_SOA_TIMESTAMPED_TABLE_FULL(_Name_, #_Name_ "Timestamped", _TimestampSource_, _TimestampColumn_, _UniformitySource_, _UniformityColumn_, _Version_, _Desc_, __VA_ARGS__)
 
 namespace o2::soa
 {
 template <typename... Ts>
 struct Join : Table<o2::aod::Hash<"JOIN"_h>, o2::aod::Hash<"JOIN/0"_h>, o2::aod::Hash<"JOIN"_h>, Ts...> {
+  static constexpr void isJoin() {};
   using base = Table<o2::aod::Hash<"JOIN"_h>, o2::aod::Hash<"JOIN/0"_h>, o2::aod::Hash<"JOIN"_h>, Ts...>;
 
-  Join(std::shared_ptr<arrow::Table>&& table, uint64_t offset = 0)
-    : base{std::move(table), offset}
+  Join(std::vector<ArrowTableRef>&& tables)
+    : base{ArrowHelpers::joinTables(std::move(tables))}
   {
     if (this->tableSize() != 0) {
       bindInternalIndicesTo(this);
     }
   }
-  Join(std::vector<std::shared_ptr<arrow::Table>>&& tables, uint64_t offset = 0)
-    : base{ArrowHelpers::joinTables(std::move(tables), std::span{base::originalLabels}), offset}
-  {
-    if (this->tableSize() != 0) {
-      bindInternalIndicesTo(this);
-    }
-  }
+
   using base::bindExternalIndices;
   using base::bindInternalIndicesTo;
   static constexpr const uint32_t binding_origin = base::binding_origin;
@@ -3530,19 +3496,19 @@ struct Join : Table<o2::aod::Hash<"JOIN"_h>, o2::aod::Hash<"JOIN/0"_h>, o2::aod:
 
   auto rawSlice(uint64_t start, uint64_t end) const
   {
-    return self_t{{this->asArrowTable()->Slice(start, end - start + 1)}, start};
+    return self_t{{this->asArrowTableRef().slice({start, static_cast<int64_t>(end - start + 1)})}};
   }
 
   auto emptySlice() const
   {
-    return self_t{{this->asArrowTable()->Slice(0, 0)}, 0};
+    return self_t{{this->asArrowTableRef().slice({0, 0})}};
   }
 
   template <typename T>
   static consteval bool contains()
   {
-    return []<size_t... Is>(std::index_sequence<Is...>) {
-      return (std::ranges::any_of(originals, [](TableRef const& ref) { return ref.desc_hash == T::originals[Is].desc_hash; }) && ...);
+    return []<size_t... Is>(std::index_sequence<Is...>) constexpr {
+      return (std::ranges::any_of(originals, [](TableRef const& ref) constexpr { return ref.desc_hash == T::originals[Is].desc_hash; }) && ...);
     }(std::make_index_sequence<T::originals.size()>());
   }
 };
@@ -3550,11 +3516,8 @@ struct Join : Table<o2::aod::Hash<"JOIN"_h>, o2::aod::Hash<"JOIN/0"_h>, o2::aod:
 template <typename... Ts>
 constexpr auto join(Ts const&... t)
 {
-  return Join<Ts...>(ArrowHelpers::joinTables({t.asArrowTable()...}, std::span{Join<Ts...>::base::originalLabels}));
+  return Join<Ts...>({ArrowHelpers::joinTables({t.asArrowTableRef()...}, std::span{Join<Ts...>::base::originalLabels})});
 }
-
-template <typename T>
-concept is_join = framework::specialization_of_template<Join, T>;
 
 template <typename T>
 constexpr bool is_soa_join_v = is_join<T>;
@@ -3563,15 +3526,26 @@ template <typename... Ts>
 struct Concat : Table<o2::aod::Hash<"CONC"_h>, o2::aod::Hash<"CONC/0"_h>, o2::aod::Hash<"CONC"_h>, Ts...> {
   using base = Table<o2::aod::Hash<"CONC"_h>, o2::aod::Hash<"CONC/0"_h>, o2::aod::Hash<"CONC"_h>, Ts...>;
   using self_t = Concat<Ts...>;
-  Concat(std::vector<std::shared_ptr<arrow::Table>>&& tables, uint64_t offset = 0)
-    : base{ArrowHelpers::concatTables(std::move(tables)), offset}
+
+  Concat(ArrowTableRef table)
+    : base{table}
   {
     bindInternalIndicesTo(this);
   }
-  Concat(Ts const&... t, uint64_t offset = 0)
-    : base{ArrowHelpers::concatTables({t.asArrowTable()...}), offset}
+
+  Concat(std::shared_ptr<arrow::Table> table)
+    : Concat{ArrowTableRef{table}}
   {
-    bindInternalIndicesTo(this);
+  }
+
+  Concat(std::vector<ArrowTableRef>&& tables)
+    : Concat{ArrowHelpers::concatTables(std::move(tables))}
+  {
+  }
+
+  Concat(Ts const&... t)
+    : Concat{ArrowHelpers::concatTables({t.asArrowTableRef()...})}
+  {
   }
 
   using base::originals;
@@ -3597,10 +3571,14 @@ constexpr auto concat(Ts const&... t)
   return Concat<Ts...>{t...};
 }
 
+template <typename S>
+concept is_a_selection = std::same_as<std::decay_t<S>, gandiva::Selection> || std::same_as<std::decay_t<S>, SelectionVector> || std::same_as<std::decay_t<S>, std::span<int64_t const>>;
+
 template <soa::is_table T>
 class FilteredBase : public T
 {
  public:
+  static constexpr void isFilteredBase() {};
   using self_t = FilteredBase<T>;
   using table_t = typename T::table_t;
   using T::originals;
@@ -3625,34 +3603,10 @@ class FilteredBase : public T
   using unfiltered_iterator = T::template iterator_template_o<DefaultIndexPolicy, self_t>;
   using const_iterator = iterator;
 
-  FilteredBase(std::vector<std::shared_ptr<arrow::Table>>&& tables, gandiva::Selection const& selection, uint64_t offset = 0)
-    : T{std::move(tables), offset},
-      mSelectedRows{getSpan(selection)}
+  FilteredBase(std::vector<ArrowTableRef>&& tables, is_a_selection auto selection)
+    : T{std::move(tables)}
   {
-    if (this->tableSize() != 0) {
-      mFilteredBegin = table_t::filtered_begin(mSelectedRows);
-    }
-    resetRanges();
-    mFilteredBegin.bindInternalIndices(this);
-  }
-
-  FilteredBase(std::vector<std::shared_ptr<arrow::Table>>&& tables, SelectionVector&& selection, uint64_t offset = 0)
-    : T{std::move(tables), offset},
-      mSelectedRowsCache{std::move(selection)},
-      mCached{true}
-  {
-    mSelectedRows = std::span{mSelectedRowsCache};
-    if (this->tableSize() != 0) {
-      mFilteredBegin = table_t::filtered_begin(mSelectedRows);
-    }
-    resetRanges();
-    mFilteredBegin.bindInternalIndices(this);
-  }
-
-  FilteredBase(std::vector<std::shared_ptr<arrow::Table>>&& tables, std::span<int64_t const> const& selection, uint64_t offset = 0)
-    : T{std::move(tables), offset},
-      mSelectedRows{selection}
-  {
+    adoptSelection(selection);
     if (this->tableSize() != 0) {
       mFilteredBegin = table_t::filtered_begin(mSelectedRows);
     }
@@ -3704,7 +3658,7 @@ class FilteredBase : public T
 
   [[nodiscard]] int64_t tableSize() const
   {
-    return table_t::asArrowTable()->num_rows();
+    return this->asArrowTableRef().range.size;
   }
 
   auto const& getSelectedRows() const
@@ -3717,12 +3671,12 @@ class FilteredBase : public T
     SelectionVector newSelection;
     newSelection.resize(static_cast<int64_t>(end - start + 1));
     std::iota(newSelection.begin(), newSelection.end(), start);
-    return self_t{{this->asArrowTable()}, std::move(newSelection), 0};
+    return self_t{{this->asArrowTableRef()}, std::move(newSelection)};
   }
 
   auto emptySlice() const
   {
-    return self_t{{this->asArrowTable()}, SelectionVector{}, 0};
+    return self_t{{this->asArrowTableRef()}, SelectionVector{}};
   }
 
   static inline auto getSpan(gandiva::Selection const& sel)
@@ -3805,41 +3759,21 @@ class FilteredBase : public T
     return static_cast<int>(std::distance(mSelectedRows.begin(), locate));
   }
 
-  void sumWithSelection(SelectionVector const& selection)
+  void sumWithSelection(is_a_selection auto selection)
   {
     mCached = true;
     SelectionVector rowsUnion;
-    std::set_union(mSelectedRows.begin(), mSelectedRows.end(), selection.begin(), selection.end(), std::back_inserter(rowsUnion));
+    std::ranges::set_union(mSelectedRows, selection, std::back_inserter(rowsUnion));
     mSelectedRowsCache.clear();
     mSelectedRowsCache = rowsUnion;
     resetRanges();
   }
 
-  void intersectWithSelection(SelectionVector const& selection)
+  void intersectWithSelection(is_a_selection auto selection)
   {
     mCached = true;
     SelectionVector intersection;
-    std::set_intersection(mSelectedRows.begin(), mSelectedRows.end(), selection.begin(), selection.end(), std::back_inserter(intersection));
-    mSelectedRowsCache.clear();
-    mSelectedRowsCache = intersection;
-    resetRanges();
-  }
-
-  void sumWithSelection(std::span<int64_t const> const& selection)
-  {
-    mCached = true;
-    SelectionVector rowsUnion;
-    std::set_union(mSelectedRows.begin(), mSelectedRows.end(), selection.begin(), selection.end(), std::back_inserter(rowsUnion));
-    mSelectedRowsCache.clear();
-    mSelectedRowsCache = rowsUnion;
-    resetRanges();
-  }
-
-  void intersectWithSelection(std::span<int64_t const> const& selection)
-  {
-    mCached = true;
-    SelectionVector intersection;
-    std::set_intersection(mSelectedRows.begin(), mSelectedRows.end(), selection.begin(), selection.end(), std::back_inserter(intersection));
+    std::ranges::set_intersection(mSelectedRows, selection, std::back_inserter(intersection));
     mSelectedRowsCache.clear();
     mSelectedRowsCache = intersection;
     resetRanges();
@@ -3848,6 +3782,11 @@ class FilteredBase : public T
   bool isCached() const
   {
     return mCached;
+  }
+
+  void setPointerReconstructor(framework::PointerReconstructor const& pointerReconstructor)
+  {
+    mFilteredBegin.setPointerReconstructor(pointerReconstructor);
   }
 
  private:
@@ -3862,6 +3801,36 @@ class FilteredBase : public T
     } else {
       mFilteredBegin.resetSelection(mSelectedRows);
     }
+  }
+
+  template <typename S>
+  inline void adoptSelection(S)
+  {
+  }
+
+  template <typename S>
+    requires(std::same_as<std::decay_t<S>, gandiva::Selection>)
+  inline void adoptSelection(S selection)
+  {
+    mSelectedRows = getSpan(selection);
+    mCached = false;
+  }
+
+  template <typename S>
+    requires(std::same_as<std::decay_t<S>, SelectionVector>)
+  inline void adoptSelection(S selection)
+  {
+    mSelectedRowsCache = std::move(selection);
+    mSelectedRows = std::span{mSelectedRowsCache};
+    mCached = true;
+  }
+
+  template <typename S>
+    requires(std::same_as<std::decay_t<S>, std::span<int64_t const>>)
+  inline void adoptSelection(S selection)
+  {
+    mSelectedRows = selection;
+    mCached = false;
   }
 
   std::span<int64_t const> mSelectedRows;
@@ -3894,23 +3863,10 @@ class Filtered : public FilteredBase<T>
     return const_iterator(this->cached_begin());
   }
 
-  Filtered(std::vector<std::shared_ptr<arrow::Table>>&& tables, gandiva::Selection const& selection, uint64_t offset = 0)
-    : FilteredBase<T>(std::move(tables), selection, offset) {}
+  Filtered(std::vector<ArrowTableRef>&& tables, is_a_selection auto selection)
+    : FilteredBase<T>{std::move(tables), std::forward<decltype(selection)>(selection)} {}
 
-  Filtered(std::vector<std::shared_ptr<arrow::Table>>&& tables, SelectionVector&& selection, uint64_t offset = 0)
-    : FilteredBase<T>(std::move(tables), std::forward<SelectionVector>(selection), offset) {}
-
-  Filtered(std::vector<std::shared_ptr<arrow::Table>>&& tables, std::span<int64_t const> const& selection, uint64_t offset = 0)
-    : FilteredBase<T>(std::move(tables), selection, offset) {}
-
-  Filtered<T> operator+(SelectionVector const& selection)
-  {
-    Filtered<T> copy(*this);
-    copy.sumWithSelection(selection);
-    return copy;
-  }
-
-  Filtered<T> operator+(std::span<int64_t const> const& selection)
+  Filtered<T> operator+(is_a_selection auto selection)
   {
     Filtered<T> copy(*this);
     copy.sumWithSelection(selection);
@@ -3922,13 +3878,7 @@ class Filtered : public FilteredBase<T>
     return operator+(other.getSelectedRows());
   }
 
-  Filtered<T> operator+=(SelectionVector const& selection)
-  {
-    this->sumWithSelection(selection);
-    return *this;
-  }
-
-  Filtered<T> operator+=(std::span<int64_t const> const& selection)
+  Filtered<T> operator+=(is_a_selection auto selection)
   {
     this->sumWithSelection(selection);
     return *this;
@@ -3939,14 +3889,7 @@ class Filtered : public FilteredBase<T>
     return operator+=(other.getSelectedRows());
   }
 
-  Filtered<T> operator*(SelectionVector const& selection)
-  {
-    Filtered<T> copy(*this);
-    copy.intersectWithSelection(selection);
-    return copy;
-  }
-
-  Filtered<T> operator*(std::span<int64_t const> const& selection)
+  Filtered<T> operator*(is_a_selection auto selection)
   {
     Filtered<T> copy(*this);
     copy.intersectWithSelection(selection);
@@ -3958,13 +3901,7 @@ class Filtered : public FilteredBase<T>
     return operator*(other.getSelectedRows());
   }
 
-  Filtered<T> operator*=(SelectionVector const& selection)
-  {
-    this->intersectWithSelection(selection);
-    return *this;
-  }
-
-  Filtered<T> operator*=(std::span<int64_t const> const& selection)
+  Filtered<T> operator*=(is_a_selection auto selection)
   {
     this->intersectWithSelection(selection);
     return *this;
@@ -3989,12 +3926,12 @@ class Filtered : public FilteredBase<T>
     SelectionVector newSelection;
     newSelection.resize(static_cast<int64_t>(end - start + 1));
     std::iota(newSelection.begin(), newSelection.end(), start);
-    return self_t{{this->asArrowTable()}, std::move(newSelection), 0};
+    return self_t{{this->asArrowTableRef()}, std::move(newSelection)};
   }
 
   auto emptySlice() const
   {
-    return self_t{{this->asArrowTable()}, SelectionVector{}, 0};
+    return self_t{{this->asArrowTableRef()}, SelectionVector{}};
   }
 
   template <typename T1>
@@ -4056,38 +3993,15 @@ class Filtered<Filtered<T>> : public FilteredBase<typename T::table_t>
     return const_iterator(this->cached_begin());
   }
 
-  Filtered(std::vector<Filtered<T>>&& tables, gandiva::Selection const& selection, uint64_t offset = 0)
-    : FilteredBase<typename T::table_t>(std::move(extractTablesFromFiltered(tables)), selection, offset)
+  Filtered(std::vector<Filtered<T>>&& tables, is_a_selection auto selection)
+    : FilteredBase<typename T::table_t>(std::move(extractTablesFromFiltered(tables)), std::forward<decltype(selection)>(selection))
   {
     for (auto& table : tables) {
       *this *= table;
     }
   }
 
-  Filtered(std::vector<Filtered<T>>&& tables, SelectionVector&& selection, uint64_t offset = 0)
-    : FilteredBase<typename T::table_t>(std::move(extractTablesFromFiltered(tables)), std::forward<SelectionVector>(selection), offset)
-  {
-    for (auto& table : tables) {
-      *this *= table;
-    }
-  }
-
-  Filtered(std::vector<Filtered<T>>&& tables, std::span<int64_t const> const& selection, uint64_t offset = 0)
-    : FilteredBase<typename T::table_t>(std::move(extractTablesFromFiltered(tables)), selection, offset)
-  {
-    for (auto& table : tables) {
-      *this *= table;
-    }
-  }
-
-  Filtered<Filtered<T>> operator+(SelectionVector const& selection)
-  {
-    Filtered<Filtered<T>> copy(*this);
-    copy.sumWithSelection(selection);
-    return copy;
-  }
-
-  Filtered<Filtered<T>> operator+(std::span<int64_t const> const& selection)
+  Filtered<Filtered<T>> operator+(is_a_selection auto selection)
   {
     Filtered<Filtered<T>> copy(*this);
     copy.sumWithSelection(selection);
@@ -4099,13 +4013,7 @@ class Filtered<Filtered<T>> : public FilteredBase<typename T::table_t>
     return operator+(other.getSelectedRows());
   }
 
-  Filtered<Filtered<T>> operator+=(SelectionVector const& selection)
-  {
-    this->sumWithSelection(selection);
-    return *this;
-  }
-
-  Filtered<Filtered<T>> operator+=(std::span<int64_t const> const& selection)
+  Filtered<Filtered<T>> operator+=(is_a_selection auto selection)
   {
     this->sumWithSelection(selection);
     return *this;
@@ -4116,14 +4024,7 @@ class Filtered<Filtered<T>> : public FilteredBase<typename T::table_t>
     return operator+=(other.getSelectedRows());
   }
 
-  Filtered<Filtered<T>> operator*(SelectionVector const& selection)
-  {
-    Filtered<Filtered<T>> copy(*this);
-    copy.intersectionWithSelection(selection);
-    return copy;
-  }
-
-  Filtered<Filtered<T>> operator*(std::span<int64_t const> const& selection)
+  Filtered<Filtered<T>> operator*(is_a_selection auto selection)
   {
     Filtered<Filtered<T>> copy(*this);
     copy.intersectionWithSelection(selection);
@@ -4135,13 +4036,7 @@ class Filtered<Filtered<T>> : public FilteredBase<typename T::table_t>
     return operator*(other.getSelectedRows());
   }
 
-  Filtered<Filtered<T>> operator*=(SelectionVector const& selection)
-  {
-    this->intersectWithSelection(selection);
-    return *this;
-  }
-
-  Filtered<Filtered<T>> operator*=(std::span<int64_t const> const& selection)
+  Filtered<Filtered<T>> operator*=(is_a_selection auto selection)
   {
     this->intersectWithSelection(selection);
     return *this;
@@ -4164,12 +4059,12 @@ class Filtered<Filtered<T>> : public FilteredBase<typename T::table_t>
     SelectionVector newSelection;
     newSelection.resize(static_cast<int64_t>(end - start + 1));
     std::iota(newSelection.begin(), newSelection.end(), start);
-    return self_t{{this->asArrowTable()}, std::move(newSelection), 0};
+    return self_t{{this->asArrowTableRef()}, std::move(newSelection)};
   }
 
   auto emptySlice() const
   {
-    return self_t{{this->asArrowTable()}, SelectionVector{}, 0};
+    return self_t{{this->asArrowTableRef()}, SelectionVector{}};
   }
 
   auto sliceByCached(framework::expressions::BindingNode const& node, int value, o2::framework::SliceCache& cache) const
@@ -4195,11 +4090,11 @@ class Filtered<Filtered<T>> : public FilteredBase<typename T::table_t>
   }
 
  private:
-  std::vector<std::shared_ptr<arrow::Table>> extractTablesFromFiltered(std::vector<Filtered<T>>& tables)
+  std::vector<ArrowTableRef> extractTablesFromFiltered(std::vector<Filtered<T>>& tables)
   {
-    std::vector<std::shared_ptr<arrow::Table>> outTables;
+    std::vector<ArrowTableRef> outTables;
     for (auto& table : tables) {
-      outTables.push_back(table.asArrowTable());
+      outTables.push_back(table.asArrowTableRef());
     }
     return outTables;
   }
@@ -4212,6 +4107,7 @@ class Filtered<Filtered<T>> : public FilteredBase<typename T::table_t>
 /// First index will be used by process() as the grouping
 template <typename L, typename D, typename O, typename Key, typename H, typename... Ts>
 struct IndexTable : Table<L, D, O> {
+  static constexpr void isIndexTable() {};
   using self_t = IndexTable<L, D, O, Key, H, Ts...>;
   using base_t = Table<L, D, O>;
   using table_t = base_t;
@@ -4234,15 +4130,13 @@ struct IndexTable : Table<L, D, O> {
      ...);
   }
 
-  IndexTable(std::shared_ptr<arrow::Table> table, uint64_t offset = 0)
-    : base_t{table, offset}
-  {
-  }
+  IndexTable(ArrowTableRef table)
+    : base_t{table} {}
 
-  IndexTable(std::vector<std::shared_ptr<arrow::Table>> tables, uint64_t offset = 0)
-    : base_t{tables[0], offset}
-  {
-  }
+  /// FIXME: this is a compatiblity for a generic constructor call with a vector
+  ///        there has to be a safer way
+  IndexTable(std::vector<ArrowTableRef>&& tables)
+    : base_t{tables[0]} {}
 
   IndexTable(IndexTable const&) = default;
   IndexTable(IndexTable&&) = default;
@@ -4257,15 +4151,11 @@ struct IndexTable : Table<L, D, O> {
 
 template <typename T, bool APPLY>
 struct SmallGroupsBase : public Filtered<T> {
+  static constexpr void isSmallGroups() {};
   static constexpr bool applyFilters = APPLY;
-  SmallGroupsBase(std::vector<std::shared_ptr<arrow::Table>>&& tables, gandiva::Selection const& selection, uint64_t offset = 0)
-    : Filtered<T>(std::move(tables), selection, offset) {}
 
-  SmallGroupsBase(std::vector<std::shared_ptr<arrow::Table>>&& tables, SelectionVector&& selection, uint64_t offset = 0)
-    : Filtered<T>(std::move(tables), std::forward<SelectionVector>(selection), offset) {}
-
-  SmallGroupsBase(std::vector<std::shared_ptr<arrow::Table>>&& tables, std::span<int64_t const> const& selection, uint64_t offset = 0)
-    : Filtered<T>(std::move(tables), selection, offset) {}
+  SmallGroupsBase(std::vector<ArrowTableRef>&& tables, is_a_selection auto selection)
+    : Filtered<T>(std::move(tables), selection) {}
 };
 
 template <typename T>
@@ -4273,11 +4163,6 @@ using SmallGroups = SmallGroupsBase<T, true>;
 
 template <typename T>
 using SmallGroupsUnfiltered = SmallGroupsBase<T, false>;
-
-template <typename T>
-concept is_smallgroups = requires {
-  []<typename B, bool A>(SmallGroupsBase<B, A>*) {}(std::declval<std::decay_t<T>*>());
-};
 } // namespace o2::soa
 
 #endif // O2_FRAMEWORK_ASOA_H_

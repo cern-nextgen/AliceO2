@@ -11,14 +11,18 @@
 
 /// @file   CosmicsMatchingSpec.cxx
 
+#include <TMap.h>
+#include <TObjString.h>
 #include <vector>
 #include <string>
 #include "TStopwatch.h"
 #include "GlobalTracking/MatchCosmics.h"
+#include "GlobalTracking/MatchCosmicsParams.h"
 #include "DataFormatsITSMFT/TopologyDictionary.h"
 #include "DataFormatsTPC/Constants.h"
 #include "ReconstructionDataFormats/GlobalTrackID.h"
 #include "Framework/ConfigParamRegistry.h"
+#include "Framework/DeviceSpec.h"
 #include "GlobalTrackingWorkflow/CosmicsMatchingSpec.h"
 #include "ReconstructionDataFormats/GlobalTrackAccessor.h"
 #include "ReconstructionDataFormats/GlobalTrackID.h"
@@ -62,7 +66,7 @@ namespace globaltracking
 class CosmicsMatchingSpec : public Task
 {
  public:
-  CosmicsMatchingSpec(std::shared_ptr<DataRequest> dr, std::shared_ptr<o2::base::GRPGeomRequest> gr, bool usePV, bool useMC) : mDataRequest(dr), mGGCCDBRequest(gr), mUsePVInfo(usePV), mUseMC(useMC) {}
+  CosmicsMatchingSpec(std::shared_ptr<DataRequest> dr, std::shared_ptr<o2::base::GRPGeomRequest> gr, GTrackID::mask_t src, GTrackID::mask_t srcPVVeto, bool usePV, bool useMC) : mDataRequest(dr), mGGCCDBRequest(gr), mSeedSources(src), mPVVetoSources(srcPVVeto), mUsePVInfo(usePV), mUseMC(useMC) {}
   ~CosmicsMatchingSpec() override = default;
   void init(InitContext& ic) final;
   void run(ProcessingContext& pc) final;
@@ -71,11 +75,14 @@ class CosmicsMatchingSpec : public Task
 
  private:
   void updateTimeDependentParams(ProcessingContext& pc);
+  void storeConfigs(ProcessingContext& pc);
   std::shared_ptr<DataRequest> mDataRequest;
   std::shared_ptr<o2::base::GRPGeomRequest> mGGCCDBRequest;
   o2::tpc::VDriftHelper mTPCVDriftHelper{};
   const o2::gpu::TPCFastTransformPOD* mCorrMap{nullptr};
   o2::globaltracking::MatchCosmics mMatching; // matching engine
+  GTrackID::mask_t mSeedSources;              // track sources used as legs
+  GTrackID::mask_t mPVVetoSources;            // sources whose PV contributors veto the legs they contain
   bool mUseMC = true;
   bool mUsePVInfo = false;
   TStopwatch mTimer;
@@ -89,6 +96,8 @@ void CosmicsMatchingSpec::init(InitContext& ic)
   mMatching.setDebugFlag(ic.options().get<int>("debug-tree-flags"));
   mMatching.setUseMC(mUseMC);
   mMatching.setUsePVInfo(mUsePVInfo);
+  mMatching.setSeedSources(mSeedSources);
+  mMatching.setPVVetoSources(mPVVetoSources);
   //
 }
 
@@ -98,13 +107,29 @@ void CosmicsMatchingSpec::run(ProcessingContext& pc)
   RecoContainer recoData;
   recoData.collectData(pc, *mDataRequest.get());
   updateTimeDependentParams(pc); // Make sure this is called after recoData.collectData, which may load some conditions
-
+  storeConfigs(pc);
   mMatching.process(recoData);
   pc.outputs().snapshot(Output{"GLO", "COSMICTRC", 0}, mMatching.getCosmicTracks());
   if (mUseMC) {
     pc.outputs().snapshot(Output{"GLO", "COSMICTRC_MC", 0}, mMatching.getCosmicTracksLbl());
   }
   mTimer.Stop();
+}
+
+void CosmicsMatchingSpec::storeConfigs(ProcessingContext& pc)
+{
+  static bool first = true;
+  if (first) {
+    first = false;
+    if (pc.services().get<const o2::framework::DeviceSpec>().inputTimesliceId == 0) {
+      const auto& conf = MatchCosmicsParams::Instance();
+      o2::conf::ConfigurableParam::write(o2::base::NameConf::getConfigOutputFileName(pc.services().get<const o2::framework::DeviceSpec>().name, conf.getName()), conf.getName());
+      TMap md;
+      md.SetOwnerKeyValue();
+      md.Add(new TObjString(conf.getName().c_str()), new TObjString(o2::conf::ConfigurableParam::asJSON(conf.getName()).c_str()));
+      pc.outputs().snapshot(Output{"META", "COSMICMATCHER", 0}, md);
+    }
+  }
 }
 
 void CosmicsMatchingSpec::updateTimeDependentParams(ProcessingContext& pc)
@@ -162,7 +187,27 @@ void CosmicsMatchingSpec::endOfStream(EndOfStreamContext& ec)
        mTimer.CpuTime(), mTimer.RealTime(), mTimer.Counter() - 1);
 }
 
-DataProcessorSpec getCosmicsMatchingSpec(GTrackID::mask_t src, bool usePV, bool useMC)
+GTrackID::mask_t getLegITSSources(GTrackID::mask_t src)
+{
+  return GTrackID::includesDet(o2::detectors::DetID::ITS, src) ? GTrackID::getSourceMask(GTrackID::ITS) & ~src : GTrackID::mask_t{};
+}
+
+GTrackID::mask_t addPVContributorParents(GTrackID::mask_t srcPVContributors)
+{
+  auto src = srcPVContributors;
+  if (src[GTrackID::ITSTPCTRDTOF]) {
+    src |= GTrackID::getSourceMask(GTrackID::ITSTPCTRD);
+  }
+  if (src[GTrackID::TPCTRDTOF]) {
+    src |= GTrackID::getSourceMask(GTrackID::TPCTRD);
+  }
+  if (src[GTrackID::ITSTPCTRD] || src[GTrackID::ITSTPCTOF]) {
+    src |= GTrackID::getSourceMask(GTrackID::ITSTPC);
+  }
+  return src;
+}
+
+DataProcessorSpec getCosmicsMatchingSpec(GTrackID::mask_t src, bool usePV, bool useMC, bool itsStag, bool useTOFClusters, GTrackID::mask_t srcPVContributors)
 {
   std::vector<OutputSpec> outputs;
   Options opts{
@@ -170,11 +215,18 @@ DataProcessorSpec getCosmicsMatchingSpec(GTrackID::mask_t src, bool usePV, bool 
     {"debug-tree-flags", VariantType::Int, 0, {"DebugFlagTypes bit-pattern for debug tree"}}};
 
   auto dataRequest = std::make_shared<DataRequest>();
+  dataRequest->setITSPerLayer(itsStag);
 
   dataRequest->requestTracks(src, useMC);
+  dataRequest->requestTracks(getLegITSSources(src), false); // the refit of legs with an ITS part reads their ITS track
   dataRequest->requestClusters(src, false); // no MC labels for clusters needed for refit only
+  if (useTOFClusters) {
+    dataRequest->requestTOFClusters(false); // TOF flight pairs of the candidate pairs (MatchCosmicsParams::tofFlightSelection)
+  }
   if (usePV) {
     dataRequest->requestPrimaryVertices(useMC);
+    // global tracks whose primary-vertex contributors veto their TPC track as a leg (MatchCosmicsParams::discardPVContributors), not legs
+    dataRequest->requestTracks(addPVContributorParents(srcPVContributors) & ~src, useMC); // same MC flag: some requests are shared with the legs
   }
 
   outputs.emplace_back("GLO", "COSMICTRC", 0, Lifetime::Timeframe);
@@ -193,11 +245,13 @@ DataProcessorSpec getCosmicsMatchingSpec(GTrackID::mask_t src, bool usePV, bool 
   o2::tpc::VDriftHelper::requestCCDBInputs(dataRequest->inputs);
   dataRequest->inputs.emplace_back("corrMap", o2::header::gDataOriginTPC, "TPCCORRMAP", 0, Lifetime::Timeframe);
 
+  outputs.emplace_back("META", "COSMICMATCHER", 0, Lifetime::Sporadic);
+
   return DataProcessorSpec{
     "cosmics-matcher",
     dataRequest->inputs,
     outputs,
-    AlgorithmSpec{adaptFromTask<CosmicsMatchingSpec>(dataRequest, ggRequest, usePV, useMC)},
+    AlgorithmSpec{adaptFromTask<CosmicsMatchingSpec>(dataRequest, ggRequest, src, usePV ? srcPVContributors : GTrackID::mask_t{}, usePV, useMC)},
     opts};
 }
 

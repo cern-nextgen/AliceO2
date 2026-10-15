@@ -24,6 +24,7 @@
 #include <sstream>
 #include <filesystem>
 #include <TGrid.h>
+#include <TSystem.h>
 
 namespace o2
 {
@@ -397,7 +398,9 @@ bool GeneratorFromEventPool::Init()
     std::random_device rd;
     mRandomEngine.seed(rd());
   }
-  mPoolFilesAvailable = setupFileUniverse(mConfig.eventPoolPath);
+  TString expPath(mConfig.eventPoolPath);
+  gSystem->ExpandPathName(expPath);
+  mPoolFilesAvailable = setupFileUniverse(expPath.Data());
 
   if (mPoolFilesAvailable.size() == 0) {
     LOG(error) << "No file found that can be used with EventPool generator";
@@ -440,7 +443,7 @@ bool checkFileName(std::string const& pathStr)
     }
     fs::path path(finalPathStr);
 
-    // Check if the filename is "eventpool.root"
+    // Check if the filename is "evtpool.root"
     return path.filename() == GeneratorFromEventPool::eventpool_filename;
   } catch (const fs::filesystem_error& e) {
     // Invalid path syntax will throw an exception
@@ -528,7 +531,26 @@ std::vector<std::string> GeneratorFromEventPool::setupFileUniverse(std::string c
     if (typeString.size() == 0) {
       return result;
     } else if (typeString.size() == 1 && typeString.front() == std::string("Type: f")) {
-      // this is a file ... simply use it
+      // this is a file:
+      // 1) list of files ==> select one of the lines and use it
+      // 2) evtpool.root  ==> use as it is
+      if (!checkFileName(path)) {
+        // Assume it is a text file containing a list of pools
+        auto tmpPath = (std::filesystem::temp_directory_path() / ("list_" + std::to_string(getpid()) + ".txt")).string();
+        auto res = TFile::Cp(Form("%s?filetype=raw", path.c_str()), tmpPath.c_str());
+        if (!res) {
+          LOG(fatal) << "Failed to copy file from AliEn: " << path;
+        } else {
+          auto files = readLines(tmpPath);
+          if (checkFileUniverse(files)) {
+            result = files;
+          } else {
+            LOG(fatal) << "The list of files in " << path << " is not valid";
+          }
+          std::filesystem::remove(tmpPath);
+        }
+        return result;
+      }
       result.push_back(mConfig.eventPoolPath);
       return result;
     } else if (typeString.size() == 1 && typeString.front() == std::string("Type: d")) {
@@ -556,7 +578,7 @@ std::vector<std::string> GeneratorFromEventPool::setupFileUniverse(std::string c
     // check if the path is a regular file
     auto is_actual_file = std::filesystem::is_regular_file(path);
     if (is_actual_file) {
-      // The files must match a criteria of being canonical paths ending with eventpool_Kine.root
+      // The files must match a criteria of being canonical paths ending with evtpool.root
       if (checkFileName(path)) {
         TFile rootfile(path.c_str(), "OPEN");
         if (!rootfile.IsZombie()) {

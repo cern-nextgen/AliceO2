@@ -129,7 +129,7 @@ void O2GPUDPLDisplaySpec::run(ProcessingContext& pc)
   }
 
   if (mDisplayStarted == false) {
-    if (mDisplay->startDisplay()) {
+    if (mDisplay->StartUnmanagedDisplay()) {
       throw std::runtime_error("Error starting event display");
     }
     mDisplayStarted = true;
@@ -143,7 +143,7 @@ void O2GPUDPLDisplaySpec::run(ProcessingContext& pc)
   ptrs.settingsTF = mTFSettings.get();
 
   if (mDisplay->show(&ptrs)) {
-    mDisplay->endDisplay();
+    mDisplay->StopUnmanagedDisplay();
     mDisplayShutDown = true;
   }
 }
@@ -153,7 +153,7 @@ void O2GPUDPLDisplaySpec::endOfStream(EndOfStreamContext& ec)
   if (mDisplayShutDown) {
     return;
   }
-  mDisplay->endDisplay();
+  mDisplay->StopUnmanagedDisplay();
   mDisplayShutDown = true;
 }
 
@@ -183,6 +183,7 @@ WorkflowSpec defineDataProcessing(ConfigContext const& cfgc)
     throw std::runtime_error("No input configured");
   }
   std::shared_ptr<DataRequest> dataRequest = std::make_shared<DataRequest>();
+  dataRequest->setITSPerLayer(o2::itsmft::DPLAlpideParamInitializer::isITSStaggeringEnabled(cfgc));
   dataRequest->requestTracks(srcTrk, useMC);
   dataRequest->requestClusters(srcCl, useMC);
 
