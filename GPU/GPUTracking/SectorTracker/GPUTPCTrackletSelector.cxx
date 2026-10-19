@@ -18,9 +18,36 @@
 #include "GPUTPCTrackParam.h"
 #include "GPUTPCTracklet.h"
 #include "GPUCommonMath.h"
+#include "GPUCommonAlgorithm.h"
 #include "MemLayout.h"
 
 using namespace o2::gpu;
+
+// Tracklets are sorted by (length, LastRow) ahead of selection (see GPUTPCTrackletSort_comp), via
+// an index permutation sorted with GPUCommonAlgorithm::sortOnDevice (host-launched, CUB
+// DeviceMergeSort) -- not the tracklet records themselves, since sortOnDevice needs a genuine
+// contiguous T* array and the SoA-stored GPUTPCTrackletSkeleton records don't have one. The actual
+// sortOnDevice call lives in GPUReconstructionCUDAKernelsSpecialize.inc (a
+// runKernelBackendTimed<GPUTPCTrackletSelector, sort> specialization, active on real CUDA/HIP
+// builds), not in Thread<sort> below -- same pattern GPUTPCGMMergerSortTracks/SortTracksQPt use,
+// and for the same reason: sortOnDevice needs __CUDACC__/__HIPCC__ actually defined in the
+// translation unit, which this plain, backend-agnostic .cxx file never has.
+template <>
+GPUdii() void GPUTPCTrackletSelector::Thread<GPUTPCTrackletSelector::sort>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& s, processorType& GPUrestrict() tracker)
+{
+#ifndef GPUCA_SPECIALIZE_THRUST_SORTS
+  // Real fallback for backends without the sortOnDevice specialization active (e.g. CPU-only
+  // builds, where __CUDACC__/__HIPCC__ are never defined) -- mirrors
+  // GPUTPCGMMerger::SortTracks/SortTracksQPt's identical #ifndef GPUCA_SPECIALIZE_THRUST_SORTS
+  // pattern. Deliberately not a no-op: a no-op fallback would leave CPU builds' tracklet
+  // visitation order diverging from a CUDA/HIP build's sortOnDevice order with no downstream
+  // re-canonicalization covering it in general (only the deterministic-mode debug sort does, and
+  // only for Tracks(), not Tracklets() itself).
+  if (iThread == 0 && iBlock == 0) {
+    GPUCommonAlgorithm::sortDeviceDynamic(tracker.TrackletSortedIndex(), tracker.TrackletSortedIndex() + *tracker.NTracklets(), GPUTPCTrackletSort_comp(tracker.Tracklets().mFirstRow, tracker.Tracklets().mLastRow));
+  }
+#endif
+}
 
 template <>
 GPUdii() void GPUTPCTrackletSelector::Thread<0>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& s, processorType& GPUrestrict() tracker)
@@ -37,9 +64,10 @@ GPUdii() void GPUTPCTrackletSelector::Thread<0>(int32_t nBlocks, int32_t nThread
   GPUTPCHitId trackHits[GPUTPCGeometry::NROWS - GPUCA_PAR_TRACKLET_SELECTOR_HITS_REG_SIZE];
   const float maxSharedFrac = tracker.Param().rec.tpc.trackletMaxSharedFraction;
 
-  for (int32_t itr = s.mItr0 + iThread; itr < s.mNTracklets; itr += s.mNThreadsTotal) {
+  for (int32_t i = s.mItr0 + iThread; i < s.mNTracklets; i += s.mNThreadsTotal) {
     GPUbarrierWarp();
 
+    const int32_t itr = tracker.TrackletSortedIndex()[i];
     GPUglobalref() MemLayout::wrapper<GPUTPCTrackletSkeleton, MemLayout::reference_restrict> tracklet = tracker.Tracklets()[itr];
 
     int32_t firstRow = tracklet.FirstRow();

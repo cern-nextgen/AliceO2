@@ -95,7 +95,7 @@ GPUdi() void GPUCommonAlgorithm::sortDeviceDynamic(T begin, T end, const S& comp
 
 #ifndef GPUCA_GPUCODE_COMPILEKERNELS
 template <class T, class S>
-GPUhi() void GPUCommonAlgorithm::sortOnDevice(auto* rec, int32_t stream, T* begin, size_t N, const S& comp)
+GPUhi() void GPUCommonAlgorithm::sortOnDevice(auto* rec, int32_t stream, T* begin, size_t N, const S& comp, void* tempMemExternal, size_t tempSizeExternal)
 {
   thrust::device_ptr<T> p(begin);
 #if 0 // Use Thrust
@@ -105,7 +105,11 @@ GPUhi() void GPUCommonAlgorithm::sortOnDevice(auto* rec, int32_t stream, T* begi
   size_t tempSize = 0;
   void* tempMem = nullptr;
   GPUChkErrS(GPUCA_CUB_NAMESPACE::DeviceMergeSort::SortKeys(tempMem, tempSize, begin, N, comp, rec->mInternals->Streams[stream]));
-  tempMem = rec->AllocateVolatileDeviceMemory(tempSize);
+  if (tempMemExternal && tempSizeExternal >= tempSize) {
+    tempMem = tempMemExternal;
+  } else {
+    tempMem = rec->AllocateVolatileDeviceMemory(tempSize);
+  }
   GPUChkErrS(GPUCA_CUB_NAMESPACE::DeviceMergeSort::SortKeys(tempMem, tempSize, begin, N, comp, rec->mInternals->Streams[stream]));
 #endif
 }

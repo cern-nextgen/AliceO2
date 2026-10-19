@@ -52,7 +52,7 @@ class GPUReconstructionCUDA : public GPUReconstructionProcessing::KernelInterfac
   struct kernelBackendMacro;
 
   template <class T, class S>
-  friend GPUh() void GPUCommonAlgorithm::sortOnDevice(auto* rec, int32_t stream, T* begin, size_t N, const S& comp);
+  friend GPUh() void GPUCommonAlgorithm::sortOnDevice(auto* rec, int32_t stream, T* begin, size_t N, const S& comp, void* tempMemExternal, size_t tempSizeExternal);
 
  protected:
   GPUReconstructionCUDAInternals* mInternals;

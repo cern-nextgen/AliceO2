@@ -140,6 +140,8 @@ GPUhd() void* GPUTPCTracker::SetPointersTracklets(void* mem)
   auto tracklet_helper = [&mem, this](auto& tracklets) -> void { computePointerWithAlignment(mem, tracklets, mNMaxTracklets); };
   ApplyRecursive{tracklet_helper}(mTracklets);
   computePointerWithAlignment(mem, mTrackletRowHits, mNMaxRowHits);
+  computePointerWithAlignment(mem, mTrackletSortedIndex, mNMaxTracklets);
+  computePointerWithAlignment(mem, mTrackletSortTempMem, TrackletSortTempMemSize(mNMaxTracklets));
   return mem;
 }
 

@@ -186,6 +186,17 @@ class GPUTPCTracker : public GPUProcessor
 
   GPUhd() GPUglobalref() auto Tracklets() const { return mTracklets; }
   GPUhd() GPUglobalref() calink* TrackletRowHits() const { return mTrackletRowHits; }
+  // Index permutation sorting Tracklets() by (length, LastRow) ahead of GPUTPCTrackletSelector --
+  // GPUCommonAlgorithm::sortOnDevice needs a genuine contiguous T* array (see
+  // GPUChainTrackingSectorTracker.cxx), which the SoA-stored GPUTPCTrackletSkeleton isn't, so a
+  // plain int32_t index array is sorted instead.
+  GPUhd() GPUglobalref() int32_t* TrackletSortedIndex() const { return mTrackletSortedIndex; }
+  // Persistent scratch for sortOnDevice's CUB temp storage (see GPUReconstructionCUDAKernelsSpecialize.inc)
+  // -- passed in explicitly instead of letting sortOnDevice fall back to AllocateVolatileDeviceMemory(),
+  // which is a single global non-reentrant allocator incompatible with calling sortOnDevice once per
+  // sector, concurrently across streams (see GPUCommonAlgorithm.h's sortOnDevice comment).
+  GPUhd() GPUglobalref() char* TrackletSortTempMem() const { return mTrackletSortTempMem; }
+  GPUhd() static constexpr size_t TrackletSortTempMemSize(uint32_t nMaxTracklets) { return 16 * (size_t)nMaxTracklets; } // generous margin over CUB's typical ~2*N*sizeof(int32_t) need
 
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NTracks() const { return &mCommonMem->nTracks; }
   GPUhd() GPUglobalref() auto Tracks() const { return mTracks; }
@@ -240,6 +251,8 @@ class GPUTPCTracker : public GPUProcessor
   GPUglobalref() GPUTPCHitId* mTrackletStartHits = nullptr;          // start hits for the tracklets
   GPUglobalref() MemLayout::interface<GPUTPCTrackletSkeleton, MemLayout::pointer, GPUTPCTrackletLayout>::type mTracklets; // tracklets
   GPUglobalref() calink* mTrackletRowHits = nullptr;                 // Hits for each Tracklet in each row
+  GPUglobalref() int32_t* mTrackletSortedIndex = nullptr;            // Index permutation sorting Tracklets() by (length, LastRow)
+  GPUglobalref() char* mTrackletSortTempMem = nullptr;               // Scratch for sortOnDevice's CUB temp storage
   GPUglobalref() MemLayout::interface<GPUTPCTrackSkeleton, MemLayout::pointer, GPUTPCTrackLayout>::type mTracks;       // reconstructed tracks
   GPUglobalref() GPUTPCHitId* mTrackHits = nullptr;                  // array of track hit numbers
 

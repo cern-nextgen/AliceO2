@@ -211,6 +211,34 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
       trk.DumpHitWeights(*mDebugFile);
     }
 
+    // Sort tracklets by (length, LastRow) ahead of GPUTPCTrackletSelector, so nearby threads in a
+    // warp process tracklets with similar remaining select-loop trip counts (see
+    // GPUTPCTrackletSort_comp). The actual sort runs via sortOnDevice (CUB DeviceMergeSort) on a
+    // plain int32_t index permutation -- not the tracklet records themselves, since sortOnDevice
+    // needs a genuine contiguous T* array and the SoA-stored tracklet records don't have one. The
+    // sortOnDevice call itself lives in GPUReconstructionCUDAKernelsSpecialize.inc, as a
+    // runKernelBackendTimed<GPUTPCTrackletSelector, sort> specialization -- NOT inline here. This
+    // .cxx file is plain, backend-agnostic C++, compiled by a normal host compiler, never by nvcc,
+    // so GPUCA_SPECIALIZE_THRUST_SORTS (which depends on __CUDACC__/__HIPCC__ being defined) is
+    // never true here; a guard here would just compile out silently, same reason every other real
+    // sort in this codebase (GPUTPCGMMergerSortTracks/SortTracksQPt, GPUTPCGMO2Output::sort) puts
+    // its sortOnDevice call there instead of in its own .cxx call site.
+    //
+    // sortOnDevice needs the tracklet count on the host, but GPUTPCTrackletConstructor just wrote
+    // it on the device (it's a compacted count, <= nStartHits, since StoreTracklet can reject a
+    // seed) -- transfer just this sector's tiny common-memory struct and wait on it, the same
+    // pattern GPUTPCGMMergerSortTracks already uses. This is a small, targeted host wait on one
+    // sector's own transfer, not a full kernel/stream sync, and since sectors are dispatched across
+    // multiple host threads (runParallelOuterLoop), it only stalls the one host thread handling
+    // this sector. Safe to reuse mEvents->sector[iSector] here since it's recorded again later in
+    // this same function for its existing purpose, within one sector's own serial instruction stream.
+    TransferMemoryResourceLinkToHost(RecoStep::TPCSectorTracking, trk.MemoryResCommon(), useStream, &mEvents->sector[iSector]);
+    int32_t waitForTrackletCount = 1;
+    CondWaitEvent(waitForTrackletCount, &mEvents->sector[iSector]);
+
+    runKernel<GPUitoa>(GetGridAutoStep(useStream, RecoStep::TPCSectorTracking), trkShadow.TrackletSortedIndex(), (uint64_t)*trk.NTracklets());
+    runKernel<GPUTPCTrackletSelector, GPUTPCTrackletSelector::sort>({GetGrid(1, 1, useStream), {iSector}});
+
     runKernel<GPUTPCTrackletSelector>({GetGridAuto(useStream), {iSector}});
     runKernel<GPUTPCExtrapolationTrackingCopyNumbers>({{1, -ThreadCount(), useStream}, {iSector}}, 1);
     if (GetProcessingSettings().deterministicGPUReconstruction) {

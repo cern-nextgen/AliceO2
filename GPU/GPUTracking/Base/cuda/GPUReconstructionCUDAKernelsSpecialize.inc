@@ -47,6 +47,22 @@ inline void GPUCA_M_CAT(GPUReconstruction, GPUCA_GPUTYPE)::runKernelBackendTimed
 {
   GPUCommonAlgorithm::sortOnDevice(this, _xyz.x.stream, mProcessorsShadow->tpcMerger.TrackSortO2(), processors()->tpcMerger.NOutputTracksTPCO2(), GPUTPCGMO2OutputSort_comp());
 }
+
+// Sorts GPUTPCTrackletSelector's tracklet-index permutation by (length, LastRow), via sortOnDevice
+// (sortOnDevice needs a contiguous T* array; the SoA-stored GPUTPCTrackletSkeleton records don't
+// have one -- see GPUTPCTrackletSelector.cxx/GPUChainTrackingSectorTracker.cxx). Uses the named
+// GPUTPCTrackletSort_comp functor (GPUTPCTrackletSelector.h), capturing only the plain
+// mFirstRow/mLastRow leaf pointers -- not the multi-pointer SoA wrapper Tracklets() itself returns,
+// and not an inline lambda -- same reasons documented next to GPUTPCExtrapolationCandidateRowIndex_comp.
+template <>
+inline void GPUCA_M_CAT(GPUReconstruction, GPUCA_GPUTYPE)::runKernelBackendTimed<GPUTPCTrackletSelector, GPUTPCTrackletSelector::sort>(const krnlSetupTime& _xyz)
+{
+  const uint32_t iSector = _xyz.y.index;
+  GPUTPCTracker& trk = processors()->tpcTrackers[iSector];
+  GPUTPCTracker& trkShadow = mProcessorsShadow->tpcTrackers[iSector];
+  const size_t tempSize = GPUTPCTracker::TrackletSortTempMemSize(trk.NMaxTracklets());
+  GPUCommonAlgorithm::sortOnDevice(this, _xyz.x.stream, trkShadow.TrackletSortedIndex(), (size_t)*trk.NTracklets(), GPUTPCTrackletSort_comp(trkShadow.Tracklets().mFirstRow, trkShadow.Tracklets().mLastRow), trkShadow.TrackletSortTempMem(), tempSize);
+}
 #endif // GPUCA_SPECIALIZE_THRUST_SORTS
 
 template <>
