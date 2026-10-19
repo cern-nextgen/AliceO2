@@ -110,7 +110,7 @@ void GPUTPCTracker::RegisterMemoryAllocation()
     mMemoryResTracklets = mRec->RegisterMemoryAllocation(this, &GPUTPCTracker::SetPointersTracklets, type | GPUMemoryResource::MEMORY_STACK, "TPCTrackerTracklets");
   }
   mMemoryResOutput = mRec->RegisterMemoryAllocation(this, &GPUTPCTracker::SetPointersOutput, type, "TPCTrackerTracks"); // TODO: Ideally this should eventually go on the stack, so that we can free it after the first phase of track merging
-  mRec->RegisterMemoryAllocation(this, &GPUTPCTracker::SetPointersExtrapolationCandidates, type, "TPCTrackerExtrapCandidates");
+  mMemoryResExtrapCandidates = mRec->RegisterMemoryAllocation(this, &GPUTPCTracker::SetPointersExtrapolationCandidates, type, "TPCTrackerExtrapCandidates");
 }
 
 namespace {

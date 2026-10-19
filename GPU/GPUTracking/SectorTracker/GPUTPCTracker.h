@@ -122,6 +122,7 @@ class GPUTPCTracker : public GPUProcessor
   int16_t MemoryResCommon() const { return mMemoryResCommon; }
   int16_t MemoryResTracklets() const { return mMemoryResTracklets; }
   int16_t MemoryResOutput() const { return mMemoryResOutput; }
+  int16_t MemoryResExtrapCandidates() const { return mMemoryResExtrapCandidates; }
   int16_t MemoryResSectorScratch() const { return mMemoryResSectorScratch; }
 
   void SetMaxData(const GPUTrackingInOutPointers& io);
@@ -249,6 +250,7 @@ class GPUTPCTracker : public GPUProcessor
   uint16_t mMemoryResCommon = (uint16_t)-1;
   uint16_t mMemoryResTracklets = (uint16_t)-1;
   uint16_t mMemoryResOutput = (uint16_t)-1;
+  uint16_t mMemoryResExtrapCandidates = (uint16_t)-1;
   uint16_t mMemoryResSectorScratch = (uint16_t)-1;
 
   // GPU Temp Arrays

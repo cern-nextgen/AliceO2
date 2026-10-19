@@ -41,8 +41,10 @@ class GPUTPCExtrapolationTracking : public GPUKernelTemplate
   // which GPUReconstructionCUDAKernelsSpecialize.inc intercepts on CUDA/HIP to call sortOnDevice
   // instead -- see GPUChainTrackingSectorTracker.cxx for why that call can't live inline there).
   // Thread<sort>'s own body below is the fallback for backends where that specialization isn't
-  // active: a no-op, leaving candidates unsorted there (correctness-safe, just not
-  // performance-optimized -- see GPUTPCExtrapolationCandidate.h on why candidates tolerate this).
+  // active (e.g. CPU-only builds): it still performs a real sort via sortDeviceDynamic, same
+  // #ifndef GPUCA_SPECIALIZE_THRUST_SORTS pattern as GPUTPCGMMerger::SortTracks/SortTracksQPt --
+  // needed so the extrapolated-track append order matches a CUDA/HIP build's sortOnDevice order
+  // bit-for-bit, since nothing re-sorts Tracks() after ExtrapolationTracking appends to it.
   enum K { defaultKernel = 0,
            sort = 1 };
 

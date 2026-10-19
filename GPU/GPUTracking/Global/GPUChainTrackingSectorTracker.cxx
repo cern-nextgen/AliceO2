@@ -203,6 +203,7 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
       trk.UpdateMaxData();
       AllocateRegisteredMemory(trk.MemoryResTracklets());
       AllocateRegisteredMemory(trk.MemoryResOutput());
+      AllocateRegisteredMemory(trk.MemoryResExtrapCandidates());
     }
 
     runKernel<GPUTPCTrackletConstructor>({GetGridAuto(useStream), {iSector}});

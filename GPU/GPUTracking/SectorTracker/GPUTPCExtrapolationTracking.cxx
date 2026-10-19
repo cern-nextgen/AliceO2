@@ -19,6 +19,7 @@
 #include "GPUTPCTrackLinearisation.h"
 #include "GPUTPCTracker.h"
 #include "GPUCommonMath.h"
+#include "GPUCommonAlgorithm.h"
 #include "GPUParam.inc"
 #include "MemLayout.h"
 
@@ -140,8 +141,22 @@ GPUd() int32_t GPUTPCExtrapolationTracking::PerformExtrapolationTrackingRun(GPUT
 template <>
 GPUdii() void GPUTPCExtrapolationTracking::Thread<GPUTPCExtrapolationTracking::sort>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& GPUrestrict() tracker)
 {
-  // No-op fallback for backends without the sortOnDevice specialization active (see comment
-  // above) -- candidates stay unsorted there, which is correctness-safe but not performance-optimized.
+#ifndef GPUCA_SPECIALIZE_THRUST_SORTS
+  // Real fallback for backends without the sortOnDevice specialization active (e.g. CPU-only builds,
+  // where __CUDACC__/__HIPCC__ are never defined) -- mirrors GPUTPCGMMerger::SortTracks/SortTracksQPt's
+  // identical #ifndef GPUCA_SPECIALIZE_THRUST_SORTS pattern. This can't be a no-op: although each
+  // candidate's own PerformExtrapolationTrackingRun result is independent of visitation order,
+  // GPUTPCSectorDebugSortKernels::sectorTracks (the deterministic-mode canonicalizing sort) runs
+  // before ExtrapolationTracking's consumer appends any extrapolated tracks -- it never re-sorts
+  // Tracks() afterward. So the order ConsumeExtrapolationCandidates visits candidates in directly
+  // becomes the extrapolated-track append order in the dump. Leaving candidates unsorted here would
+  // make that order (CPU: original candidate-creation order) diverge from a CUDA/HIP build's order
+  // (RowIndex-sorted via sortOnDevice), breaking bit-exact cross-backend --debug 6 comparisons.
+  if (iThread == 0 && iBlock == 0) {
+    GPUCommonAlgorithm::sortDeviceDynamic(tracker.ExtrapCandSortedIndexToLeft(), tracker.ExtrapCandSortedIndexToLeft() + *tracker.NExtrapCandToLeft(), GPUTPCExtrapolationCandidateRowIndex_comp(tracker.ExtrapCandToLeft().mRowIndex));
+    GPUCommonAlgorithm::sortDeviceDynamic(tracker.ExtrapCandSortedIndexToRight(), tracker.ExtrapCandSortedIndexToRight() + *tracker.NExtrapCandToRight(), GPUTPCExtrapolationCandidateRowIndex_comp(tracker.ExtrapCandToRight().mRowIndex));
+  }
+#endif
 }
 
 GPUd() void GPUTPCExtrapolationTracking::ConsumeExtrapolationCandidates(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, uint32_t sourceSector, GPUsharedref() GPUSharedMemory& smem, GPUTPCTracker& GPUrestrict() sectorTarget, MemLayout::wrapper<GPUTPCExtrapolationCandidateSkeleton, MemLayout::pointer> cand, GPUglobalref() const int32_t* sortedIndex, uint32_t nCand, float angle)
