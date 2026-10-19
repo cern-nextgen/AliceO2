@@ -403,62 +403,52 @@ GPUdic(2, 1) void GPUTPCTrackletConstructor::UpdateTracklet(int32_t /*nBlocks*/,
 
 GPUdic(2, 1) void GPUTPCTrackletConstructor::DoTracklet(GPUconstantref() GPUTPCTracker& GPUrestrict() tracker, GPUsharedref() GPUTPCTrackletConstructor::GPUSharedMemory& s, GPUTPCThreadMemory& GPUrestrict() r)
 {
-  int32_t iRow = 0, iRowEnd = GPUTPCGeometry::NROWS;
   MemLayout::wrapper<GPUTPCTrackParamSkeleton, MemLayout::value> tParam;
   calink rowHits[GPUTPCGeometry::NROWS];
+  // Rows outside this tracklet's active range (below mStartRow during the forward pass, above
+  // mEndRow during the backward pass) hit UpdateTracklet's early-return guards, which only skip
+  // real work -- they don't write rowHit. Left uninitialized, those slots would hold garbage
+  // instead of CALINK_INVAL, and the backward pass's own "reuse the existing hit" fallback
+  // (UpdateTracklet's `best = rowHit` path, taken when r.mNHits == 0 and no new hit was found)
+  // reads rowHits[iRow] for rows below mStartRow too -- so every slot needs a well-defined value
+  // up front, not just the ones StoreTracklet itself ends up reading.
+  for (int32_t i = 0; i < (int32_t)GPUTPCGeometry::NROWS; i++) {
+    rowHits[i] = CALINK_INVAL;
+  }
   if (r.mGo) {
     GPUTPCHitId id = tracker.TrackletStartHits()[r.mISH];
 
     r.mStartRow = r.mEndRow = r.mFirstRow = r.mLastRow = id.RowIndex();
     r.mCurrIH = id.HitIndex();
     r.mNMissed = 0;
-    iRow = r.mStartRow;
     GPUTPCTrackletConstructor::InitTracklet(tParam);
   }
   r.mStage = 0;
   r.mNHits = 0;
   CADEBUG(printf("Start tracklet\n"));
 
-#ifdef __HIPCC__ // Todo: fixme!
-  for (int32_t iStage = -1; ++iStage < 2; /*iStage++*/) {
-#else
-  for (int32_t iStage = 0; iStage < 2; iStage++) {
-#endif
-    for (; iRow != iRowEnd; iRow += r.mStage == 2 ? -1 : 1) {
-      if (!r.mGo) {
-        break;
-      }
+  for (int32_t iRow = 0; iRow < (int32_t)GPUTPCGeometry::NROWS; iRow++) {
+    if (r.mGo) {
       UpdateTracklet(0, 0, 0, 0, s, r, tracker, tParam, iRow, rowHits[iRow], rowHits);
-    }
-    if (!r.mGo && r.mStage == 2) {
-      for (; iRow >= (int32_t)r.mStartRow; iRow--) {
-        rowHits[iRow] = CALINK_INVAL;
-      }
-    }
-    if (r.mStage == 2) {
-      StoreTracklet(0, 0, 0, 0, s, r, tracker, tParam, rowHits);
     } else {
-      r.mStage = 2;
-      r.mNMissed = 0;
-      iRow = r.mEndRow;
-      iRowEnd = -1;
-      float x = tracker.Row(r.mEndRow).X();
-      {
-        float tmpY, tmpZ;
-        if (tParam.GetPropagatedYZ(tracker.Param().bzCLight, x, tmpY, tmpZ)) {
-          if (tracker.ISector() < GPUTPCGeometry::NSECTORS / 2 ? (tmpZ < 0) : (tmpZ > 0)) {
-            tmpZ = 0;
-          } else if (tracker.ISector() < GPUTPCGeometry::NSECTORS / 2 ? (tmpZ > GPUTPCGeometry::TPCLength()) : (tmpZ < -GPUTPCGeometry::TPCLength())) {
-            tmpZ = tracker.ISector() < GPUTPCGeometry::NSECTORS / 2 ? GPUTPCGeometry::TPCLength() : -GPUTPCGeometry::TPCLength();
-          }
-          tracker.GetConstantMem()->calibObjects.fastTransform->InverseTransformYZtoX(tracker.ISector(), iRow, tmpY, tmpZ, x);
-        } else {
-          r.mGo = 0;
-          continue;
-        }
+      rowHits[iRow] = CALINK_INVAL;
+    }
+  }
+
+  r.mStage = 2;
+  r.mNMissed = 0;
+  {
+    float x = tracker.Row(r.mEndRow).X();
+    float tmpY, tmpZ;
+    if (tParam.GetPropagatedYZ(tracker.Param().bzCLight, x, tmpY, tmpZ)) {
+      if (tracker.ISector() < GPUTPCGeometry::NSECTORS / 2 ? (tmpZ < 0) : (tmpZ > 0)) {
+        tmpZ = 0;
+      } else if (tracker.ISector() < GPUTPCGeometry::NSECTORS / 2 ? (tmpZ > GPUTPCGeometry::TPCLength()) : (tmpZ < -GPUTPCGeometry::TPCLength())) {
+        tmpZ = tracker.ISector() < GPUTPCGeometry::NSECTORS / 2 ? GPUTPCGeometry::TPCLength() : -GPUTPCGeometry::TPCLength();
       }
+      tracker.GetConstantMem()->calibObjects.fastTransform->InverseTransformYZtoX(tracker.ISector(), r.mEndRow, tmpY, tmpZ, x);
       if ((r.mGo = (tParam.TransportToX(x, tracker.Param().bzCLight, constants::MAX_SIN_PHI) && tParam.Filter(r.mLastY, r.mLastZ, tParam.Err2Y() * 0.5f, tParam.Err2Z() * 0.5f, constants::MAX_SIN_PHI_LOW, true)))) {
-        CADEBUG(printf("%14s: SEA BACK  ROW %3d X %8.3f -", "", iRow, tParam.X()); for (int32_t i = 0; i < 5; i++) { printf(" %8.3f", tParam.Par()[i]); } printf(" -"); for (int32_t i = 0; i < 15; i++) { printf(" %8.3f", tParam.Cov()[i]); } printf("\n"));
+        CADEBUG(printf("%14s: SEA BACK  ROW %3d X %8.3f -", "", r.mEndRow, tParam.X()); for (int32_t i = 0; i < 5; i++) { printf(" %8.3f", tParam.Par()[i]); } printf(" -"); for (int32_t i = 0; i < 15; i++) { printf(" %8.3f", tParam.Cov()[i]); } printf("\n"));
         float err2Y, err2Z;
         tracker.GetErrors2Seeding(r.mEndRow, tParam, -1.f, err2Y, err2Z); // TODO: Use correct time
         if (tParam.GetCov(0) < err2Y) {
@@ -467,11 +457,40 @@ GPUdic(2, 1) void GPUTPCTrackletConstructor::DoTracklet(GPUconstantref() GPUTPCT
         if (tParam.GetCov(2) < err2Z) {
           tParam.SetCov(2, err2Z);
         }
-        CADEBUG(printf("%14s: SEA ADJUS ROW %3d X %8.3f -", "", iRow, tParam.X()); for (int32_t i = 0; i < 5; i++) { printf(" %8.3f", tParam.Par()[i]); } printf(" -"); for (int32_t i = 0; i < 15; i++) { printf(" %8.3f", tParam.Cov()[i]); } printf("\n"));
+        CADEBUG(printf("%14s: SEA ADJUS ROW %3d X %8.3f -", "", r.mEndRow, tParam.X()); for (int32_t i = 0; i < 5; i++) { printf(" %8.3f", tParam.Par()[i]); } printf(" -"); for (int32_t i = 0; i < 15; i++) { printf(" %8.3f", tParam.Cov()[i]); } printf("\n"));
         r.mNHits -= r.mNHitsEndRow;
       }
+    } else {
+      r.mGo = 0;
     }
   }
+
+  // mEndRow is fixed for the whole backward pass (stage 2 never updates it), so rows above it are
+  // provably irrelevant -- UpdateTracklet's own internal "iRow > r.mEndRow" guard already no-ops
+  // for them, but reaching that guard still runs the function's unconditional one-shot z-shift
+  // check at its tail (triggered by r.mNHits == 8, which the backward-init block's r.mNHits -=
+  // r.mNHitsEndRow subtraction can coincidentally reproduce). Skipping the call entirely for these
+  // rows avoids spuriously re-firing that one-shot calibration a second time. This doesn't
+  // reintroduce the original variable-trip-count divergence: the loop itself still runs the same
+  // fixed NROWS iterations for every thread, and whenever UpdateTracklet *is* called, every active
+  // thread in the warp is still doing so at the same shared iRow.
+  for (int32_t iRow = (int32_t)GPUTPCGeometry::NROWS - 1; iRow >= 0; iRow--) {
+    if (iRow > (int32_t)r.mEndRow) {
+      // Forward pass already decided this row (a real hit from stage 1, or CALINK_INVAL) --
+      // never touch it here, regardless of r.mGo's current (backward-pass) value. r.mGo can be
+      // false by the time we reach here (the backward-search init can fail outright, e.g. if
+      // GetPropagatedYZ or TransportToX/Filter fails), and blindly invalidating every row in that
+      // case would also wipe out these already-correct forward-pass rows above mEndRow.
+      continue;
+    }
+    if (r.mGo) {
+      UpdateTracklet(0, 0, 0, 0, s, r, tracker, tParam, iRow, rowHits[iRow], rowHits);
+    } else {
+      rowHits[iRow] = CALINK_INVAL;
+    }
+  }
+
+  StoreTracklet(0, 0, 0, 0, s, r, tracker, tParam, rowHits);
   CADEBUG(printf("End tracklet\n"));
 }
 
