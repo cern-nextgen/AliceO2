@@ -10,7 +10,7 @@ on:
 jobs:
   benchmark:
     runs-on: ${{ matrix.runner }}
-    container: registry.cern.ch/alisw/slc9-gpu-builder@sha256:ea3443f9dfbc770e4b4bce0d1a9ecc0b7a7c16e9f76e416b796d170877220820
+    container: registry.cern.ch/alisw/slc9-gpu-builder@sha256:55ffe1c2c5fa8449403fc011e425ee983fe34ebc79799e7ab9f44eeab8aee7fc
     strategy:
       fail-fast: false
       matrix:
@@ -56,6 +56,7 @@ jobs:
       WORK_DIR: /cvmfs/alice.cern.ch
       ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
       MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
+      MODULES: Vc/1.4.5-23 fmt/11.1.2-25 ms_gsl/4.2.1-16 TBB/v2022.3.0-15 ROOT/v6-36-10-alice4-5
       STANDALONE_DIR: /root/standalone
       BENCHMARK_CSV: standalone_${{ matrix.name }}.csv
       WARMUP_RUNS: 2
@@ -69,21 +70,17 @@ jobs:
       - name: Download Files
         run: |
           mkdir -p ${STANDALONE_DIR}
-
           curl -fL --retry 3 -o ${STANDALONE_DIR}/o2-simple-GPU.out https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/o2-simple-GPU.out
-
           mkdir -p ${STANDALONE_DIR}/events
           curl -fL --retry 3 -o ${STANDALONE_DIR}/events/o2-simple.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/events/o2-simple.tar.xz
           tar -xf ${STANDALONE_DIR}/events/o2-simple.tar.xz -C ${STANDALONE_DIR}/events
-
           curl -fL --retry 3 -o ${STANDALONE_DIR}/events/50kHz.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/events/50kHz.tar.xz
           tar -xf ${STANDALONE_DIR}/events/50kHz.tar.xz -C ${STANDALONE_DIR}/events
 
       - name: Build Deterministic
         run: &build |
           source /etc/profile.d/modules.sh
-          module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
-
+          module load ${MODULES}
           mkdir -p ${STANDALONE_DIR}
           cmake -B ${STANDALONE_DIR}/build ${{ matrix.cmake_args }} -DGPUCA_DETERMINISTIC_MODE=${DETERMINISTIC_MODE} -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
           cmake --build ${STANDALONE_DIR}/build --target install -j 8
@@ -93,7 +90,7 @@ jobs:
       - name: Test Track Reconstruction
         run: |
           source /etc/profile.d/modules.sh
-          module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
+          module load ${MODULES}
           cd ${STANDALONE_DIR}
           ${STANDALONE_DIR}/ca -e o2-simple ${{ matrix.backend }} --memSize 20500000000 --seed 0 --sync --runsInit 0 --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptConstexpr 1 --RTCoptSpecialCode 1 --debug 6
           cmp ${STANDALONE_DIR}/*.out
@@ -107,7 +104,7 @@ jobs:
       - name: Benchmark Track Reconstruction
         run: |
           source /etc/profile.d/modules.sh
-          module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
+          module load ${MODULES}
           cd ${STANDALONE_DIR}
           ${TIMING_CA} --runs $(( ${{ matrix.standalone_runs }} + WARMUP_RUNS )) --debug 1 --PROCdebugCSV /root/${BENCHMARK_CSV}
           python3 ${GITHUB_WORKSPACE}/.github/scripts/profiler_standalone.py --discard ${WARMUP_RUNS} --input /root/${BENCHMARK_CSV} --output /root/summary_${BENCHMARK_CSV}
@@ -117,7 +114,7 @@ jobs:
         run: |
           dnf install -y cuda-nsight-compute-13-1
           source /etc/profile.d/modules.sh
-          module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
+          module load ${MODULES}
           cd ${STANDALONE_DIR}
           ncu --set none --metrics gpu__time_duration.avg --export /root/${{ matrix.name }} --clock-control none --force-overwrite ${TIMING_CA} --runs ${{ matrix.profiler_runs }} --debug 0  # Generates /root/${{ matrix.name }}.ncu-rep
 
@@ -127,7 +124,7 @@ jobs:
           dnf config-manager --add-repo "https://developer.download.nvidia.com/devtools/repos/rhel$(source /etc/os-release; echo ${VERSION_ID%%.*})/$(rpm --eval '%{_arch}' | sed s/aarch/arm/)/"
           dnf install --nogpgcheck -y nsight-systems-cli-2026.5.1
           source /etc/profile.d/modules.sh
-          module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
+          module load ${MODULES}
           cd ${STANDALONE_DIR}
           nsys profile -o /root/${{ matrix.name }} ${TIMING_CA} --runs ${{ matrix.profiler_runs }} --debug 0  # Generates /root/${{ matrix.name }}.nsys-rep
 
@@ -135,7 +132,7 @@ jobs:
         if: ${{ matrix.name == 'amd-mi300x' || matrix.name == 'amd-w7900' }}
         run: |
           source /etc/profile.d/modules.sh
-          module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
+          module load ${MODULES}
           cd ${STANDALONE_DIR}
           rocprofv3 --kernel-trace --stats --output-format csv pftrace -d /root -o ${{ matrix.name }} -- ${TIMING_CA} --runs ${{ matrix.profiler_runs }} --debug 0  # Generates /root/${{ matrix.name }}* .csv and .pftrace
 
@@ -144,7 +141,7 @@ jobs:
         run: |
           dnf install -y perf
           source /etc/profile.d/modules.sh
-          module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
+          module load ${MODULES}
           cd ${STANDALONE_DIR}
           perf record -g -o /root/${{ matrix.name }}.perf.data -- ${TIMING_CA} --runs ${{ matrix.profiler_runs }} --debug 0
 
@@ -162,7 +159,7 @@ jobs:
       - name: Display table on GitHub web
         run: |
           source /etc/profile.d/modules.sh
-          module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
+          module load ${MODULES}
           mkdir -p ${STANDALONE_DIR}/baseline
           rm -f ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV}
           curl -fL --retry 3 -o ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV} https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/baseline/summary_${BENCHMARK_CSV} || true
