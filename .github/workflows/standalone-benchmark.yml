@@ -28,7 +28,7 @@ jobs:
             profiler_runs: 21
             standalone_runs: 42
             cpu_gpu: "-g --memSize 20000000000"
-          - name: cern-nextgen-rtx6000
+          - name: nvidia-rtx6000
             runner: cern-nextgen-rtx6000
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=120
             profiler_runs: 42
