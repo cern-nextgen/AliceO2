@@ -20,11 +20,12 @@ proxy (ccdb_proxy.py) that handles GRID certificate auth.
 
 Usage
 -----
-    python3 hyperloop_server.py [--proxy URL] [--token TOKEN]
+    python3 hyperloop_server.py [--allow-write]
 
-Environment variables
-    HYPERLOOP_PROXY   proxy base URL  (default: http://localhost:8888)
-    HYPERLOOP_TOKEN   bearer token    (default: foo-baz)
+Credentials come from the security-proxy (see ~/src/ali-bot/security-proxy): the
+random port and the per-service "alimonitor" gate token are read from its agent
+socket (/usr/local/var/run/security-proxy/agent/agent.sock, falling back to the
+legacy ~/.security-proxy/agent.sock; override with SECURITY_PROXY_AGENT_SOCK).
 """
 
 from __future__ import annotations
@@ -36,16 +37,42 @@ import json
 import os
 import re
 import sys
-import time
 
 import httpx
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("hyperloop")
 
-PROXY = os.environ.get("HYPERLOOP_PROXY", "http://localhost:8888")
-TOKEN = os.environ.get("HYPERLOOP_TOKEN", "foo-baz")
-API = f"{PROXY}/alihyperloop-data"
+# security-proxy (see ~/src/ali-bot/security-proxy): random localhost port + a
+# per-service, daily-rotating gate token, both read from a per-user UNIX socket.
+# Everything is routed through the single "/alimonitor/" route (upstream =
+# alimonitor.cern.ch root), so one "alimonitor" token covers both the
+# alihyperloop-data API and the train-workdir artefacts.
+# The security-proxy client is shared with the sibling MCP servers; it lives one
+# directory up so all of them import the same copy (it used to be duplicated, and
+# the copies drifted). See security_proxy_client.__doc__.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import security_proxy_client as _spc  # noqa: E402
+
+_AGENT_SOCK = _spc.AGENT_SOCK
+_PROXY_SERVICE = _spc.DEFAULT_SERVICE
+
+
+def _proxy_creds() -> tuple[int, str]:
+    """(port, gate_token) for the alimonitor service from the security-proxy agent
+    socket; cached ~5 min (the proxy accepts current+previous token, so a stale
+    cached token survives the daily rotation)."""
+    return _spc.proxy_creds(_PROXY_SERVICE)
+
+
+def _alimon() -> str:
+    """Base URL of the /alimonitor/ proxy route (= alimonitor.cern.ch root)."""
+    return _spc.proxy_base_url(_PROXY_SERVICE)
+
+
+def _api() -> str:
+    """Base URL of the alihyperloop-data API (via the /alimonitor/ route)."""
+    return f"{_alimon()}/alihyperloop-data"
 
 # --- Write guardrails ---------------------------------------------------------
 # Wagon-creating tools are HARD-LOCKED to this one analysis. The destination is a
@@ -59,14 +86,14 @@ ALLOW_WRITE = os.environ.get("HYPERLOOP_ALLOW_WRITE", "").strip().lower() in ("1
 
 
 def _headers() -> dict[str, str]:
-    return {"Authorization": f"Bearer {TOKEN}"}
+    return _spc.bearer_headers(_PROXY_SERVICE)
 
 
 async def _get(path: str, params: dict | None = None) -> any:
     hdrs = _headers()
     hdrs["Accept-Encoding"] = "identity"
     async with httpx.AsyncClient(timeout=60) as client:
-        r = await client.get(f"{API}/{path}", params=params, headers=hdrs)
+        r = await client.get(f"{_api()}/{path}", params=params, headers=hdrs)
         r.raise_for_status()
         return r.json()
 
@@ -77,23 +104,18 @@ async def _get_text(path: str, params: dict | None = None) -> str:
     hdrs = _headers()
     hdrs["Accept-Encoding"] = "identity"
     async with httpx.AsyncClient(timeout=60) as client:
-        r = await client.get(f"{API}/{path}", params=params, headers=hdrs)
+        r = await client.get(f"{_api()}/{path}", params=params, headers=hdrs)
         r.raise_for_status()
         return r.text
-
-
-ALIMON = f"{PROXY}/alimonitor"
-ALIMON_TOKEN = os.environ.get("HYPERLOOP_ALIMON_TOKEN", "jalien-secret")
 
 
 async def _get_workdir_json(train_id: int, fname: str):
     """Fetch a file from a test's train-workdir (alimonitor route)."""
     b = f"{train_id // 10000:04d}"
     n = f"{train_id:08d}"
-    url = f"{ALIMON}/train-workdir/tests/{b}/{n}/{fname}"
-    hdrs = {"Authorization": f"Bearer {ALIMON_TOKEN}", "Accept-Encoding": "identity"}
+    url = f"{_alimon()}/train-workdir/tests/{b}/{n}/{fname}"
     async with httpx.AsyncClient(timeout=180) as client:
-        r = await client.get(url, headers=hdrs)
+        r = await client.get(url, headers=_headers())
         r.raise_for_status()
         return r.json()
 
@@ -399,6 +421,194 @@ async def train_wagons(train_id: int) -> str:
     return "\n".join(lines)
 
 
+async def _train_composition(train_id: int) -> tuple[str | None, list[dict]]:
+    """(dataset_name, [wagon dicts]) for a train. Shared composition fetch."""
+    t = await _get("trains/train.jsp", {"train_id": train_id})
+    ds = t.get("dataset_name")
+    wagons_ts = t.get("wagons_timestamp") or t.get("dataset_timestamp")
+    if not wagons_ts:
+        return ds, []
+    wd = await _get("trains/wagons_derived_data.jsp",
+                    {"train_id": train_id, "wagons_timestamp": wagons_ts})
+    wagon_ids = list(wd.keys()) if isinstance(wd, dict) else []
+
+    async def fetch_one(wid: str) -> dict | None:
+        try:
+            w = await _get("analysis/wagon/wagon.jsp",
+                           {"wagon_id": int(wid), "referenceTime": 0})
+            if isinstance(w, dict) and w.get("id") is not None:
+                return w
+        except Exception:
+            pass
+        return None
+
+    wagons = [w for w in await asyncio.gather(*(fetch_one(w) for w in wagon_ids)) if w]
+    return ds, wagons
+
+
+def _summarize_sig(sig) -> str:
+    """Human-readable 'Nx workflow [analysis_id]' summary of a composition signature."""
+    if not sig or not sig[1]:
+        return "(no wagons / unresolved)"
+    c = collections.Counter(f"{wf} [{aid}]" for wf, aid in sig[1])
+    return ", ".join(f"{n}x {k}" for k, n in sorted(c.items()))
+
+
+async def _match_compositions(train_ids: list[int]):
+    """Group trains by (dataset, multiset of (workflow, analysis_id)).
+
+    Returns (groups, ref_sig, matched_ids, failed_ids) where groups maps each
+    signature to its train ids, ref_sig is the largest group's signature (None
+    if nothing resolved), and matched_ids are the trains sharing it. Shared by
+    validate_train_composition and grid_job_bands so both apply the same guard.
+    """
+    async def one(tid: int):
+        try:
+            ds, wagons = await _train_composition(tid)
+            sig = (ds, tuple(sorted((w.get("work_flow_name") or "?",
+                                     w.get("analysis_id")) for w in wagons)))
+            return tid, sig
+        except Exception:
+            return tid, None
+
+    res = await asyncio.gather(*(one(t) for t in train_ids))
+    groups: dict = collections.defaultdict(list)
+    failed = []
+    for tid, sig in res:
+        (failed.append(tid) if sig is None else groups[sig].append(tid))
+    if not groups:
+        return groups, None, [], failed
+    ref = max(groups, key=lambda s: len(groups[s]))
+    return groups, ref, sorted(groups[ref]), failed
+
+
+@mcp.tool()
+async def validate_train_composition(train_ids: list[int]) -> str:
+    """Check whether a set of trains share the same dataset + wagon composition.
+
+    For each train builds a signature = its dataset plus the multiset of
+    (workflow, analysis_id) over its wagons, then groups the trains. Run this
+    before comparing trains over time (throughput / CPU trends, distribution
+    heatmaps) so confounders — a different analysis, an extra or missing wagon,
+    a different dataset — are dropped rather than silently skewing the result.
+
+    Returns the reference composition (the largest matching group), the matched
+    train list (feed it straight into the comparison), and each outlier with how
+    it differs.
+    """
+    groups, ref, matched, failed = await _match_compositions(train_ids)
+    if ref is None:
+        return "Could not resolve composition for: " + ", ".join(map(str, failed))
+    ref_ds = ref[0]
+
+    out = [f"Composition check for {len(train_ids)} trains:\n",
+           f"Reference ({len(matched)}/{len(train_ids)} match): dataset={ref_ds}",
+           f"  {_summarize_sig(ref)}",
+           f"  matched: {', '.join(map(str, matched))}\n"]
+
+    outliers = sorted([(s, ts) for s, ts in groups.items() if s != ref],
+                      key=lambda x: sorted(x[1])[0])
+    if outliers or failed:
+        out.append("Outliers (exclude from the comparison):")
+        for s, ts in outliers:
+            tag = f"dataset={s[0]}; " if s[0] != ref_ds else ""
+            out.append(f"  {', '.join(map(str, sorted(ts)))}: {tag}{_summarize_sig(s)}")
+        for tid in failed:
+            out.append(f"  {tid}: composition could not be resolved")
+        out.append("")
+    else:
+        out.append("All trains share the same composition. ✓\n")
+
+    out.append(f"matched_train_ids = {matched}")
+    return "\n".join(out)
+
+
+def _percentiles(vals: list[float], ps=(0, 5, 10, 25, 50, 75, 90, 95, 100)) -> dict:
+    """Nearest-rank percentiles of a value list (no numpy in the server env)."""
+    s = sorted(vals)
+    n = len(s)
+    out = {}
+    for p in ps:
+        if n == 1:
+            out[p] = s[0]
+            continue
+        k = (n - 1) * (p / 100.0)
+        lo, hi = int(k), min(int(k) + 1, n - 1)
+        out[p] = s[lo] + (s[hi] - s[lo]) * (k - lo)
+    return out
+
+
+@mcp.tool()
+async def grid_job_bands(train_ids: list[int], check_composition: bool = True) -> str:
+    """Per-JOB grid throughput distribution (percentile bands) across trains over time.
+
+    For each train, fetches its per-run grid results (train.jsp jobResults) and
+    builds percentile bands over the *individual jobs'* throughput_per_core — the
+    distribution behind the grid-statistics "jobs per CPU time" histogram — NOT
+    the single train-average throughput, which collapses that spread to one
+    number. Use this to watch a job-performance distribution shift over time
+    (e.g. an optimization landing) rather than chasing a noisy mean.
+
+    By default runs validate_train_composition first and keeps only the trains
+    that share the reference composition (set check_composition=False to skip the
+    guard and band every train as given). Returns a per-train percentile table
+    (p0/p10/p50/p90/p100 KB/s/core, job count) ordered by date, plus a fenced
+    ```jsonl block (one {date,train,n,tpc:[...]} per train) ready to feed a
+    band/fan-chart plotting script.
+    """
+    if check_composition and len(train_ids) > 1:
+        groups, ref, matched, failed = await _match_compositions(train_ids)
+        if ref is None:
+            return "Could not resolve composition for any train: " + \
+                   ", ".join(map(str, train_ids))
+        dropped = [t for t in train_ids if t not in matched]
+        keep = matched
+    else:
+        keep, dropped = list(train_ids), []
+
+    async def fetch(tid: int):
+        try:
+            t = await _get("trains/train.jsp", {"train_id": tid})
+            t = t[0] if isinstance(t, list) else t
+            jr = t.get("jobResults") or []
+            tpc = [j["throughput_per_core"] for j in jr
+                   if (j.get("throughput_per_core") or 0) > 0]
+            created = t.get("created")
+            date = (datetime.datetime.fromtimestamp(
+                created / 1000, datetime.timezone.utc).strftime("%Y-%m-%d")
+                if created else "?")
+            return tid, date, tpc
+        except Exception as e:
+            return tid, None, str(e)
+
+    rows = await asyncio.gather(*(fetch(t) for t in keep))
+    good = [(tid, d, tpc) for tid, d, tpc in rows if d is not None and tpc]
+    good.sort(key=lambda r: (r[1], r[0]))
+    if not good:
+        return "No usable per-job throughput for: " + ", ".join(map(str, keep))
+
+    out = ["Per-job grid throughput bands (KB/s/core), over individual jobs "
+           "(not train average):\n"]
+    if dropped:
+        out.append(f"Dropped (composition mismatch): {', '.join(map(str, dropped))}\n")
+    out.append(f"{'date':<11}{'train':>8}{'jobs':>6}"
+               f"{'p0':>8}{'p10':>8}{'p50':>8}{'p90':>8}{'p100':>8}")
+    out.append("-" * 65)
+    jsonl = []
+    for tid, date, tpc in good:
+        pc = _percentiles(tpc)
+        k = {p: pc[p] / 1e3 for p in pc}    # KB/s/core
+        out.append(f"{date:<11}{tid:>8}{len(tpc):>6}"
+                   f"{k[0]:>8.0f}{k[10]:>8.0f}{k[50]:>8.0f}{k[90]:>8.0f}{k[100]:>8.0f}")
+        jsonl.append(json.dumps({"date": date, "train": tid,
+                                 "n": len(tpc), "tpc": tpc}))
+    out.append("\nData (write to a .jsonl and feed the band plot):")
+    out.append("```jsonl")
+    out.extend(jsonl)
+    out.append("```")
+    return "\n".join(out)
+
+
 # ---------------------------------------------------------------------------
 # Analysis / wagon browsing
 #
@@ -692,6 +902,105 @@ async def analysis_trains(analysis_id: int, days: int = 14,
 
 
 @mcp.tool()
+async def composition_trend(analysis_ids: str = "21674,50446,50462,50570",
+                            dataset: str = "", days: int = 30,
+                            daily_only: bool = True) -> str:
+    """Trend of train composition & splitting over recent releases.
+
+    For the given analyses, groups their trains by package date and reports, per
+    date: number of trains, total wagons, wagons-per-train (mean / max), and how
+    many trains are in a ``decomposed`` (split-for-submission) state. Rising
+    wagons-per-train together with a falling train-count / decomposed-count means
+    more wagons are running together (fewer splits) — the downstream effect of
+    per-device memory wins, which is exactly what frees room under the per-train
+    memory budget.
+
+    Wagon count comes from the ``wagons_names`` field (comma-separated), so it is
+    approximate if that field is truncated server-side. Most informative on
+    production / splitting analyses; fixed-composition daily *test* analyses
+    (e.g. the benchmark set) never decompose, so they will look flat by design.
+
+    Args:
+        analysis_ids: comma-separated analysis ids (default: the benchmark set).
+        dataset:      if set, ignore analysis_ids and group a single dataset's
+                      trains by release — sub-trains/day = the split factor of that
+                      (cross-analysis, merged) submission. The right lens for
+                      *production* splits (a heavy merged train decomposing).
+        days:         look-back window by package date (default 30).
+        daily_only:   keep only daily builds (default True).
+    """
+    cutoff = (datetime.date.today() - datetime.timedelta(days=days)).strftime("%Y%m%d")
+    trains: list = []
+    if dataset:
+        raw = await _get("trains/all-trains.jsp", {"dataset_name": dataset})
+        trains = [t for t in (raw or []) if t.get("dataset_name") == dataset]
+        src = f"dataset '{dataset}'"
+    else:
+        aids = [int(x) for x in str(analysis_ids).split(",") if str(x).strip()]
+        for aid in aids:
+            try:
+                raw = await _get("analysis/trains-by-analyses.jsp", {"analysis_ids": aid})
+            except Exception:
+                continue
+            c = raw[0] if isinstance(raw, list) and raw else raw
+            trains.extend(c.get("trains", []) if isinstance(c, dict) else [])
+        src = f"analyses {aids}"
+    # keep only trains within the look-back window
+    kept = []
+    for t in trains:
+        d = _tag_date(t.get("package_tag"))
+        if not d or d < cutoff:
+            continue
+        if daily_only and "daily" not in (t.get("package_tag") or "").lower():
+            continue
+        kept.append((d, t))
+    # Wagon count per train. Analysis-mode trains carry `wagons_names`; the
+    # dataset-mode (all-trains.jsp) ones do not, so fetch the count per train
+    # (concurrency-bounded; capped to the most recent trains to bound load —
+    # uncounted trains contribute to the train/decomp counts but not w/train).
+    if dataset:
+        kept.sort(key=lambda dt: (dt[0], dt[1].get("id", 0)), reverse=True)
+        sem = asyncio.Semaphore(8)
+
+        async def _wcount(tid):
+            async with sem:
+                try:
+                    tj = await _get("trains/train.jsp", {"train_id": tid})
+                    ts = tj.get("wagons_timestamp") or tj.get("dataset_timestamp")
+                    if not ts:
+                        return None
+                    wd = await _get("trains/wagons_derived_data.jsp",
+                                    {"train_id": tid, "wagons_timestamp": ts})
+                    return len(wd) if isinstance(wd, dict) else None
+                except Exception:
+                    return None
+        fetched = await asyncio.gather(*[_wcount(t.get("id")) for _, t in kept[:120]])
+        counts = list(fetched) + [None] * (len(kept) - len(fetched))
+    else:
+        counts = [len([x for x in (t.get("wagons_names") or "").split(",") if x.strip()])
+                  for _, t in kept]
+    per_date: dict = collections.defaultdict(list)  # date -> [(nwagons|None, state)]
+    for (d, t), nw in zip(kept, counts):
+        per_date[d].append((nw, str(t.get("state") or "").lower()))
+    if not per_date:
+        return f"No trains for {src} in last {days}d."
+    lines = [f"Composition / split trend — {src}, last {days}d"
+             + (", daily" if daily_only else "") + ":\n",
+             f"{'date':>8}  {'trains':>6} {'wagons':>8} {'w/train':>8} {'maxw':>5} {'decomp':>7}"]
+    lines.append("-" * 54)
+    for d in sorted(per_date, reverse=True):
+        rows = per_date[d]
+        ntr = len(rows)
+        wcs = [w for w, _ in rows if w is not None]
+        tot = sum(wcs)
+        mx = max(wcs, default=0)
+        mean = tot / len(wcs) if wcs else 0.0
+        dec = sum(1 for _, s in rows if "decompos" in s or "split" in s)
+        lines.append(f"{d:>8}  {ntr:>6} {tot:>8} {mean:>8.1f} {mx:>5} {dec:>7}")
+    return "\n".join(lines)
+
+
+@mcp.tool()
 async def test_metrics(train_id: int, per_device: bool = False) -> str:
     """Resource metrics for one test train (from performanceMetrics_processed.json).
 
@@ -909,7 +1218,7 @@ async def _post_form(path: str, data: dict) -> str:
     hdrs = _headers()
     hdrs["Accept-Encoding"] = "identity"
     async with httpx.AsyncClient(timeout=60) as client:
-        r = await client.post(f"{API}/{path}", data=data, headers=hdrs)
+        r = await client.post(f"{_api()}/{path}", data=data, headers=hdrs)
         r.raise_for_status()
         return r.text
 
@@ -1043,6 +1352,117 @@ async def set_wagon_config(wagon_id: int, params: dict) -> str:
 
 
 @mcp.tool()
+async def sync_wagon(wagon_id: int) -> str:
+    """Re-synchronise a wagon's configuration against its workflow (analysis 50446).
+
+    WRITE operation. Refuses unless the wagon belongs to analysis 50446. Inert
+    unless the server was started with HYPERLOOP_ALLOW_WRITE=1.
+
+    A wagon's editable parameter list is a set of server-side rows created when the
+    wagon is made; it is NOT re-derived when a newer package adds options. So a task
+    that gains a configurable (e.g. a new CCDB column registering "ccdb:fXxx") stays
+    unconfigurable on existing wagons, and cloning does not help because a clone
+    copies the rows. This is the UI's "sync" action: it re-reads the workflow and
+    adds the missing parameters. Run it after a wagon's task gains options, then
+    set them with set_wagon_config.
+
+    Also syncs derived-data settings, mirroring what the UI does in one step.
+    """
+    if not ALLOW_WRITE:
+        return ("Refused: writes are disabled. Start the server with "
+                f"HYPERLOOP_ALLOW_WRITE=1 (locked to analysis {ALLOWED_ANALYSIS}).")
+    if not await _wagon_in_allowed(wagon_id):
+        return (f"Refused: wagon {wagon_id} is not in analysis {ALLOWED_ANALYSIS} "
+                "(or could not be verified). Writes are restricted to that analysis.")
+    try:
+        w = await _get("analysis/wagon/wagon.jsp",
+                       {"wagon_id": int(wagon_id), "referenceTime": 0})
+    except Exception as e:
+        return f"Could not read wagon {wagon_id} ({e})."
+    wf = w.get("work_flow_name", "") if isinstance(w, dict) else ""
+    if not wf:
+        return f"Refused: could not determine the workflow name of wagon {wagon_id}."
+
+    def _count_params(conf) -> int:
+        entries = conf.get("subwagons_conf", []) if isinstance(conf, dict) else []
+        return len(entries)
+
+    before = 0
+    try:
+        before = _count_params(await _get("analysis/wagon/get-subwagons-configuration.jsp",
+                                          {"lists": "subwagons_configuration",
+                                           "wagon_id": int(wagon_id), "referenceTime": 0}))
+    except Exception:
+        pass
+    params = {"wagon_id": int(wagon_id), "work_flow_name": wf}
+    try:
+        resp = await _get_text("analysis/wagon/sync-wagon.jsp", params)
+        resp_dd = await _get_text("analysis/wagon/sync-wagon-derived-data.jsp", params)
+    except Exception as e:
+        return f"Sync of wagon {wagon_id} failed ({e})."
+    # The UI treats -1 from either call as failure.
+    if resp.strip() == "-1" or resp_dd.strip() == "-1":
+        return (f"Hyperloop reported a sync failure for wagon {wagon_id} "
+                f"(workflow '{wf}'): sync={resp.strip()[:80]} "
+                f"derived-data={resp_dd.strip()[:80]}")
+    after = before
+    try:
+        after = _count_params(await _get("analysis/wagon/get-subwagons-configuration.jsp",
+                                         {"lists": "subwagons_configuration",
+                                          "wagon_id": int(wagon_id), "referenceTime": 0}))
+    except Exception:
+        pass
+    return (f"Synced wagon {wagon_id} ('{w.get('name')}') against workflow '{wf}'. "
+            f"Parameters: {before} -> {after}. Inspect with wagon_config({wagon_id}).")
+
+
+@mcp.tool()
+async def create_wagon(name: str, work_flow_name: str, package_tag: str) -> str:
+    """Create a NEW wagon in the O2 Development analysis (50446) from a workflow.
+
+    WRITE operation. HARD-LOCKED to analysis 50446, like clone_wagon: the
+    destination is baked in and there is no analysis argument. Inert unless the
+    server was started with HYPERLOOP_ALLOW_WRITE=1.
+
+    Unlike clone_wagon, this derives the configuration from `package_tag`, so the
+    wagon gets the options the workflow has in THAT package. Use it when a clone
+    would inherit a stale parameter list (see sync_wagon for fixing an existing
+    wagon instead). `package_tag` is a full tag, e.g. "daily-20260922-0000-1".
+
+    The name is always prefixed with 'Test'; you may pass it with or without.
+    """
+    if not ALLOW_WRITE:
+        return ("Refused: writes are disabled. Start the server with "
+                f"HYPERLOOP_ALLOW_WRITE=1 (locked to analysis {ALLOWED_ANALYSIS}).")
+    if not name or not work_flow_name or not package_tag:
+        return "Refused: name, work_flow_name and package_tag are all required."
+    full = name if name.startswith(WAGON_PREFIX) else WAGON_PREFIX + name
+    params = {"name": full, "package_tag": package_tag,
+              "work_flow_name": work_flow_name, "analysis_id": ALLOWED_ANALYSIS}
+    try:
+        resp = await _get_text("analysis/wagon/add-wagon.jsp", params)
+    except Exception as e:
+        return f"Wagon creation failed ({e})."
+    if resp.strip() in ("-1", ""):
+        return (f"Hyperloop refused to create '{full}' (workflow '{work_flow_name}', "
+                f"package '{package_tag}'). Response: {resp.strip()[:200]}")
+    found = ""
+    try:
+        back = await _get("analysis/wagons-by-analyses.jsp",
+                          {"analysis_ids": ALLOWED_ANALYSIS})
+        rows = back.get("wagons", []) if isinstance(back, dict) else []
+        for r in rows:
+            if r.get("name") == full:
+                found = f" (confirmed as wagon {r.get('id') or r.get('wagon_id')})"
+                break
+    except Exception:
+        pass
+    return (f"Created wagon '{full}' in analysis {ALLOWED_ANALYSIS} from workflow "
+            f"'{work_flow_name}' @ {package_tag}{found}.\n"
+            f"Server response: {resp.strip()[:200]}")
+
+
+@mcp.tool()
 async def set_wagon_dependencies(wagon_id: int, dependency_wagon_ids: list) -> str:
     """Set the dependency wagons of a wagon in O2 Development (50446).
 
@@ -1157,20 +1577,15 @@ async def subscribe_dataset(dataset: str) -> str:
 
 def main():
     import argparse
-    global PROXY, TOKEN, API, ALLOW_WRITE
+    global ALLOW_WRITE
 
     parser = argparse.ArgumentParser(description="AliHyperloop MCP server")
-    parser.add_argument("--proxy", default=PROXY, help="Proxy base URL")
-    parser.add_argument("--token", default=TOKEN, help="Bearer token")
     parser.add_argument("--allow-write", action="store_true",
                         help=("Enable the wagon-write tools (clone/configure), "
                               f"hard-locked to analysis {ALLOWED_ANALYSIS}. "
                               "Off by default; HYPERLOOP_ALLOW_WRITE=1 also enables it."))
     args = parser.parse_args()
 
-    PROXY = args.proxy
-    TOKEN = args.token
-    API = f"{PROXY}/alihyperloop-data"
     if args.allow_write:
         ALLOW_WRITE = True
 

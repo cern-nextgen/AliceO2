@@ -59,8 +59,9 @@ class IOTOFDPLDigitizerTask : o2::base::BaseDPLDigitizer
     geom->fillMatrixCache(o2::math_utils::bit2Mask(o2::math_utils::TransformType::L2G)); // make sure L2G matrices are loaded
 
     mDigitizer.setGeometry(geom);
-    mDigitizer.setChargeThreshold(-1000.f);
     mDigitizer.init();
+
+    mROMode = mDigitizer.isContinuous() ? o2::parameters::GRPObject::CONTINUOUS : o2::parameters::GRPObject::PRESENT;
   }
 
   void run(framework::ProcessingContext& pc)
@@ -90,6 +91,7 @@ class IOTOFDPLDigitizerTask : o2::base::BaseDPLDigitizer
 
     mDigitizer.setDigits(&mDigits);
     mDigitizer.setROFRecords(&mROFRecords);
+    mDigitizer.setROFRecordIR(firstIR);
     if (mWithMCTruth) {
       mDigitizer.setMCLabels(&mLabels);
     }
@@ -139,16 +141,18 @@ class IOTOFDPLDigitizerTask : o2::base::BaseDPLDigitizer
     pc.outputs().snapshot(Output{mOrigin, "DIGITSROF", 0}, mROFRecords);
     if (mWithMCTruth) {
       auto& sharedlabels = pc.outputs().make<o2::dataformats::ConstMCTruthContainer<o2::MCCompLabel>>(Output{mOrigin, "DIGITSMCTR", 0});
-      mLabelsAccum.flatten_to(sharedlabels);
+      mLabels.flatten_to(sharedlabels);
       // free space of existing label containers
       mLabels.clear_andfreememory();
-      mLabelsAccum.clear_andfreememory();
 
       // write dummy MC2ROF vector to keep writer/readers backward compatible
       // NOTE: Steer/DigitizerWorkflow/src/ITSMFTDigitizerSpec.cxx also uses dummy MC2ROF
       static std::vector<o2::itsmft::MC2ROFRecord> dummyMC2ROF;
       pc.outputs().snapshot(Output{mOrigin, "DIGITSMC2ROF", 0}, dummyMC2ROF);
     }
+
+    LOG(info) << mID.getName() << ": Sending ROMode= " << mROMode << " to GRPUpdater";
+    pc.outputs().snapshot(Output{mOrigin, "ROMode", 0}, mROMode);
 
     timer.Stop();
     LOG(info) << "Digitization took " << timer.CpuTime() << "s";
@@ -172,7 +176,6 @@ class IOTOFDPLDigitizerTask : o2::base::BaseDPLDigitizer
   std::vector<o2::itsmft::Hit> mHits{};
   std::vector<o2::itsmft::Hit>* mHitsP{&mHits};
   o2::dataformats::MCTruthContainer<o2::MCCompLabel> mLabels{};
-  o2::dataformats::MCTruthContainer<o2::MCCompLabel> mLabelsAccum{};
   std::vector<TChain*> mSimChains{};
   o2::parameters::GRPObject::ROMode mROMode = o2::parameters::GRPObject::PRESENT; // readout mode
 };

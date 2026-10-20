@@ -16,6 +16,8 @@
 #ifndef O2_GLOBAL_TRACK_ID
 #define O2_GLOBAL_TRACK_ID
 
+#include "GPUCommonDef.h"
+
 #include "GPUCommonBitSet.h"
 #include "CommonDataFormat/AbstractRef.h"
 #include "DetectorsCommonDataFormats/DetID.h"
@@ -78,8 +80,8 @@ class GlobalTrackID : public AbstractRef<25, 5, 2>
   static constexpr std::string_view NONE{"none"}; ///< keywork for no sources
   static constexpr std::string_view ALL{"all"};   ///< keywork for all sources
 #endif
-  static constexpr mask_t MASK_ALL = (1u << NSources) - 1;
-  static constexpr mask_t MASK_NONE = 0;
+  static GPUglobalconstexpr() mask_t MASK_ALL = (1u << NSources) - 1;
+  static GPUglobalconstexpr() mask_t MASK_NONE = 0;
 
   // methods for detector level manipulations
   GPUdi() static constexpr DetID::mask_t getSourceDetectorsMask(int i);
@@ -163,7 +165,7 @@ GPUconstexpr() GlobalTrackID::mask_t sMasks[GlobalTrackID::NSources] = ///< dete
     GlobalTrackID::mask_t(math_utils::bit2Mask(GlobalTrackID::MCHMID)) // Temporary ordering
 };
 
-#ifndef __OPENCL__
+#if !defined(__OPENCL__) && !defined(__METAL__)
 GPUconstexpr() GlobalTrackID::mask_t sTrackSources =
   sMasks[GlobalTrackID::ITS] | sMasks[GlobalTrackID::TPC] | sMasks[GlobalTrackID::MFT] | sMasks[GlobalTrackID::MCH] | sMasks[GlobalTrackID::ITSTPC] | sMasks[GlobalTrackID::TPCTOF] |
   sMasks[GlobalTrackID::TPCTRD] | sMasks[GlobalTrackID::MFTMCH] | sMasks[GlobalTrackID::ITSTPCTRD] | sMasks[GlobalTrackID::ITSTPCTOF] | sMasks[GlobalTrackID::TPCTRDTOF] |
@@ -175,7 +177,7 @@ GPUconstexpr() GlobalTrackID::mask_t sTrackSources =
 GPUdi() constexpr GlobalTrackID::DetID::mask_t GlobalTrackID::getSourceDetectorsMask(int i) { return globaltrackid_internal::SourceDetectorsMasks[i]; }
 GPUdi() constexpr GlobalTrackID::mask_t GlobalTrackID::getSourceMask(int s) { return globaltrackid_internal::sMasks[s]; }
 
-#ifndef __OPENCL__
+#if !defined(__OPENCL__) && !defined(__METAL__)
 GPUdi() bool GlobalTrackID::isTrackSource(int s)
 {
   return globaltrackid_internal::sTrackSources[s];

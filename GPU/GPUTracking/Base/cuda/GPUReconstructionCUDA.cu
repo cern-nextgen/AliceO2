@@ -84,9 +84,9 @@ GPUReconstructionCUDA::~GPUReconstructionCUDA()
 }
 
 static_assert(sizeof(cudaError_t) <= sizeof(int64_t) && cudaSuccess == 0);
-int32_t GPUReconstructionCUDA::GPUChkErrInternal(const int64_t error, const char* file, int32_t line) const
+int32_t GPUReconstructionCUDA::GPUChkErrInternal(const int64_t retval, const char* file, int32_t line) const
 {
-  return internal::GPUReconstructionCUDAChkErr(error, file, line);
+  return internal::GPUReconstructionCUDAChkErr(retval, file, line);
 }
 
 GPUReconstruction* GPUReconstruction_Create_CUDA(const GPUSettingsDeviceBackend& cfg) { return new GPUReconstructionCUDA(cfg); }
@@ -194,7 +194,7 @@ int32_t GPUReconstructionCUDA::InitDevice_Runtime()
 
     bool noDevice = false;
     if (bestDevice == -1) {
-      GPUWarning("No %sCUDA Device available, aborting CUDA Initialisation (Required mem: %ld)", count ? "appropriate " : "", (int64_t)mDeviceMemorySize);
+      GPUWarning("No %sCUDA Device available, aborting CUDA Initialisation (Required mem: %ld, scanned %d devices)", count ? "appropriate " : "", (int64_t)mDeviceMemorySize, count);
 #ifndef __HIPCC__
       GPUImportant("Requiring Revision %d.%d, Mem: %lu", reqVerMaj, reqVerMin, std::max<size_t>(mDeviceMemorySize, REQUIRE_MIN_MEMORY));
 #endif
@@ -228,7 +228,7 @@ int32_t GPUReconstructionCUDA::InitDevice_Runtime()
     GPUChkErrI(cudaGetDeviceProperties(&deviceProp, mDeviceId));
 
     if (GetProcessingSettings().debugLevel >= 2) {
-      GPUInfo("Using CUDA Device %s with Properties:", deviceProp.name);
+      GPUInfo("Using CUDA Device %d: %s with Properties:", bestDevice, deviceProp.name);
       GPUInfo("\ttotalGlobalMem = %ld", (uint64_t)deviceProp.totalGlobalMem);
       GPUInfo("\tsharedMemPerBlock = %ld", (uint64_t)deviceProp.sharedMemPerBlock);
       GPUInfo("\tregsPerBlock = %d", deviceProp.regsPerBlock);
@@ -594,7 +594,11 @@ void GPUReconstructionCUDA::PrintKernelOccupancies()
   int32_t maxBlocks = 0, threads = 0, suggestedBlocks = 0, nRegs = 0, sMem = 0;
   GPUChkErr(cudaSetDevice(mDeviceId));
   for (uint32_t i = 0; i < mInternals->kernelFunctions.size(); i++) {
-    GPUChkErr(cuOccupancyMaxPotentialBlockSize(&suggestedBlocks, &threads, *mInternals->kernelFunctions[i], 0, 0, 0)); // NOLINT: failure in clang-tidy
+#if !defined(__HIPCC__) || (defined(__clang_major__) && __clang_major__ < 23) // CUDA
+    GPUChkErr(cuOccupancyMaxPotentialBlockSize(&suggestedBlocks, &threads, *mInternals->kernelFunctions[i], 0, 0, 0));
+#else
+    GPUChkErr(cuOccupancyMaxPotentialBlockSize(&suggestedBlocks, &threads, *mInternals->kernelFunctions[i], 0, 0));
+#endif
     GPUChkErr(cuOccupancyMaxActiveBlocksPerMultiprocessor(&maxBlocks, *mInternals->kernelFunctions[i], threads, 0));
     GPUChkErr(cuFuncGetAttribute(&nRegs, CU_FUNC_ATTRIBUTE_NUM_REGS, *mInternals->kernelFunctions[i]));
     GPUChkErr(cuFuncGetAttribute(&sMem, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, *mInternals->kernelFunctions[i]));
@@ -631,34 +635,47 @@ void GPUReconstructionCUDA::loadKernelModules(bool perKernel)
     }                                                 \
   }
 
-void GPUReconstructionCUDA::SetONNXGPUStream(Ort::SessionOptions& session_options, int32_t stream, int32_t* deviceId)
+void GPUReconstructionCUDA::SetONNXGPUStream(Ort::SessionOptions& sessionOptions, int32_t stream, int32_t* deviceId)
 {
   GPUChkErr(cudaGetDevice(deviceId));
+
 #if !defined(__HIPCC__) && defined(ORT_CUDA_BUILD)
   const OrtApi* api = OrtGetApiBase()->GetApi(ORT_API_VERSION);
-  OrtCUDAProviderOptionsV2* cuda_options = nullptr;
-  ORTCHK(api->CreateCUDAProviderOptions(&cuda_options));
 
+#ifdef ORT_TENSORRT_BUILD
+  OrtTensorRTProviderOptionsV2* trtOptions = nullptr;
+  ORTCHK(api->CreateTensorRTProviderOptions(&trtOptions));
+
+  const std::string device = std::to_string(*deviceId);
+  const char* keys[] = {"device_id", "trt_int8_enable"};
+  const char* values[] = {device.c_str(), "1"};
+
+  ORTCHK(api->UpdateTensorRTProviderOptions(trtOptions, keys, values, sizeof(keys) / sizeof(keys[0])));
+  ORTCHK(api->UpdateTensorRTProviderOptionsWithValue(trtOptions, "user_compute_stream", mInternals->Streams[stream]));
+  ORTCHK(api->SessionOptionsAppendExecutionProvider_TensorRT_V2(sessionOptions, trtOptions)); // Register TensorRT first: it consequently has higher priority.
+  api->ReleaseTensorRTProviderOptions(trtOptions);
+#endif
+
+  // CUDA is the fallback for nodes unsupported by TensorRT.
+  OrtCUDAProviderOptionsV2* cudaOptions = nullptr;
+  ORTCHK(api->CreateCUDAProviderOptions(&cudaOptions));
   // std::vector<const char*> keys{"device_id", "gpu_mem_limit", "arena_extend_strategy", "cudnn_conv_algo_search", "do_copy_in_default_stream", "cudnn_conv_use_max_workspace", "cudnn_conv1d_pad_to_nc1d"};
   // std::vector<const char*> values{"0", "2147483648", "kSameAsRequested", "DEFAULT", "1", "1", "1"};
   // UpdateCUDAProviderOptions(cuda_options, keys.data(), values.data(), keys.size());
+  ORTCHK(api->UpdateCUDAProviderOptionsWithValue(cudaOptions, "user_compute_stream", mInternals->Streams[stream]));
+  ORTCHK(api->SessionOptionsAppendExecutionProvider_CUDA_V2(sessionOptions, cudaOptions));
+  api->ReleaseCUDAProviderOptions(cudaOptions);
 
-  // this implicitly sets "has_user_compute_stream"
-  ORTCHK(api->UpdateCUDAProviderOptionsWithValue(cuda_options, "user_compute_stream", mInternals->Streams[stream]));
-  ORTCHK(api->SessionOptionsAppendExecutionProvider_CUDA_V2(session_options, cuda_options));
-
-  // Finally, don't forget to release the provider options
-  api->ReleaseCUDAProviderOptions(cuda_options);
 #elif defined(ORT_ROCM_BUILD)
   // const auto& api = Ort::GetApi();
   // api.GetCurrentGpuDeviceId(deviceId);
-  OrtROCMProviderOptions rocm_options;
-  rocm_options.has_user_compute_stream = 1; // Indicate that we are passing a user stream
-  rocm_options.arena_extend_strategy = 0;   // kNextPowerOfTwo = 0, kSameAsRequested = 1 -> https://github.com/search?q=repo%3Amicrosoft%2Fonnxruntime%20kSameAsRequested&type=code
+  OrtROCMProviderOptions rocmOptions;
+  rocmOptions.has_user_compute_stream = 1; // Indicate that we are passing a user stream
+  rocmOptions.arena_extend_strategy = 0;   // kNextPowerOfTwo = 0, kSameAsRequested = 1 -> https://github.com/search?q=repo%3Amicrosoft%2Fonnxruntime%20kSameAsRequested&type=code
   // rocm_options.gpu_mem_limit = 1073741824; // 0 means no limit
-  rocm_options.user_compute_stream = mInternals->Streams[stream];
-  session_options.AppendExecutionProvider_ROCM(rocm_options);
-#endif // ORT_ROCM_BUILD
+  rocmOptions.user_compute_stream = mInternals->Streams[stream];
+  sessionOptions.AppendExecutionProvider_ROCM(rocmOptions);
+#endif
 }
 
 #ifndef __HIPCC__ // CUDA

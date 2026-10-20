@@ -20,9 +20,9 @@
 #include "DataFormatsITS/TrackITS.h"
 #include "ITStracking/Cell.h"
 #include "ITStracking/Cluster.h"
-#include "ITStracking/Constants.h"
+#include "ITSMFTTracking/Constants.h"
 #include "ITStracking/LayerMask.h"
-#include "ITStracking/MathUtils.h"
+#include "ITSMFTTracking/MathUtils.h"
 #include "ITStracking/TrackITSInternal.h"
 #include "DetectorsBase/Propagator.h"
 #include "ReconstructionDataFormats/Track.h"
@@ -198,11 +198,12 @@ GPUdi() bool fitTrack(TrackITSInternal<NLayers>& trk,
                       o2::track::TrackPar* linRef = nullptr)
 {
   for (int iLayer{start}; iLayer != end; iLayer += step) {
-    if (trk.getClusterIndex(iLayer) == constants::UnusedIndex) {
+    const int clsIdx = trk.getClusterIndex(iLayer);
+    if (clsIdx == constants::UnusedIndex) {
       continue;
     }
 
-    const TrackingFrameInfo& trackingHit = ctx.tfInfos[iLayer][trk.getClusterIndex(iLayer)];
+    const TrackingFrameInfo& trackingHit = ctx.tfInfos[iLayer][clsIdx];
     if (linRef) {
       if (!param.o2::track::TrackParCovF::rotate(trackingHit.alphaTrackingFrame, *linRef, ctx.bz)) {
         return false;

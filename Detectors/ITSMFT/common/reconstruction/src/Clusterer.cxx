@@ -170,6 +170,7 @@ void Clusterer::ClustererThread::process(uint16_t chip, uint16_t nChips, CompClu
   if (stats.empty() || stats.back().firstChip + stats.back().nChips != chip) { // there is a jump, register new block
     stats.emplace_back(ThreadStat{.firstChip = chip, .nChips = 0, .firstClus = uint32_t(compClusPtr->size()), .firstPatt = patternsPtr ? uint32_t(patternsPtr->size()) : 0, .nClus = 0, .nPatt = 0});
   }
+
   for (int ic = 0; ic < nChips; ic++) {
     auto* curChipData = parent->mFiredChipsPtr[chip + ic];
     auto chipID = curChipData->getChipID();
@@ -316,7 +317,7 @@ void Clusterer::ClustererThread::finishChipSingleHitFast(uint32_t hit, ChipPixel
     int nlab = 0;
     fetchMCLabels(curChipData->getStartID() + hit, labelsDigPtr, nlab);
     auto cnt = compClusPtr->size();
-    for (int i = nlab; i--;) {
+    for (int i = 0; i < nlab; i++) {
       labelsClusPtr->addElement(cnt, labelsBuff[i]);
     }
   }
@@ -389,13 +390,12 @@ void Clusterer::ClustererThread::updateChip(const ChipPixelData* curChipData, ui
     }
   } else {
     // row above should be always checked
-    int nnb = 0, lowestIndex = curr[row - 1], lowestNb = 0, *nbrCol[4], nbrRow[4];
+    int nnb = 0, lowestIndex = curr[row - 1], *nbrCol[4], nbrRow[4];
     if (lowestIndex >= 0) {
       nbrCol[nnb] = curr;
       nbrRow[nnb++] = row - 1;
     } else {
       lowestIndex = 0x7ffff;
-      lowestNb = -1;
     }
 #ifdef _ALLOW_DIAGONAL_ALPIDE_CLUSTERS_
     for (int i : {-1, 0, 1}) {
@@ -405,7 +405,6 @@ void Clusterer::ClustererThread::updateChip(const ChipPixelData* curChipData, ui
         nbrRow[nnb] = row + i;
         if (v < lowestIndex) {
           lowestIndex = v;
-          lowestNb = nnb;
         }
         nnb++;
       }
@@ -415,8 +414,7 @@ void Clusterer::ClustererThread::updateChip(const ChipPixelData* curChipData, ui
       nbrCol[nnb] = prev;
       nbrRow[nnb] = row;
       if (prev[row] < lowestIndex) {
-        lowestIndex = v;
-        lowestNb = nnb;
+        lowestIndex = prev[row];
       }
       nnb++;
     }
@@ -439,20 +437,27 @@ void Clusterer::ClustererThread::updateChip(const ChipPixelData* curChipData, ui
 void Clusterer::ClustererThread::fetchMCLabels(int digID, const ConstMCTruth* labelsDig, int& nfilled)
 {
   // transfer MC labels to cluster
-  if (nfilled >= MaxLabels) {
-    return;
-  }
-  const auto& lbls = labelsDig->getLabels(digID);
-  for (int i = lbls.size(); i--;) {
-    int ic = nfilled;
-    for (; ic--;) { // check if the label is already present
-      if (labelsBuff[ic] == lbls[i]) {
-        return; // label is found, do nothing
+  auto sortBuffer = [this]() { std::sort(this->labelsBuff.begin(), this->labelsBuff.end(), [](Label const& a, Label const& b) { return a.getTrackID() < b.getTrackID(); }); };
+  for (const auto& l : labelsDig->getLabels(digID)) {
+    bool skip = false;
+    for (int ic = 0; ic < nfilled; ic++) { // check if the label is already present
+      if (labelsBuff[ic] == l) {
+        skip = true;
+        break;
       }
     }
-    labelsBuff[nfilled++] = lbls[i];
-    if (nfilled >= MaxLabels) {
-      break;
+    if (!skip) { // are there still slots to add it?
+      if (nfilled < MaxLabels) {
+        labelsBuff[nfilled++] = l;
+        if (nfilled == MaxLabels) { // we filled the buffer, sort labels in the trackID increasing order, to increase chances of not losing more primary at next filling
+          sortBuffer();
+        }
+      } else { // buffer is full and sorted in trackID increasing order, substitute the old highest track ID if it is higher than the new label
+        if (labelsBuff.back().getTrackID() > l.getTrackID()) {
+          labelsBuff.back() = l; // substitute and re-sort
+          sortBuffer();
+        }
+      }
     }
   }
   //

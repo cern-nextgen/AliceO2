@@ -37,9 +37,6 @@ void GPUTPCTracker::DumpTrackingData(std::ostream& out)
       continue;
     }
     out << "Row: " << i << std::endl;
-    if (mRec->GetProcessingSettings().dumpClusterGrid) {
-      out << "Grid: y0 " << Row(i).Hy0() << " z0 " << Row(i).Hz0() << " stepY " << Row(i).HstepY() << " stepZ " << Row(i).HstepZ() << std::endl;
-    }
     for (uint32_t j = 0; j < Row(i).NHits(); j++) {
       if (j && j % 16 == 0) {
         out << std::endl;

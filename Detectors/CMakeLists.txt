@@ -10,6 +10,7 @@
 # or submit itself to any jurisdiction.
 
 add_subdirectory(Base)
+add_subdirectory(CADSupport)
 add_subdirectory(Raw)
 add_subdirectory(CTF)
 
@@ -25,6 +26,7 @@ add_subdirectory(TOF)
 add_subdirectory(ZDC)
 
 add_subdirectory(ITSMFT)
+add_subdirectory(External) # sensitive external (CAD-derived) detectors; uses ITSMFT hit type
 add_subdirectory(TRD)
 
 add_subdirectory(MUON)
@@ -52,6 +54,7 @@ add_subdirectory(ForwardAlign)
 
 
 if(BUILD_SIMULATION)
+  add_subdirectory(FastSim)
   add_subdirectory(gconfig)
   o2_data_file(COPY gconfig DESTINATION Detectors)
 endif()

@@ -25,6 +25,7 @@
 #include "Framework/TableBuilder.h"
 #include "Framework/Traits.h"
 
+#include <fmt/format.h>
 #include <string>
 namespace o2::framework
 {
@@ -147,7 +148,7 @@ auto spawner(framework::pack<C...>, std::vector<std::shared_ptr<arrow::Table>>&&
   if (fullTable->num_rows() == 0) {
     return makeEmptyTable(name, framework::pack<C...>{});
   }
-  return spawnerHelper(fullTable, schema, sizeof...(C), projectors, name, projector);
+  return spawnerHelper(fullTable.tablePtr, schema, sizeof...(C), projectors, name, projector);
 }
 
 std::string serializeProjectors(std::vector<framework::expressions::Projector>& projectors);
@@ -192,11 +193,13 @@ ConcreteDataMatcher replaceOrigin(ConcreteDataMatcher& matcher, const header::Da
 
 namespace o2::soa
 {
+// fmt::format, not std::string + const char*: GCC 14 turns the latter into a
+// spurious -Werror=array-bounds= on the temporary's SSO buffer.
 template <TableRef R>
 constexpr auto tableRef2ConfigParamSpec()
 {
   return o2::framework::ConfigParamSpec{
-    std::string{"input:"} + o2::aod::label<R>(),
+    fmt::format("input:{}", o2::aod::label<R>()),
     framework::VariantType::String,
     aod::sourceSpec<R>(),
     {"\"\""}};
@@ -206,7 +209,7 @@ template <TableRef R>
 constexpr auto tableRef2Schema()
 {
   return o2::framework::ConfigParamSpec{
-    std::string{"input-schema:"} + o2::aod::label<R>(),
+    fmt::format("input-schema:{}", o2::aod::label<R>()),
     framework::VariantType::String,
     framework::serializeSchema(o2::aod::MetadataTrait<o2::aod::Hash<R.desc_hash>>::metadata::getSchema()),
     {"\"\""}};
@@ -262,6 +265,12 @@ inline constexpr auto getCCDBUrls()
     result.push_back({std::string{"ccdb:"} + std::string{T::ccdb_bindings[i]},
                       framework::VariantType::String,
                       T::ccdb_urls[i],
+                      {"\"\""}});
+    // How this object is keyed in CCDB; the fetcher turns a non-zero value into a
+    // run-number-qualified query rather than a plain timestamp one.
+    result.push_back({std::string{"ccdb-run-dependent:"} + std::string{T::ccdb_bindings[i]},
+                      framework::VariantType::Int,
+                      T::ccdb_run_dependent[i],
                       {"\"\""}});
   }
   return result;
@@ -368,6 +377,11 @@ constexpr auto getCCDBMetadata() -> std::vector<framework::ConfigParamSpec>
   std::sort(results.begin(), results.end(), [](framework::ConfigParamSpec const& a, framework::ConfigParamSpec const& b) { return a.name < b.name; });
   auto last = std::unique(results.begin(), results.end(), [](framework::ConfigParamSpec const& a, framework::ConfigParamSpec const& b) { return a.name == b.name; });
   results.erase(last, results.end());
+  // Tell the fetcher which column carries the timestamp to query at, and which column
+  // it may group by (rows sharing a uniformity value resolve to the same object, so one
+  // query per distinct value suffices). Both default to the timestamp column.
+  results.push_back({std::string{"timestamp-column"}, framework::VariantType::String, std::string{T::timestamp_column_label}, {"\"\""}});
+  results.push_back({std::string{"uniformity-column"}, framework::VariantType::String, std::string{T::uniformity_column_label}, {"\"\""}});
   return results;
 }
 
@@ -492,12 +506,6 @@ class TableConsumer;
 /// Helper class actually implementing the cursor which can write to
 /// a table. The provided template arguments are if type Column and
 /// therefore refer only to the persisted columns.
-template <typename T>
-concept is_producable = soa::has_metadata<aod::MetadataTrait<T>> || soa::has_metadata<aod::MetadataTrait<typename T::parent_t>>;
-
-template <typename T>
-concept is_enumerated_iterator = requires(T t) { t.globalIndex(); };
-
 template <is_producable T>
 struct WritingCursor {
  public:
@@ -579,13 +587,13 @@ struct WritingCursor {
   decltype(FFL(std::declval<cursor_t>())) cursor;
 
  private:
-  static decltype(auto) extract(is_enumerated_iterator auto const& arg)
+  static decltype(auto) extract(soa::is_enumerated_iterator auto const& arg)
   {
     return arg.globalIndex();
   }
 
   template <typename A>
-    requires(!is_enumerated_iterator<A>)
+    requires(!soa::is_enumerated_iterator<A>)
   static decltype(auto) extract(A&& arg)
   {
     return arg;
@@ -642,9 +650,6 @@ template <is_producable T>
 struct Produces : WritingCursor<T> {
 };
 
-template <typename T>
-concept is_produces = requires(T t) { typename T::cursor_t; typename T::persistent_table_t; &T::cursor; };
-
 /// Use this to group together produces. Useful to separate them logically
 /// or simply to stay within the 100 elements per Task limit.
 /// Use as:
@@ -654,10 +659,8 @@ concept is_produces = requires(T t) { typename T::cursor_t; typename T::persiste
 ///
 /// Notice the label MySetOfProduces is just a mnemonic and can be omitted.
 struct ProducesGroup {
+  static constexpr void isProducesGroup() {};
 };
-
-template <typename T>
-concept is_produces_group = std::derived_from<T, ProducesGroup>;
 
 /// Helper template for table transformations
 template <soa::is_metadata M, soa::TableRef Ref>
@@ -682,12 +685,6 @@ struct TableTransform {
 
 /// This helper struct allows you to declare extended tables which should be
 /// created by the task (as opposed to those pre-defined by data model)
-template <typename T>
-concept is_spawnable = soa::has_metadata<aod::MetadataTrait<o2::aod::Hash<T::originals[T::originals.size() - 1].desc_hash>>> && soa::has_extension<typename aod::MetadataTrait<o2::aod::Hash<T::originals[T::originals.size() - 1].desc_hash>>::metadata>;
-
-template <typename T>
-concept is_dynamically_spawnable = soa::has_metadata<aod::MetadataTrait<o2::aod::Hash<T::originals[T::originals.size() - 1].desc_hash>>> && soa::has_configurable_extension<typename aod::MetadataTrait<o2::aod::Hash<T::originals[T::originals.size() - 1].desc_hash>>::metadata>;
-
 template <is_spawnable T>
 consteval auto transformBase()
 {
@@ -734,13 +731,6 @@ struct Spawns : decltype(transformBase<T>()) {
     s->WithMetadata(std::make_shared<arrow::KeyValueMetadata>(std::vector{std::string{"label"}}, std::vector{std::string{o2::aod::label<T::ref>()}}));
     return s;
   }();
-};
-
-template <typename T>
-concept is_spawns = requires(T t) {
-  typename T::metadata;
-  typename T::expression_pack_t;
-  requires std::same_as<decltype(t.projector), std::shared_ptr<gandiva::Projector>>;
 };
 
 /// This helper struct allows you to declare extended tables with dynamically-supplied
@@ -791,15 +781,6 @@ struct Defines : decltype(transformBase<T>()) {
 
 template <is_dynamically_spawnable T>
 using DefinesDelayed = Defines<T, true>;
-
-template <typename T>
-concept is_defines = requires(T t) {
-  typename T::metadata;
-  typename T::placeholders_pack_t;
-  requires std::same_as<decltype(t.projector), std::shared_ptr<gandiva::Projector>>;
-  requires std::same_as<decltype(t.needRecompilation), bool>;
-  &T::recompile;
-};
 
 /// Policy to control index building
 /// Exclusive index: each entry in a row has a valid index
@@ -859,13 +840,6 @@ struct Builds : decltype(transformBase<T>()) {
   }
 };
 
-template <typename T>
-concept is_builds = requires(T t) {
-  typename T::metadata;
-  typename T::Key;
-  requires std::same_as<decltype(t.map), std::vector<soa::IndexRecord>>;
-};
-
 /// a task with rewritten origin, if running together with a task with the default, will
 /// have a different name and thus its output would be routed separately
 
@@ -877,6 +851,7 @@ concept is_builds = requires(T t) {
 /// to determine the target file, e.g. analysis result, QA or control histogram,
 /// etc.
 template <typename T>
+  requires(std::derived_from<T, TObject>)
 struct OutputObj {
   using obj_t = T;
 
@@ -964,15 +939,6 @@ struct OutputObj {
   uint32_t mTaskHash;
 };
 
-template <typename T>
-concept is_outputobj = requires(T t) {
-  &T::setHash;
-  &T::spec;
-  &T::ref;
-  requires std::same_as<decltype(t.operator->()), typename T::obj_t*>;
-  requires std::same_as<decltype(t.object), std::shared_ptr<typename T::obj_t>>;
-};
-
 /// This helper allows you to fetch a Sevice from the context or
 /// by using some singleton. This hopefully will hide the Singleton and
 /// We will be able to retrieve it in a more thread safe manner later on.
@@ -991,12 +957,6 @@ struct Service {
   }
 };
 
-template <typename T>
-concept is_service = requires(T t) {
-  requires std::same_as<decltype(t.service), typename T::service_t*>;
-  &T::operator->;
-};
-
 auto getTableFromFilter(soa::is_filtered_table auto const& table, soa::SelectionVector&& selection)
 {
   return std::make_unique<o2::soa::Filtered<std::decay_t<decltype(table)>>>(std::vector{table}, std::forward<soa::SelectionVector>(selection));
@@ -1004,10 +964,10 @@ auto getTableFromFilter(soa::is_filtered_table auto const& table, soa::Selection
 
 auto getTableFromFilter(soa::is_not_filtered_table auto const& table, soa::SelectionVector&& selection)
 {
-  return std::make_unique<o2::soa::Filtered<std::decay_t<decltype(table)>>>(std::vector{table.asArrowTable()}, std::forward<soa::SelectionVector>(selection));
+  return std::make_unique<o2::soa::Filtered<std::decay_t<decltype(table)>>>(std::vector{table.asArrowTableRef()}, std::forward<soa::SelectionVector>(selection));
 }
 
-void initializePartitionCaches(std::set<uint32_t> const& hashes, std::shared_ptr<arrow::Schema> const& schema, expressions::Filter const& filter, gandiva::NodePtr& tree, gandiva::FilterPtr& gfilter);
+void initializePartitionCaches(std::span<const uint32_t> hashes, std::shared_ptr<arrow::Schema> const& schema, expressions::Filter const& filter, gandiva::NodePtr& tree, gandiva::FilterPtr& gfilter);
 
 /// Partition ties directly to the argument type
 /// in a case with several origins in subscriptions it will get the correct input, as the type contains the origin
@@ -1016,7 +976,7 @@ void initializePartitionCaches(std::set<uint32_t> const& hashes, std::shared_ptr
 ///        the real reason is to provide grouped parts for the process functions that request it
 ///        better solution would be to "slice" the selection, as is already done in GroupSlicer
 ///        for the same purpose, instead of reapplying the filtering
-template <typename T>
+template <soa::is_table T>
 struct Partition {
   using content_t = T;
   Partition(expressions::Node&& filter_) : filter{std::forward<expressions::Node>(filter_)}
@@ -1029,14 +989,14 @@ struct Partition {
     setTable(table);
   }
 
-  void intializeCaches(std::set<uint32_t> const& hashes, std::shared_ptr<arrow::Schema> const& schema)
+  void intializeCaches(std::span<const uint32_t> hashes, std::shared_ptr<arrow::Schema> const& schema)
   {
     initializePartitionCaches(hashes, schema, filter, tree, gfilter);
   }
 
   void bindTable(T const& table)
   {
-    intializeCaches(T::table_t::hashes(), table.asArrowTable()->schema());
+    intializeCaches(T::table_t::column_hashes, table.asArrowTableRef()->schema());
     if (dataframeChanged) {
       mFiltered = getTableFromFilter(table, soa::selectionToVector(framework::expressions::createSelection(table.asArrowTable(), gfilter)));
       dataframeChanged = false;
@@ -1128,13 +1088,6 @@ struct Partition {
     return mFiltered->size();
   }
 };
-
-template <typename T>
-concept is_partition = requires(T t) {
-  &T::updatePlaceholders;
-  requires std::same_as<decltype(t.filter), expressions::Filter>;
-  requires std::same_as<decltype(t.mFiltered), std::unique_ptr<o2::soa::Filtered<typename T::content_t>>>;
-};
 } // namespace o2::framework
 
 namespace o2::soa
@@ -1147,7 +1100,7 @@ auto Extend(T const& table)
   static std::array<framework::expressions::Projector, sizeof...(Cs)> projectors{{std::move(Cs::Projector())...}};
   static std::shared_ptr<gandiva::Projector> projector = nullptr;
   static auto schema = std::make_shared<arrow::Schema>(o2::soa::createFieldsFromColumns(framework::pack<Cs...>{}));
-  return output_t{{o2::framework::spawner(framework::pack<Cs...>{}, {table.asArrowTable()}, "dynamicExtension", projectors.data(), projector, schema), table.asArrowTable()}, 0};
+  return output_t{{o2::framework::spawner(framework::pack<Cs...>{}, {table.asArrowTable()}, "dynamicExtension", projectors.data(), projector, schema), table.asArrowTable()}};
 }
 
 /// Template function to attach dynamic columns on-the-fly (e.g. inside
@@ -1156,7 +1109,7 @@ template <soa::is_table T, soa::is_dynamic_column... Cs>
 auto Attach(T const& table)
 {
   using output_t = Join<T, o2::soa::Table<o2::aod::Hash<"JOIN"_h>, o2::aod::Hash<"JOIN/0"_h>, o2::aod::Hash<"JOIN"_h>, Cs...>>;
-  return output_t{{table.asArrowTable()}, table.offset()};
+  return output_t{{table.asArrowTableRef()}};
 }
 } // namespace o2::soa
 

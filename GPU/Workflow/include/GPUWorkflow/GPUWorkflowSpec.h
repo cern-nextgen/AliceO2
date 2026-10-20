@@ -23,7 +23,6 @@
 #include "Framework/InitContext.h"
 #include "Framework/CompletionPolicy.h"
 #include "GPUCommonAlignedAlloc.h"
-#include "Algorithm/Parser.h"
 #include <string>
 #include <array>
 #include <vector>
@@ -162,6 +161,8 @@ class GPURecoWorkflowSpec : public o2::framework::Task
     float mInstLumiCTP{-1};
     aligned_unique_buffer_ptr<TPCFastTransformPOD> mFastTransformBuffer;
   };
+
+  void storeConfigs(o2::framework::ProcessingContext& pc);
 
   /// initialize TPC options from command line
   void initFunctionTPCCalib(o2::framework::InitContext& ic);

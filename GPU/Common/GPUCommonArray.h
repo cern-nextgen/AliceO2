@@ -15,7 +15,7 @@
 #ifndef GPUCOMMONARRAY_H
 #define GPUCOMMONARRAY_H
 
-#if !defined(GPUCA_GPUCODE_DEVICE) || defined(__CUDACC__) || defined(__HIPCC__) // TODO: Get rid of GPUCommonArray once OpenCL supports <array>
+#if !defined(GPUCA_GPUCODE_DEVICE) || defined(__CUDACC__) || defined(__HIPCC__) || defined(__CPUDEVICE__) // TODO: Get rid of GPUCommonArray once OpenCL supports <array>
 #ifndef GPUCA_GPUCODE_COMPILEKERNELS
 #include <array>
 #endif
@@ -24,7 +24,9 @@
 #include "GPUCommonDef.h"
 namespace std
 {
-#ifdef GPUCA_GPUCODE_DEVICE
+#ifdef __METAL__
+using ::array;
+#elif defined(GPUCA_GPUCODE_DEVICE)
 template <typename T, size_t N>
 struct array {
   GPUd() T& operator[](size_t i) { return m_internal_V__[i]; };
