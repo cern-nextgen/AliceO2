@@ -134,7 +134,9 @@ jobs:
           source /etc/profile.d/modules.sh
           module load ${MODULES}
           cd ${STANDALONE_DIR}
-          rocprofv3 --kernel-trace --stats --output-format csv pftrace -d /root -o ${{ matrix.name }} -- ${TIMING_CA} --runs ${{ matrix.profiler_runs }} --debug 0  # Generates /root/${{ matrix.name }}* .csv and .pftrace
+          unset PYTHONHOME PYTHONPATH  # rocprofv3 is a #!/usr/bin/python3 script; the module-loaded ROOT env points PYTHONHOME at a mismatched cvmfs Python and breaks it
+          rocprofv3 --kernel-trace --stats --output-format csv pftrace -d /root -o ${{ matrix.name }} -- ${TIMING_CA} --runs ${{ matrix.profiler_runs }} --debug 0  # Generates /root/${{ matrix.name }}{_kernel_stats.csv,_results.pftrace}
+          rm -f /root/${{ matrix.name }}_agent_info.csv /root/${{ matrix.name }}_domain_stats.csv /root/${{ matrix.name }}_kernel_trace.csv
 
       - name: Profiler - perf
         if: ${{ matrix.name == 'cpu' }}
