@@ -60,6 +60,7 @@ jobs:
       STANDALONE_DIR: /root/standalone
       BENCHMARK_CSV: standalone_${{ matrix.name }}.csv
       WARMUP_RUNS: 2
+      DETAIL_KERNELS: GPUTPCTrackletConstructor GPUTPCExtrapolationTracking
       TIMING_CA: ./ca -e 50kHz ${{ matrix.backend }} --memSize 15000000000 --inputMemory 6000000000 --outputMemory 10000000000 --RTCenable --RTCcacheOutput --RTCoptConstexpr 1 --RTCoptSpecialCode 1 --seed 0 --sync --runsInit 0 --PROCresetTimers 1 --PROCdebugMarkdown 1 # Add --runs 42 for benchmark runs, and --debug 1 (plain benchmark) or --debug 0 (profiler runs)
 
     name: ${{ matrix.name }}
@@ -110,13 +111,15 @@ jobs:
           python3 ${GITHUB_WORKSPACE}/.github/scripts/profiler_standalone.py --discard ${WARMUP_RUNS} --input /root/${BENCHMARK_CSV} --output /root/summary_${BENCHMARK_CSV}
 
       - name: Profiler - Nsight Compute
-        if: ${{ matrix.name == 'nvidia-h100' || matrix.name == 'nvidia-rtx6000' || matrix.name == 'nvidia-l40s' }}
+        if: ${{ matrix.name == 'nvidia-h100' || matrix.name == 'nvidia-rtx6000' }}
         run: |
           dnf install -y cuda-nsight-compute-13-1
           source /etc/profile.d/modules.sh
           module load ${MODULES}
           cd ${STANDALONE_DIR}
-          ncu --set none --metrics gpu__time_duration.avg --export /root/${{ matrix.name }} --clock-control none --force-overwrite ${TIMING_CA} --runs ${{ matrix.profiler_runs }} --debug 0  # Generates /root/${{ matrix.name }}.ncu-rep
+          for kernel in ${DETAIL_KERNELS}; do
+            ncu --set full -k "${kernel}" -c 1 --kill 1 --export /root/${{ matrix.name }}_${kernel} --force-overwrite ${TIMING_CA} --runs 1 --debug 0  # Generates /root/${{ matrix.name }}_${kernel}.ncu-rep
+          done
 
       - name: Profiler - Nsight Systems
         if: ${{ matrix.name == 'nvidia-h100' || matrix.name == 'nvidia-rtx6000' || matrix.name == 'nvidia-l40s' }}
@@ -137,6 +140,22 @@ jobs:
           unset PYTHONHOME PYTHONPATH  # rocprofv3 is a #!/usr/bin/python3 script; the module-loaded ROOT env points PYTHONHOME at a mismatched cvmfs Python and breaks it
           rocprofv3 --kernel-trace --stats --output-format csv pftrace -d /root -o ${{ matrix.name }} -- ${TIMING_CA} --runs ${{ matrix.profiler_runs }} --debug 0  # Generates /root/${{ matrix.name }}{_kernel_stats.csv,_results.pftrace}
           rm -f /root/${{ matrix.name }}_agent_info.csv /root/${{ matrix.name }}_domain_stats.csv /root/${{ matrix.name }}_kernel_trace.csv
+
+      - name: Profiler - rocprofv3 Detail
+        if: ${{ matrix.name == 'amd-mi300x' || matrix.name == 'amd-w7900' }}
+        run: |
+          source /etc/profile.d/modules.sh
+          module load ${MODULES}
+          cd ${STANDALONE_DIR}
+          unset PYTHONHOME PYTHONPATH  # same python-poisoning issue as the other rocprofv3 step
+          for kernel in ${DETAIL_KERNELS}; do
+            rocprofv3 --kernel-include-regex "^${kernel}$" --kernel-iteration-range 0-0 \
+              --pmc GPUBusy MemUnitBusy MemUnitStalled L2CacheHit OccupancyPercent MeanOccupancyPerCU \
+                    VALUBusy SALUBusy VALUInsts SALUInsts LDSBankConflict FetchSize WriteSize Wavefronts \
+                    ACTIVE_CYCLES ELAPSED_CYCLES \
+              --output-format csv -d /root -o ${{ matrix.name }}_${kernel}_detail \
+              -- ${TIMING_CA} --runs 1 --debug 0
+          done
 
       - name: Profiler - perf
         if: ${{ matrix.name == 'cpu' }}
