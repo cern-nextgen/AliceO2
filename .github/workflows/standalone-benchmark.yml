@@ -133,8 +133,11 @@ jobs:
           module load ${MODULES}
           cd ${STANDALONE_DIR}
           for kernel in ${PROFILING_KERNELS}; do
-            ncu --set full -k "${kernel}" -c 1 --kill 1 --export ${ARTIFACT_DIR}/${{ matrix.name }}_${kernel} --force-overwrite \
-            ./ca ${TIMING_CA_ARGS} --runs 1 --debug 0  # Generates ${ARTIFACT_DIR}/${{ matrix.name }}_${kernel}.ncu-rep
+            ncu -k "${kernel}" --clock-control none \
+              --section Occupancy --section WarpStateStats --section ComputeWorkloadAnalysis --section LaunchStats --section SpeedOfLight \
+              --export ${ARTIFACT_DIR}/${{ matrix.name }}_${kernel} --force-overwrite \
+              ./ca ${TIMING_CA_ARGS} --runs 1 --debug 0  # Captures every invocation of ${kernel} in the one event (e.g. all 36 sectors), viewable in the Nsight Compute UI
+            ncu --import ${ARTIFACT_DIR}/${{ matrix.name }}_${kernel}.ncu-rep --csv --print-summary per-kernel > ${ARTIFACT_DIR}/${{ matrix.name }}_${kernel}_detail.csv
           done
 
       - name: Profiler - Nsight Systems
@@ -166,7 +169,7 @@ jobs:
           cd ${STANDALONE_DIR}
           unset PYTHONHOME PYTHONPATH  # same python-poisoning issue as the other rocprofv3 step
           for kernel in ${PROFILING_KERNELS}; do
-            rocprofv3 --kernel-include-regex "^${kernel}$" --kernel-iteration-range 0-0 \
+            rocprofv3 --kernel-include-regex "^${kernel}$" \
               --pmc GPUBusy MemUnitBusy MemUnitStalled L2CacheHit OccupancyPercent MeanOccupancyPerCU \
                     VALUBusy SALUBusy VALUInsts SALUInsts LDSBankConflict FetchSize WriteSize Wavefronts \
                     ACTIVE_CYCLES ELAPSED_CYCLES \
