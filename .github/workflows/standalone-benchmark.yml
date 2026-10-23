@@ -68,7 +68,7 @@ jobs:
       STANDALONE_DIR: /scratch/standalone
       BENCHMARK_CSV: standalone_${{ matrix.name }}.csv
       WARMUP_RUNS: 2
-      PROFILING_KERNELS: GPUTPCTrackletConstructor GPUTPCExtrapolationTracking GPUTPCTrackletSelector
+      PROFILING_KERNELS: krnl_GPUTPCTrackletConstructor krnl_GPUTPCExtrapolationTracking krnl_GPUTPCTrackletSelector
       VERIFY_CA_ARGS: -e o2-simple ${{ matrix.backend }} --memSize 20500000000 --seed 0 --sync --runsInit 0 --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptConstexpr 1 --RTCoptSpecialCode 1 --debug 6
       TIMING_CA_ARGS: -e 50kHz ${{ matrix.backend }} --memSize 15000000000 --inputMemory 6000000000 --outputMemory 10000000000 --RTCenable --RTCcacheOutput --RTCoptConstexpr 1 --RTCoptSpecialCode 1 --seed 0 --sync --runsInit 0 --PROCresetTimers 1 --PROCdebugMarkdown 1 # Add --runs 42 for benchmark runs, and --debug 1 (plain benchmark) or --debug 0 (profiler runs)
 
