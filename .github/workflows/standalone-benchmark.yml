@@ -19,36 +19,42 @@ jobs:
           - name: cpu
             runner: cern-nextgen-highfreq-4c
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=0
+            cmake_jobs: 4
             profiler_runs: 12
             standalone_runs: 42
             backend: "-c"
           - name: nvidia-h100
             runner: cern-nextgen-h100
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=90
+            cmake_jobs: 8
             profiler_runs: 12
             standalone_runs: 42
             backend: "-g"
           - name: nvidia-rtx6000
             runner: cern-nextgen-rtx6000
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=120
+            cmake_jobs: 8
             profiler_runs: 12
             standalone_runs: 42
             backend: "-g"
           - name: nvidia-l40s
             runner: cern-nextgen-l40s
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=89
+            cmake_jobs: 8
             profiler_runs: 12
             standalone_runs: 42
             backend: "-g"
           - name: amd-mi300x
             runner: cern-nextgen-mi300x
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx942
+            cmake_jobs: 8
             profiler_runs: 12
             standalone_runs: 42
             backend: "-g"
           - name: amd-w7900
             runner: cern-nextgen-w7900
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx1100
+            cmake_jobs: 8
             profiler_runs: 12
             standalone_runs: 42
             backend: "-g"
@@ -93,7 +99,7 @@ jobs:
           module load ${MODULES}
           mkdir -p ${STANDALONE_DIR}
           cmake -B ${STANDALONE_DIR}/build ${{ matrix.cmake_args }} -DGPUCA_DETERMINISTIC_MODE=${DETERMINISTIC_MODE} -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${ALICE_SOURCE_DIR}/GPU/GPUTracking/Standalone/
-          cmake --build ${STANDALONE_DIR}/build --target install -j 8
+          cmake --build ${STANDALONE_DIR}/build --target install -j ${{ matrix.cmake_jobs }}
         env:
           DETERMINISTIC_MODE: GPU
 
