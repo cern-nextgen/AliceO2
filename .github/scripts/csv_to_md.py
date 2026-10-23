@@ -17,7 +17,7 @@ def get_2d_list(csv_filename):
   with open(csv_filename) as csv_file:
     csv_reader = csv.reader(csv_file)
     next(csv_reader)
-    return [[str(name), float(mean), float(variance), int(count)] for name, mean, variance, count in csv_reader]
+    return [[str(name), float(mean), float(stdev), int(count)] for name, mean, stdev, count in csv_reader]
 
 table_baseline = get_2d_list(args.baseline)
 table_current = get_2d_list(args.current)
@@ -56,20 +56,20 @@ def get_emoji(d, ci_half_width):
 
 table = []
 for baseline, current in zip(table_baseline, table_current):
-  baseline_name, baseline_mean, baseline_variance, baseline_count = baseline
-  name, mean, variance, count = current
+  baseline_name, baseline_mean, baseline_stdev, baseline_count = baseline
+  name, mean, stdev, count = current
   assert(baseline_name == name)
-  d, se, t, nu, ci_half_width = welch(mean, math.sqrt(variance), args.runs, baseline_mean, math.sqrt(baseline_variance), args.runs)
+  d, se, t, nu, ci_half_width = welch(mean, stdev, args.runs, baseline_mean, baseline_stdev, args.runs)
   emoji = get_emoji(d, ci_half_width)
   ci_low = d - ci_half_width
   ci_high = d + ci_half_width
   table.append([
     name,
     int(mean),
-    f'{variance:.2f}',
+    f'{stdev:.2f}',
     count,
     int(baseline_mean),
-    f'{baseline_variance:.2f}',
+    f'{baseline_stdev:.2f}',
     baseline_count,
     f'{d:.2f}',
     f'[{ci_low:.2f}, {ci_high:.2f}]',
@@ -82,10 +82,10 @@ confidence_pct = int(round((1.0 - args.alpha) * 100))
 header = [
   'name',
   'mean (\u03BCs)',
-  'variance',
+  'stdev \u03C3',
   'count/run',
   'mean (base)',
-  'variance (base)',
+  'stdev (base)',
   'count/run (base)',
   'diff \u0394',
   f'{confidence_pct}% CI (\u0394)',

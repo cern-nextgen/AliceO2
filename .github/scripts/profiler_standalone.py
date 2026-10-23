@@ -23,12 +23,12 @@ with open(args.input) as csv_file:
       time_dict[name] = [time]
       count_dict[name] = 1 if count == '' else int(count)
 
-data = [["name", "mean", "variance", "count"]]
+data = [["name", "mean", "stdev", "count"]]
 for name, time_list in time_dict.items():
   retained = time_list[args.discard:]
   mean = statistics.mean(retained)
-  variance = 0.0 if len(retained) < 2 else statistics.variance(retained)
-  data.append([name, mean, variance, count_dict[name]])
+  stdev = 0.0 if len(retained) < 2 else statistics.stdev(retained)
+  data.append([name, mean, stdev, count_dict[name]])
 
 with open(args.output, 'w') as csv_file:
   csv_writer = csv.writer(csv_file)
