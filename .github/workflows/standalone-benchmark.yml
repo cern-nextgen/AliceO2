@@ -57,16 +57,25 @@ jobs:
       ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
       MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
       MODULES: Vc/1.4.5-23 fmt/11.1.2-25 ms_gsl/4.2.1-16 TBB/v2022.3.0-15 ROOT/v6-36-10-alice4-5
-      STANDALONE_DIR: /root/standalone
+      ARTIFACT_DIR: /scratch/artifacts
+      ALICE_SOURCE_DIR: /scratch/alice
+      STANDALONE_DIR: /scratch/standalone
       BENCHMARK_CSV: standalone_${{ matrix.name }}.csv
       WARMUP_RUNS: 2
-      DETAIL_KERNELS: GPUTPCTrackletConstructor GPUTPCExtrapolationTracking
-      TIMING_CA: ./ca -e 50kHz ${{ matrix.backend }} --memSize 15000000000 --inputMemory 6000000000 --outputMemory 10000000000 --RTCenable --RTCcacheOutput --RTCoptConstexpr 1 --RTCoptSpecialCode 1 --seed 0 --sync --runsInit 0 --PROCresetTimers 1 --PROCdebugMarkdown 1 # Add --runs 42 for benchmark runs, and --debug 1 (plain benchmark) or --debug 0 (profiler runs)
+      PROFILING_KERNELS: GPUTPCTrackletConstructor GPUTPCExtrapolationTracking GPUTPCTrackletSelector
+      VERIFY_CA_ARGS: -e o2-simple ${{ matrix.backend }} --memSize 20500000000 --seed 0 --sync --runsInit 0 --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptConstexpr 1 --RTCoptSpecialCode 1 --debug 6
+      TIMING_CA_ARGS: -e 50kHz ${{ matrix.backend }} --memSize 15000000000 --inputMemory 6000000000 --outputMemory 10000000000 --RTCenable --RTCcacheOutput --RTCoptConstexpr 1 --RTCoptSpecialCode 1 --seed 0 --sync --runsInit 0 --PROCresetTimers 1 --PROCdebugMarkdown 1 # Add --runs 42 for benchmark runs, and --debug 1 (plain benchmark) or --debug 0 (profiler runs)
 
     name: ${{ matrix.name }}
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
+
+      - name: Create Directories and Copy Source
+        run: |
+          mkdir -p ${ARTIFACT_DIR}
+          mkdir -p ${ALICE_SOURCE_DIR}
+          cp -r ${GITHUB_WORKSPACE}/. ${ALICE_SOURCE_DIR}/
 
       - name: Download Files
         run: |
@@ -83,7 +92,7 @@ jobs:
           source /etc/profile.d/modules.sh
           module load ${MODULES}
           mkdir -p ${STANDALONE_DIR}
-          cmake -B ${STANDALONE_DIR}/build ${{ matrix.cmake_args }} -DGPUCA_DETERMINISTIC_MODE=${DETERMINISTIC_MODE} -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
+          cmake -B ${STANDALONE_DIR}/build ${{ matrix.cmake_args }} -DGPUCA_DETERMINISTIC_MODE=${DETERMINISTIC_MODE} -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${ALICE_SOURCE_DIR}/GPU/GPUTracking/Standalone/
           cmake --build ${STANDALONE_DIR}/build --target install -j 8
         env:
           DETERMINISTIC_MODE: GPU
@@ -93,7 +102,7 @@ jobs:
           source /etc/profile.d/modules.sh
           module load ${MODULES}
           cd ${STANDALONE_DIR}
-          ${STANDALONE_DIR}/ca -e o2-simple ${{ matrix.backend }} --memSize 20500000000 --seed 0 --sync --runsInit 0 --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptConstexpr 1 --RTCoptSpecialCode 1 --debug 6
+          ./ca ${VERIFY_CA_ARGS}
           cmp ${STANDALONE_DIR}/*.out
           rm -rf ${STANDALONE_DIR}/*.out ${STANDALONE_DIR}/events/o2-simple ${STANDALONE_DIR}/build
 
@@ -107,8 +116,8 @@ jobs:
           source /etc/profile.d/modules.sh
           module load ${MODULES}
           cd ${STANDALONE_DIR}
-          ${TIMING_CA} --runs $(( ${{ matrix.standalone_runs }} + WARMUP_RUNS )) --debug 1 --PROCdebugCSV /root/${BENCHMARK_CSV}
-          python3 ${GITHUB_WORKSPACE}/.github/scripts/profiler_standalone.py --discard ${WARMUP_RUNS} --input /root/${BENCHMARK_CSV} --output /root/summary_${BENCHMARK_CSV}
+          ./ca ${TIMING_CA_ARGS} --runs $(( ${{ matrix.standalone_runs }} + WARMUP_RUNS )) --debug 1 --PROCdebugCSV ${ARTIFACT_DIR}/${BENCHMARK_CSV}
+          python3 ${ALICE_SOURCE_DIR}/.github/scripts/profiler_standalone.py --discard ${WARMUP_RUNS} --input ${ARTIFACT_DIR}/${BENCHMARK_CSV} --output ${ARTIFACT_DIR}/summary_${BENCHMARK_CSV}
 
       - name: Profiler - Nsight Compute
         if: ${{ matrix.name == 'nvidia-h100' || matrix.name == 'nvidia-rtx6000' }}
@@ -117,8 +126,9 @@ jobs:
           source /etc/profile.d/modules.sh
           module load ${MODULES}
           cd ${STANDALONE_DIR}
-          for kernel in ${DETAIL_KERNELS}; do
-            ncu --set full -k "${kernel}" -c 1 --kill 1 --export /root/${{ matrix.name }}_${kernel} --force-overwrite ${TIMING_CA} --runs 1 --debug 0  # Generates /root/${{ matrix.name }}_${kernel}.ncu-rep
+          for kernel in ${PROFILING_KERNELS}; do
+            ncu --set full -k "${kernel}" -c 1 --kill 1 --export ${ARTIFACT_DIR}/${{ matrix.name }}_${kernel} --force-overwrite \
+            ./ca ${TIMING_CA_ARGS} --runs 1 --debug 0  # Generates ${ARTIFACT_DIR}/${{ matrix.name }}_${kernel}.ncu-rep
           done
 
       - name: Profiler - Nsight Systems
@@ -129,7 +139,7 @@ jobs:
           source /etc/profile.d/modules.sh
           module load ${MODULES}
           cd ${STANDALONE_DIR}
-          nsys profile -o /root/${{ matrix.name }} ${TIMING_CA} --runs ${{ matrix.profiler_runs }} --debug 0  # Generates /root/${{ matrix.name }}.nsys-rep
+          nsys profile -o ${ARTIFACT_DIR}/${{ matrix.name }} ./ca ${TIMING_CA_ARGS} --runs ${{ matrix.profiler_runs }} --debug 0  # Generates ${ARTIFACT_DIR}/${{ matrix.name }}.nsys-rep
 
       - name: Profiler - rocprofv3
         if: ${{ matrix.name == 'amd-mi300x' || matrix.name == 'amd-w7900' }}
@@ -138,8 +148,9 @@ jobs:
           module load ${MODULES}
           cd ${STANDALONE_DIR}
           unset PYTHONHOME PYTHONPATH  # rocprofv3 is a #!/usr/bin/python3 script; the module-loaded ROOT env points PYTHONHOME at a mismatched cvmfs Python and breaks it
-          rocprofv3 --kernel-trace --stats --output-format csv pftrace -d /root -o ${{ matrix.name }} -- ${TIMING_CA} --runs ${{ matrix.profiler_runs }} --debug 0  # Generates /root/${{ matrix.name }}{_kernel_stats.csv,_results.pftrace}
-          rm -f /root/${{ matrix.name }}_agent_info.csv /root/${{ matrix.name }}_domain_stats.csv /root/${{ matrix.name }}_kernel_trace.csv
+          rocprofv3 --kernel-trace --stats --output-format csv pftrace -d ${ARTIFACT_DIR} -o ${{ matrix.name }} -- \
+          ./ca ${TIMING_CA_ARGS} --runs ${{ matrix.profiler_runs }} --debug 0  # Generates ${ARTIFACT_DIR}/${{ matrix.name }}{_kernel_stats.csv,_results.pftrace}
+          rm -f ${ARTIFACT_DIR}/${{ matrix.name }}_agent_info.csv ${ARTIFACT_DIR}/${{ matrix.name }}_domain_stats.csv ${ARTIFACT_DIR}/${{ matrix.name }}_kernel_trace.csv
 
       - name: Profiler - rocprofv3 Detail
         if: ${{ matrix.name == 'amd-mi300x' || matrix.name == 'amd-w7900' }}
@@ -148,13 +159,13 @@ jobs:
           module load ${MODULES}
           cd ${STANDALONE_DIR}
           unset PYTHONHOME PYTHONPATH  # same python-poisoning issue as the other rocprofv3 step
-          for kernel in ${DETAIL_KERNELS}; do
+          for kernel in ${PROFILING_KERNELS}; do
             rocprofv3 --kernel-include-regex "^${kernel}$" --kernel-iteration-range 0-0 \
               --pmc GPUBusy MemUnitBusy MemUnitStalled L2CacheHit OccupancyPercent MeanOccupancyPerCU \
                     VALUBusy SALUBusy VALUInsts SALUInsts LDSBankConflict FetchSize WriteSize Wavefronts \
                     ACTIVE_CYCLES ELAPSED_CYCLES \
-              --output-format csv -d /root -o ${{ matrix.name }}_${kernel}_detail \
-              -- ${TIMING_CA} --runs 1 --debug 0
+              --output-format csv -d ${ARTIFACT_DIR} -o ${{ matrix.name }}_${kernel}_detail \
+              -- ./ca ${TIMING_CA_ARGS} --runs 1 --debug 0
           done
 
       - name: Profiler - perf
@@ -164,18 +175,18 @@ jobs:
           source /etc/profile.d/modules.sh
           module load ${MODULES}
           cd ${STANDALONE_DIR}
-          perf record -g -o /root/${{ matrix.name }}.perf.data -- ${TIMING_CA} --runs ${{ matrix.profiler_runs }} --debug 0
+          perf record -g -o ${ARTIFACT_DIR}/${{ matrix.name }}.perf.data -- ./ca ${TIMING_CA_ARGS} --runs ${{ matrix.profiler_runs }} --debug 0
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.name }}-artifact
           path: |
-            /root/*.csv
-            /root/*.ncu-rep
-            /root/*.nsys-rep
-            /root/*.pftrace
-            /root/*.perf.data
+            ${{ env.ARTIFACT_DIR }}/*.csv
+            ${{ env.ARTIFACT_DIR }}/*.ncu-rep
+            ${{ env.ARTIFACT_DIR }}/*.nsys-rep
+            ${{ env.ARTIFACT_DIR }}/*.pftrace
+            ${{ env.ARTIFACT_DIR }}/*.perf.data
 
       - name: Display table on GitHub web
         run: |
@@ -185,7 +196,9 @@ jobs:
           rm -f ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV}
           curl -fL --retry 3 -o ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV} https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/baseline/summary_${BENCHMARK_CSV} || true
           if [ -s ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV} ]; then
-            python3 ${GITHUB_WORKSPACE}/.github/scripts/csv_to_md.py --runs ${{ matrix.standalone_runs }} --baseline ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV} --current /root/summary_${BENCHMARK_CSV} >> ${GITHUB_STEP_SUMMARY}
+            python3 ${ALICE_SOURCE_DIR}/.github/scripts/csv_to_md.py --runs ${{ matrix.standalone_runs }} \
+            --baseline ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV} \
+            --current ${ARTIFACT_DIR}/summary_${BENCHMARK_CSV} >> ${GITHUB_STEP_SUMMARY}
           else
             echo "No baseline found for ${{ matrix.name }}, skipping comparison table." >> ${GITHUB_STEP_SUMMARY}
           fi
