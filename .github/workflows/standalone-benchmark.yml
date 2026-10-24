@@ -68,7 +68,7 @@ jobs:
       STANDALONE_DIR: /scratch/standalone
       BENCHMARK_CSV: standalone_${{ matrix.name }}.csv
       WARMUP_RUNS: 2
-      PROFILING_KERNELS: krnl_GPUTPCTrackletConstructor krnl_GPUTPCExtrapolationTracking krnl_GPUTPCTrackletSelector
+      PROFILING_KERNELS_REGEX: ^(krnl_GPUTPCTrackletConstructor|krnl_GPUTPCExtrapolationTracking|krnl_GPUTPCTrackletSelector)$
       VERIFY_CA_ARGS: -e o2-simple ${{ matrix.backend }} --memSize 20500000000 --seed 0 --sync --runsInit 0 --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptConstexpr 1 --RTCoptSpecialCode 1 --debug 6
       TIMING_CA_ARGS: -e 50kHz ${{ matrix.backend }} --memSize 15000000000 --inputMemory 6000000000 --outputMemory 10000000000 --RTCenable --RTCcacheOutput --RTCoptConstexpr 1 --RTCoptSpecialCode 1 --seed 0 --sync --runsInit 0 --PROCresetTimers 1 --PROCdebugMarkdown 1 # Add --runs 42 for benchmark runs, and --debug 1 (plain benchmark) or --debug 0 (profiler runs)
 
@@ -132,13 +132,11 @@ jobs:
           source /etc/profile.d/modules.sh
           module load ${MODULES}
           cd ${STANDALONE_DIR}
-          for kernel in ${PROFILING_KERNELS}; do
-            ncu -k "${kernel}" --clock-control none \
-              --section Occupancy --section WarpStateStats --section ComputeWorkloadAnalysis --section LaunchStats --section SpeedOfLight \
-              --export ${ARTIFACT_DIR}/${{ matrix.name }}_${kernel} --force-overwrite \
-              ./ca ${TIMING_CA_ARGS} --runs 1 --debug 0  # Captures every invocation of ${kernel} in the one event (e.g. all 36 sectors), viewable in the Nsight Compute UI
-            ncu --import ${ARTIFACT_DIR}/${{ matrix.name }}_${kernel}.ncu-rep --csv --print-summary per-kernel > ${ARTIFACT_DIR}/${{ matrix.name }}_${kernel}_detail.csv
-          done
+          ncu -k "regex:${PROFILING_KERNELS_REGEX}" --clock-control none \
+            --section Occupancy --section WarpStateStats --section ComputeWorkloadAnalysis --section LaunchStats --section SpeedOfLight \
+            --export ${ARTIFACT_DIR}/${{ matrix.name }} --force-overwrite \
+            ./ca ${TIMING_CA_ARGS} --runs 1 --debug 0  # One application run captures every invocation of every kernel matching PROFILING_KERNELS_REGEX, viewable in the Nsight Compute UI
+          ncu --import ${ARTIFACT_DIR}/${{ matrix.name }}.ncu-rep --csv --print-summary per-kernel > ${ARTIFACT_DIR}/${{ matrix.name }}_detail.csv
 
       - name: Profiler - Nsight Systems
         if: ${{ matrix.name == 'nvidia-h100' || matrix.name == 'nvidia-rtx6000' || matrix.name == 'nvidia-l40s' }}
@@ -168,14 +166,10 @@ jobs:
           module load ${MODULES}
           cd ${STANDALONE_DIR}
           unset PYTHONHOME PYTHONPATH  # same python-poisoning issue as the other rocprofv3 step
-          for kernel in ${PROFILING_KERNELS}; do
-            rocprofv3 --kernel-include-regex "^${kernel}$" \
-              --pmc GPUBusy MemUnitBusy MemUnitStalled L2CacheHit OccupancyPercent MeanOccupancyPerCU \
-                    VALUBusy SALUBusy VALUInsts SALUInsts LDSBankConflict FetchSize WriteSize Wavefronts \
-                    ACTIVE_CYCLES ELAPSED_CYCLES \
-              --output-format csv -d ${ARTIFACT_DIR} -o ${{ matrix.name }}_${kernel}_detail \
-              -- ./ca ${TIMING_CA_ARGS} --runs 1 --debug 0
-          done
+          rocprofv3 --kernel-include-regex "${PROFILING_KERNELS_REGEX}" \
+            --pmc GPUBusy OccupancyPercent MeanOccupancyPerCU VALUBusy Wavefronts MemUnitBusy MemUnitStalled L2CacheHit LDSBankConflict \
+            --output-format csv -d ${ARTIFACT_DIR} -o ${{ matrix.name }}_detail \
+            -- ./ca ${TIMING_CA_ARGS} --runs 1 --debug 0  # One application run captures every invocation of every kernel matching PROFILING_KERNELS_REGEX
 
       - name: Profiler - perf
         if: ${{ matrix.name == 'cpu' }}
