@@ -125,6 +125,22 @@ jobs:
           ./ca ${TIMING_CA_ARGS} --runs $(( ${{ matrix.standalone_runs }} + WARMUP_RUNS )) --debug 1 --PROCdebugCSV ${ARTIFACT_DIR}/${BENCHMARK_CSV}
           python3 ${ALICE_SOURCE_DIR}/.github/scripts/profiler_standalone.py --discard ${WARMUP_RUNS} --input ${ARTIFACT_DIR}/${BENCHMARK_CSV} --output ${ARTIFACT_DIR}/summary_${BENCHMARK_CSV}
 
+      - name: Display table on GitHub web
+        run: |
+          source /etc/profile.d/modules.sh
+          module load ${MODULES}
+          mkdir -p ${STANDALONE_DIR}/baseline
+          rm -f ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV}
+          curl -fL --retry 3 -o ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV} https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/baseline/summary_${BENCHMARK_CSV} || true
+          if [ -s ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV} ]; then
+            python3 ${ALICE_SOURCE_DIR}/.github/scripts/csv_to_md.py --runs ${{ matrix.standalone_runs }} \
+            --baseline ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV} \
+            --current ${ARTIFACT_DIR}/summary_${BENCHMARK_CSV} >> ${GITHUB_STEP_SUMMARY}
+          else
+            echo "No baseline found for ${{ matrix.name }}, skipping comparison table." >> ${GITHUB_STEP_SUMMARY}
+          fi
+          rm -rf ${STANDALONE_DIR}/baseline
+
       - name: Profiler - Nsight Compute
         if: ${{ matrix.name == 'nvidia-h100' || matrix.name == 'nvidia-rtx6000' }}
         run: |
@@ -190,19 +206,3 @@ jobs:
             ${{ env.ARTIFACT_DIR }}/*.nsys-rep
             ${{ env.ARTIFACT_DIR }}/*.pftrace
             ${{ env.ARTIFACT_DIR }}/*.perf.data
-
-      - name: Display table on GitHub web
-        run: |
-          source /etc/profile.d/modules.sh
-          module load ${MODULES}
-          mkdir -p ${STANDALONE_DIR}/baseline
-          rm -f ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV}
-          curl -fL --retry 3 -o ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV} https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/baseline/summary_${BENCHMARK_CSV} || true
-          if [ -s ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV} ]; then
-            python3 ${ALICE_SOURCE_DIR}/.github/scripts/csv_to_md.py --runs ${{ matrix.standalone_runs }} \
-            --baseline ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV} \
-            --current ${ARTIFACT_DIR}/summary_${BENCHMARK_CSV} >> ${GITHUB_STEP_SUMMARY}
-          else
-            echo "No baseline found for ${{ matrix.name }}, skipping comparison table." >> ${GITHUB_STEP_SUMMARY}
-          fi
-          rm -rf ${STANDALONE_DIR}/baseline ${STANDALONE_DIR}/events/ ${STANDALONE_DIR}/build
