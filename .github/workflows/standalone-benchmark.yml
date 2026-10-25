@@ -10,7 +10,9 @@ on:
 jobs:
   benchmark:
     runs-on: ${{ matrix.runner }}
-    container: registry.cern.ch/alisw/slc9-gpu-builder@sha256:55ffe1c2c5fa8449403fc011e425ee983fe34ebc79799e7ab9f44eeab8aee7fc
+    container:
+      image: registry.cern.ch/alisw/slc9-gpu-builder@sha256:55ffe1c2c5fa8449403fc011e425ee983fe34ebc79799e7ab9f44eeab8aee7fc
+      options: --cap-add=SYS_PTRACE --cap-add=PERFMON
     strategy:
       fail-fast: false
       matrix:
@@ -55,7 +57,7 @@ jobs:
             profiler_runs: 12
             standalone_runs: 42
             backend: "-g"
-            metrics: MeanOccupancyPerCU MemUnitStalled OccupancyPercent VALUBusy
+            metrics: MeanOccupancyPerCU MemUnitStalled OccupancyPercent VALUBusy VALUUtilization SALUBusy SIMD_UTILIZATION
           - name: amd-w7900
             runner: cern-nextgen-w7900
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx1100
@@ -63,7 +65,7 @@ jobs:
             profiler_runs: 12
             standalone_runs: 42
             backend: "-g"
-            metrics: GPUBusy L2CacheHit LDSBankConflict MeanOccupancyPerCU MemUnitBusy OccupancyPercent Wavefronts
+            metrics: Wavefronts
     env:
       WORK_DIR: /cvmfs/alice.cern.ch
       ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
@@ -116,7 +118,8 @@ jobs:
           cd ${STANDALONE_DIR}
           ./ca ${VERIFY_CA_ARGS}
           cmp ${STANDALONE_DIR}/*.out
-          rm -rf ${STANDALONE_DIR}/*.out ${STANDALONE_DIR}/events/o2-simple ${STANDALONE_DIR}/build
+          rm -rf ${STANDALONE_DIR}/ca ${STANDALONE_DIR}/*.out ${STANDALONE_DIR}/rtccache ${STANDALONE_DIR}/events/o2-simple ${STANDALONE_DIR}/build \
+          ${STANDALONE_DIR}/include ${STANDALONE_DIR}/lib* ${STANDALONE_DIR}/makefile ${STANDALONE_DIR}/share ${STANDALONE_DIR}/config.cmake
 
       - name: Build Non-Deterministic
         run: *build
