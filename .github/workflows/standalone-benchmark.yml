@@ -150,20 +150,6 @@ jobs:
           fi
           rm -rf ${STANDALONE_DIR}/baseline
 
-      - name: Profiler - Nsight Compute
-        if: ${{ matrix.name == 'nvidia-h100' || matrix.name == 'nvidia-rtx6000' }}
-        run: |
-          dnf install -y cuda-nsight-compute-13-1
-          source /etc/profile.d/modules.sh
-          module load ${MODULES}
-          cd ${STANDALONE_DIR}
-          SECTION_ARGS=""
-          for section in ${{ matrix.metrics }}; do SECTION_ARGS="${SECTION_ARGS} --section ${section}"; done
-          ncu -k "regex:${PROFILING_KERNELS_REGEX}" --clock-control none ${SECTION_ARGS} \
-            --export ${ARTIFACT_DIR}/${{ matrix.name }} --force-overwrite \
-            ./ca ${TIMING_CA_ARGS} --runs 1 --debug 0  # One application run captures every invocation of every kernel matching PROFILING_KERNELS_REGEX, viewable in the Nsight Compute UI
-          ncu --import ${ARTIFACT_DIR}/${{ matrix.name }}.ncu-rep --csv --print-summary per-kernel > ${ARTIFACT_DIR}/${{ matrix.name }}_detail.csv
-
       - name: Profiler - Nsight Systems
         if: ${{ matrix.name == 'nvidia-h100' || matrix.name == 'nvidia-rtx6000' || matrix.name == 'nvidia-l40s' }}
         run: |
@@ -173,6 +159,21 @@ jobs:
           module load ${MODULES}
           cd ${STANDALONE_DIR}
           nsys profile -o ${ARTIFACT_DIR}/${{ matrix.name }} ./ca ${TIMING_CA_ARGS} --runs ${{ matrix.profiler_runs }} --debug 0  # Generates ${ARTIFACT_DIR}/${{ matrix.name }}.nsys-rep
+
+      - name: Profiler - Nsight Compute
+        if: ${{ matrix.name == 'nvidia-h100' || matrix.name == 'nvidia-rtx6000' }}
+        run: |
+          dnf config-manager --add-repo "https://developer.download.nvidia.com/devtools/repos/rhel$(source /etc/os-release; echo ${VERSION_ID%%.*})/$(rpm --eval '%{_arch}' | sed s/aarch/arm/)/"
+          dnf install -y cuda-nsight-compute-13-1
+          source /etc/profile.d/modules.sh
+          module load ${MODULES}
+          cd ${STANDALONE_DIR}
+          SECTION_ARGS=""
+          for section in ${{ matrix.metrics }}; do SECTION_ARGS="${SECTION_ARGS} --section ${section}"; done
+          ncu -k "regex:${PROFILING_KERNELS_REGEX}" --clock-control none ${SECTION_ARGS} \
+            --export ${ARTIFACT_DIR}/${{ matrix.name }} --force-overwrite \
+            ./ca ${TIMING_CA_ARGS} --runs 1 --debug 0
+          ncu --import ${ARTIFACT_DIR}/${{ matrix.name }}.ncu-rep --csv --print-summary per-kernel > ${ARTIFACT_DIR}/${{ matrix.name }}_detail.csv
 
       - name: Profiler - rocprofv3
         if: ${{ matrix.name == 'amd-mi300x' || matrix.name == 'amd-w7900' }}
@@ -197,6 +198,7 @@ jobs:
           python3 ${ALICE_SOURCE_DIR}/.github/scripts/rocprofv3_detail_summary.py \
             --input ${ARTIFACT_DIR}/${{ matrix.name }}_detail_counter_collection.csv \
             --output ${ARTIFACT_DIR}/${{ matrix.name }}_detail.csv
+          rm -f ${ARTIFACT_DIR}/${{ matrix.name }}_detail_agent_info.csv ${ARTIFACT_DIR}/${{ matrix.name }}_detail_counter_collection.csv
 
       - name: Profiler - perf
         if: ${{ matrix.name == 'cpu' }}

@@ -21,19 +21,32 @@ with open(args.input) as csv_file:
     except ValueError:
       continue
     if kernel not in launch_config:
-      launch_config[kernel] = (row.get('Workgroup_Size', ''), row.get('Grid_Size', ''))
+      launch_config[kernel] = (
+        row.get('Workgroup_Size', ''),
+        row.get('Grid_Size', ''),
+        row.get('VGPR_Count', ''),
+        row.get('SGPR_Count', ''),
+        row.get('LDS_Block_Size', ''),
+        row.get('Scratch_Size', ''),
+      )
 
-data = [['Kernel Name', 'Block Size', 'Grid Size', 'Counter Name', 'Minimum', 'Maximum', 'Average', 'Invocations']]
+data = [['Kernel Name', 'Block Size', 'Grid Size', 'VGPR Count', 'SGPR Count', 'LDS Block Size', 'Scratch Size',
+         'Counter Name', 'Minimum', 'Maximum', 'Average', 'Stdev', 'Invocations']]
 for (kernel, counter), vals in values.items():
-  block_size, grid_size = launch_config.get(kernel, ('', ''))
+  block_size, grid_size, vgpr_count, sgpr_count, lds_block_size, scratch_size = launch_config.get(kernel, ('',) * 6)
   data.append([
     kernel,
     block_size,
     grid_size,
+    vgpr_count,
+    sgpr_count,
+    lds_block_size,
+    scratch_size,
     counter,
     min(vals),
     max(vals),
     statistics.mean(vals),
+    0.0 if len(vals) < 2 else statistics.stdev(vals),
     len(vals),
   ])
 
