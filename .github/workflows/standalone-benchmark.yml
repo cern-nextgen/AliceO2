@@ -180,8 +180,7 @@ jobs:
           source /etc/profile.d/modules.sh
           module load ${MODULES}
           cd ${STANDALONE_DIR}
-          unset PYTHONHOME PYTHONPATH  # rocprofv3 is a #!/usr/bin/python3 script; the module-loaded ROOT env points PYTHONHOME at a mismatched cvmfs Python and breaks it
-          rocprofv3 --kernel-trace --stats --output-format csv pftrace -d ${ARTIFACT_DIR} -o ${{ matrix.name }} -- \
+          env -u PYTHONHOME -u PYTHONPATH rocprofv3 --kernel-trace --stats --output-format csv pftrace -d ${ARTIFACT_DIR} -o ${{ matrix.name }} -- \
           ./ca ${TIMING_CA_ARGS} --runs ${{ matrix.profiler_runs }} --debug 0  # Generates ${ARTIFACT_DIR}/${{ matrix.name }}{_kernel_stats.csv,_results.pftrace}
           rm -f ${ARTIFACT_DIR}/${{ matrix.name }}_agent_info.csv ${ARTIFACT_DIR}/${{ matrix.name }}_domain_stats.csv ${ARTIFACT_DIR}/${{ matrix.name }}_kernel_trace.csv
 
@@ -191,8 +190,7 @@ jobs:
           source /etc/profile.d/modules.sh
           module load ${MODULES}
           cd ${STANDALONE_DIR}
-          unset PYTHONHOME PYTHONPATH  # same python-poisoning issue as the other rocprofv3 step
-          rocprofv3 --kernel-include-regex "${PROFILING_KERNELS_REGEX}" \
+          env -u PYTHONHOME -u PYTHONPATH rocprofv3 --kernel-include-regex "${PROFILING_KERNELS_REGEX}" \
             --pmc ${{ matrix.metrics }} \
             --output-format csv -d ${ARTIFACT_DIR} -o ${{ matrix.name }}_detail \
             -- ./ca ${TIMING_CA_ARGS} --runs 1 --debug 0  # One application run captures every invocation of every kernel matching PROFILING_KERNELS_REGEX
