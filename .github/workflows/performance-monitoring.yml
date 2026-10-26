@@ -1,15 +1,25 @@
 name: Performance Monitoring
 
-# Proof of concept: workflow_dispatch can't be manually triggered from a non-default
-# branch (GitHub platform restriction, not fixable from workflow config), so this is
-# triggered by pushing a tag matching perf-run-*, e.g.:
-#   git tag perf-run-$(date +%s) && git push origin perf-run-$(date +%s)
-# n and platform are hardcoded for now instead of taken as inputs.
 on:
   push:
-    tags:
-      - 'perf-run-*'
+    branches: ['**']
   workflow_dispatch:
+    inputs:
+      n:
+        description: 'Number of most recent pushes to include'
+        required: true
+        default: '10'
+      platform:
+        description: 'Matrix platform to plot'
+        required: true
+        type: choice
+        options:
+          - cpu
+          - nvidia-h100
+          - nvidia-rtx6000
+          - nvidia-l40s
+          - amd-mi300x
+          - amd-w7900
 
 permissions:
   contents: read
@@ -20,12 +30,17 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      BRANCH: ngt-ci-pipeline
-      N: 10
-      PLATFORM: nvidia-h100
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
+
+      - name: Validate n
+        shell: bash
+        run: |
+          if ! [[ "${{ inputs.n }}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "n must be a positive integer, got '${{ inputs.n }}'" >&2
+            exit 1
+          fi
 
       - name: Install plotting dependencies
         shell: bash
@@ -37,26 +52,26 @@ jobs:
           echo "push,mean_us,stdev_us" > plot.csv
 
           gh run list --repo ${{ github.repository }} --workflow=standalone-benchmark.yml \
-            --branch "$BRANCH" --status completed --limit "$N" \
+            --branch ${{ github.ref_name }} --status completed --limit ${{ inputs.n }} \
             --json databaseId,headSha \
             --jq '.[] | [.databaseId,.headSha] | @tsv' > runs.tsv
 
           found=$(wc -l < runs.tsv)
-          if [ "$found" -lt "$N" ]; then
-            echo "::warning::Only found $found completed run(s) of standalone-benchmark.yml on branch $BRANCH, requested $N"
+          if [ "$found" -lt "${{ inputs.n }}" ]; then
+            echo "::warning::Only found $found completed run(s) of standalone-benchmark.yml on branch ${{ github.ref_name }}, requested ${{ inputs.n }}"
           fi
 
           tac runs.tsv | while IFS=$'\t' read -r runid sha; do
             dest="push_${sha:0:7}"
             mkdir -p "$dest"
-            if ! gh run download "$runid" --repo ${{ github.repository }} -D "$dest" -n "${PLATFORM}-artifact" 2>/dev/null; then
-              echo "::warning::No ${PLATFORM}-artifact for run $runid ($sha) -- ignoring push"
+            if ! gh run download "$runid" --repo ${{ github.repository }} -D "$dest" -n "${{ inputs.platform }}-artifact" 2>/dev/null; then
+              echo "::warning::No ${{ inputs.platform }}-artifact for run $runid ($sha) -- ignoring push"
               continue
             fi
 
-            wall=$(awk -F, '$1=="Wall"{print $2","$3}' "$dest/summary_standalone_${PLATFORM}.csv" 2>/dev/null)
+            wall=$(awk -F, '$1=="Wall"{print $2","$3}' "$dest/summary_standalone_${{ inputs.platform }}.csv" 2>/dev/null)
             if [ -z "$wall" ]; then
-              echo "::warning::No Wall row in summary_standalone_${PLATFORM}.csv for run $runid ($sha) -- ignoring push"
+              echo "::warning::No Wall row in summary_standalone_${{ inputs.platform }}.csv for run $runid ($sha) -- ignoring push"
               continue
             fi
 
@@ -74,7 +89,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: performance-monitoring-${{ env.PLATFORM }}
+          name: performance-monitoring-${{ inputs.platform }}
           path: |
             plot.csv
             plot.png

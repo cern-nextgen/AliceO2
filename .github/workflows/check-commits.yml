@@ -1,15 +1,14 @@
 name: Check Commits
 
-# Proof of concept: workflow_dispatch can't be manually triggered from a non-default
-# branch (GitHub platform restriction, not fixable from workflow config), so this is
-# triggered by pushing a tag matching check-commits-*, e.g.:
-#   git tag check-commits-$(date +%s) && git push origin check-commits-$(date +%s)
-# n is hardcoded for now instead of taken as an input.
 on:
   push:
-    tags:
-      - 'check-commits-*'
+    branches: ['**']
   workflow_dispatch:
+    inputs:
+      n:
+        description: 'Number of most recent pushes to check'
+        required: true
+        default: '10'
 
 permissions:
   actions: read
@@ -19,18 +18,24 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      BRANCH: ngt-ci-pipeline
-      N: 10
     steps:
+      - name: Validate n
+        shell: bash
+        run: |
+          if ! [[ "${{ inputs.n }}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "n must be a positive integer, got '${{ inputs.n }}'" >&2
+            exit 1
+          fi
+
       - name: Report broken pushes
         shell: bash
         run: |
           gh run list --repo ${{ github.repository }} --workflow=standalone-benchmark.yml \
-            --branch "$BRANCH" --status completed --limit "$N" \
+            --branch ${{ github.ref_name }} --status completed --limit ${{ inputs.n }} \
             --json headSha,displayTitle,conclusion \
             --jq '.[] | select(.conclusion != "success") | [.headSha,.displayTitle] | @tsv' > broken.tsv
 
-          echo "## Broken pushes (last $N)" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Broken pushes (last ${{ inputs.n }})" >> "$GITHUB_STEP_SUMMARY"
           if [ -s broken.tsv ]; then
             echo "| Commit | Message |" >> "$GITHUB_STEP_SUMMARY"
             echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
