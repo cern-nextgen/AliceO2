@@ -163,7 +163,6 @@ jobs:
       - name: Profiler - Nsight Compute
         if: ${{ matrix.name == 'nvidia-h100' || matrix.name == 'nvidia-rtx6000' }}
         run: |
-          dnf config-manager --add-repo "https://developer.download.nvidia.com/devtools/repos/rhel$(source /etc/os-release; echo ${VERSION_ID%%.*})/$(rpm --eval '%{_arch}' | sed s/aarch/arm/)/"
           dnf install -y cuda-nsight-compute-13-1
           source /etc/profile.d/modules.sh
           module load ${MODULES}
