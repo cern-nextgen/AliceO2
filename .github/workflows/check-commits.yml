@@ -1,6 +1,8 @@
 name: Check Commits
 
 on:
+  push:
+    branches: ['**']
   workflow_dispatch:
     inputs:
       n:

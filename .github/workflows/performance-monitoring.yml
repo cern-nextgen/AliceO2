@@ -1,6 +1,8 @@
 name: Performance Monitoring
 
 on:
+  push:
+    branches: ['**']
   workflow_dispatch:
     inputs:
       n:
