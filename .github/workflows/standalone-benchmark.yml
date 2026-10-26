@@ -196,6 +196,9 @@ jobs:
             --pmc ${{ matrix.metrics }} \
             --output-format csv -d ${ARTIFACT_DIR} -o ${{ matrix.name }}_detail \
             -- ./ca ${TIMING_CA_ARGS} --runs 1 --debug 0  # One application run captures every invocation of every kernel matching PROFILING_KERNELS_REGEX
+          python3 ${ALICE_SOURCE_DIR}/.github/scripts/rocprofv3_detail_summary.py \
+            --input ${ARTIFACT_DIR}/${{ matrix.name }}_detail_counter_collection.csv \
+            --output ${ARTIFACT_DIR}/${{ matrix.name }}_detail.csv
 
       - name: Profiler - perf
         if: ${{ matrix.name == 'cpu' }}
