@@ -1,15 +1,9 @@
 name: Performance Monitoring
 
-# Proof of concept: workflow_dispatch can't be manually triggered from a non-default
-# branch (GitHub platform restriction, not fixable from workflow config), so this is
-# triggered by pushing a tag matching perf-run-*, e.g.:
-#   git tag perf-run-$(date +%s) && git push origin perf-run-$(date +%s)
-# n and platform are hardcoded for now instead of taken as inputs.
 on:
   push:
-    tags:
-      - 'perf-run-*'
-  workflow_dispatch:
+    branches:
+      - 'performance-monitoring'
 
 permissions:
   contents: read

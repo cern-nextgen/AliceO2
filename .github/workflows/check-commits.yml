@@ -1,15 +1,9 @@
 name: Check Commits
 
-# Proof of concept: workflow_dispatch can't be manually triggered from a non-default
-# branch (GitHub platform restriction, not fixable from workflow config), so this is
-# triggered by pushing a tag matching check-commits-*, e.g.:
-#   git tag check-commits-$(date +%s) && git push origin check-commits-$(date +%s)
-# n is hardcoded for now instead of taken as an input.
 on:
   push:
-    tags:
-      - 'check-commits-*'
-  workflow_dispatch:
+    branches:
+      - 'performance-monitoring'
 
 permissions:
   actions: read
