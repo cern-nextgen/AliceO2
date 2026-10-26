@@ -61,9 +61,10 @@ jobs:
         shell: bash
         run: python3 .github/scripts/performance_monitoring.py --input plot.csv --output plot.png
 
-      - name: Add plot to job summary
+      - name: Add note to job summary
         shell: bash
-        run: echo "![Wall time](data:image/png;base64,$(base64 -w0 plot.png))" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          echo "Wall time plot for ${PLATFORM} -- see the performance-monitoring-${PLATFORM} artifact below." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
