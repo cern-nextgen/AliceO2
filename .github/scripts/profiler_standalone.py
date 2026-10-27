@@ -1,6 +1,5 @@
 import argparse
 import csv
-import math
 import statistics
 
 parser = argparse.ArgumentParser()
@@ -26,11 +25,10 @@ with open(args.input) as csv_file:
 
 data = [["name", "mean", "stdev", "count"]]
 for name, time_list in time_dict.items():
-  count = count_dict[name]
-  mean = statistics.mean(time_list[args.discard:]) / count
-  runs = len(time_list[args.discard:])
-  stdev = 0.0 if runs == 1 else statistics.stdev(time_list[args.discard:]) / math.sqrt(count)
-  data.append([name, mean, stdev, runs * count])
+  retained = time_list[args.discard:]
+  mean = statistics.mean(retained)
+  stdev = 0.0 if len(retained) < 2 else statistics.stdev(retained)
+  data.append([name, mean, stdev, count_dict[name]])
 
 with open(args.output, 'w') as csv_file:
   csv_writer = csv.writer(csv_file)
