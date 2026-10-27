@@ -10,88 +10,116 @@ on:
 jobs:
   benchmark:
     runs-on: ${{ matrix.runner }}
-    container: registry.cern.ch/alisw/slc9-gpu-builder@sha256:ea3443f9dfbc770e4b4bce0d1a9ecc0b7a7c16e9f76e416b796d170877220820
+    container:
+      image: registry.cern.ch/alisw/slc9-gpu-builder@sha256:55ffe1c2c5fa8449403fc011e425ee983fe34ebc79799e7ab9f44eeab8aee7fc
+      options: --cap-add=SYS_PTRACE --cap-add=PERFMON
     strategy:
       fail-fast: false
       matrix:
-        name: [cpu, nvidia-h100, nvidia-l40s, amd-mi300x, amd-w7900]
+        name: [cpu, nvidia-h100, nvidia-rtx6000, nvidia-l40s, amd-mi300x, amd-w7900]
         include:
           - name: cpu
-            runner: cern-nextgen-mi300x
+            runner: cern-nextgen-highfreq-4c
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=0
-            profiler_runs: 42
+            cmake_jobs: 4
+            profiler_runs: 12
             standalone_runs: 42
-            cpu_gpu: "-c"
+            backend: "-c"
+            metrics: cycles instructions cache-misses branch-misses
           - name: nvidia-h100
             runner: cern-nextgen-h100
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=90
-            profiler_runs: 21
+            cmake_jobs: 8
+            profiler_runs: 12
             standalone_runs: 42
-            cpu_gpu: "-g --memSize 20000000000"
+            backend: "-g"
+            metrics: Occupancy WarpStateStats ComputeWorkloadAnalysis LaunchStats SpeedOfLight
+          - name: nvidia-rtx6000
+            runner: cern-nextgen-rtx6000
+            cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=120
+            cmake_jobs: 8
+            profiler_runs: 12
+            standalone_runs: 42
+            backend: "-g"
+            metrics: Occupancy WarpStateStats ComputeWorkloadAnalysis LaunchStats SpeedOfLight
           - name: nvidia-l40s
             runner: cern-nextgen-l40s
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=89
-            profiler_runs: 42
+            cmake_jobs: 8
+            profiler_runs: 12
             standalone_runs: 42
-            cpu_gpu: "-g --memSize 20000000000"
+            backend: "-g"
+            metrics: Occupancy WarpStateStats ComputeWorkloadAnalysis LaunchStats SpeedOfLight
           - name: amd-mi300x
             runner: cern-nextgen-mi300x
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx942
-            profiler_runs: 42
+            cmake_jobs: 8
+            profiler_runs: 12
             standalone_runs: 42
-            cpu_gpu: "-g --memSize 20000000000"
+            backend: "-g"
+            metrics: MeanOccupancyPerCU MemUnitStalled OccupancyPercent VALUBusy VALUUtilization SALUBusy SIMD_UTILIZATION
           - name: amd-w7900
             runner: cern-nextgen-w7900
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx1100
-            profiler_runs: 42
+            cmake_jobs: 8
+            profiler_runs: 12
             standalone_runs: 42
-            cpu_gpu: "-g --memSize 20000000000"
+            backend: "-g"
+            metrics: Wavefronts
     env:
       WORK_DIR: /cvmfs/alice.cern.ch
       ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
       MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
-      STANDALONE_DIR: /root/standalone
+      MODULES: Vc/1.4.5-23 fmt/11.1.2-25 ms_gsl/4.2.1-16 TBB/v2022.3.0-15 ROOT/v6-36-10-alice4-5
+      ARTIFACT_DIR: /scratch/artifacts
+      ALICE_SOURCE_DIR: /scratch/alice
+      STANDALONE_DIR: /scratch/standalone
       BENCHMARK_CSV: standalone_${{ matrix.name }}.csv
-      PROFILER_CSV: profiler_${{ matrix.name }}.csv
-      TIMING_CA: ./ca -e 50kHz ${{ matrix.cpu_gpu }} --seed 0 --sync --runsInit 0 --PROCresetTimers 1 --PROCdebugMarkdown 1 --debug 1 # Add --runs 42 for benchmark runs
+      WARMUP_RUNS: 2
+      PROFILING_KERNELS_REGEX: ^(krnl_GPUTPCTrackletConstructor|krnl_GPUTPCExtrapolationTracking|krnl_GPUTPCTrackletSelector)$
+      VERIFY_CA_ARGS: -e o2-simple ${{ matrix.backend }} --memSize 20500000000 --seed 0 --sync --runsInit 0 --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptConstexpr 1 --RTCoptSpecialCode 1 --debug 6
+      TIMING_CA_ARGS: -e 50kHz ${{ matrix.backend }} --memSize 15000000000 --inputMemory 6000000000 --outputMemory 10000000000 --RTCenable --RTCcacheOutput --RTCoptConstexpr 1 --RTCoptSpecialCode 1 --seed 0 --sync --runsInit 0 --PROCresetTimers 1 --PROCdebugMarkdown 1 # Add --runs 42 for benchmark runs, and --debug 1 (plain benchmark) or --debug 0 (profiler runs)
 
     name: ${{ matrix.name }}
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
+
+      - name: Create Directories and Copy Source
+        run: |
+          mkdir -p ${ARTIFACT_DIR}
+          mkdir -p ${ALICE_SOURCE_DIR}
+          cp -r ${GITHUB_WORKSPACE}/. ${ALICE_SOURCE_DIR}/
 
       - name: Download Files
         run: |
           mkdir -p ${STANDALONE_DIR}
-
           curl -fL --retry 3 -o ${STANDALONE_DIR}/o2-simple-GPU.out https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/o2-simple-GPU.out
-
           mkdir -p ${STANDALONE_DIR}/events
           curl -fL --retry 3 -o ${STANDALONE_DIR}/events/o2-simple.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/events/o2-simple.tar.xz
           tar -xf ${STANDALONE_DIR}/events/o2-simple.tar.xz -C ${STANDALONE_DIR}/events
-
           curl -fL --retry 3 -o ${STANDALONE_DIR}/events/50kHz.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/events/50kHz.tar.xz
           tar -xf ${STANDALONE_DIR}/events/50kHz.tar.xz -C ${STANDALONE_DIR}/events
 
       - name: Build Deterministic
         run: &build |
           source /etc/profile.d/modules.sh
-          module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
-
+          module load ${MODULES}
           mkdir -p ${STANDALONE_DIR}
-          cmake -B ${STANDALONE_DIR}/build ${{ matrix.cmake_args }} -DGPUCA_DETERMINISTIC_MODE=${DETERMINISTIC_MODE} -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${GITHUB_WORKSPACE}/GPU/GPUTracking/Standalone/
-          cmake --build ${STANDALONE_DIR}/build --target install -j 8
+          cmake -B ${STANDALONE_DIR}/build ${{ matrix.cmake_args }} -DGPUCA_DETERMINISTIC_MODE=${DETERMINISTIC_MODE} -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${ALICE_SOURCE_DIR}/GPU/GPUTracking/Standalone/
+          cmake --build ${STANDALONE_DIR}/build --target install -j ${{ matrix.cmake_jobs }}
         env:
           DETERMINISTIC_MODE: GPU
 
       - name: Test Track Reconstruction
         run: |
           source /etc/profile.d/modules.sh
-          module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
+          module load ${MODULES}
           cd ${STANDALONE_DIR}
-          ${STANDALONE_DIR}/ca -e o2-simple ${{ matrix.cpu_gpu }} --seed 0 --sync --runs 1 --RTCenable --PROCdeterministicGPUReconstruction 1 --RTCoptConstexpr 1 --RTCoptSpecialCode 1 --debug 6
+          ./ca ${VERIFY_CA_ARGS}
           cmp ${STANDALONE_DIR}/*.out
-          rm -rf ${STANDALONE_DIR}/*.out ${STANDALONE_DIR}/events/o2-simple ${STANDALONE_DIR}/build
+          rm -rf ${STANDALONE_DIR}/ca ${STANDALONE_DIR}/*.out ${STANDALONE_DIR}/rtccache ${STANDALONE_DIR}/events/o2-simple ${STANDALONE_DIR}/build \
+          ${STANDALONE_DIR}/include ${STANDALONE_DIR}/lib* ${STANDALONE_DIR}/makefile ${STANDALONE_DIR}/share ${STANDALONE_DIR}/config.cmake
 
       - name: Build Non-Deterministic
         run: *build
@@ -101,62 +129,93 @@ jobs:
       - name: Benchmark Track Reconstruction
         run: |
           source /etc/profile.d/modules.sh
-          module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
+          module load ${MODULES}
           cd ${STANDALONE_DIR}
-          ${TIMING_CA} --runs ${{ matrix.standalone_runs }} --PROCdebugCSV /root/${BENCHMARK_CSV}
-          python3 ${GITHUB_WORKSPACE}/.github/scripts/profiler_standalone.py --discard 0 --input /root/${BENCHMARK_CSV} --output /root/summary_${BENCHMARK_CSV}
-      
-      - name: Profiler - Nsight Compute
-        if: ${{ matrix.name == 'nvidia-h100' }}
-        run: |
-          dnf install -y cuda-nsight-compute-13-1
-          source /etc/profile.d/modules.sh
-          module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
-          cd ${STANDALONE_DIR}
-          ncu --set none --metrics gpu__time_duration.avg --export ${{ matrix.name }} --clock-control none --force-overwrite ${TIMING_CA} --runs ${{ matrix.profiler_runs }}  # Generates ${{ matrix.name }}.ncu-rep
-          ncu --import ${STANDALONE_DIR}/${{ matrix.name }}.ncu-rep --print-units base --csv > /root/${PROFILER_CSV}
-          rm -rf ${STANDALONE_DIR}/events/50kHz ${STANDALONE_DIR}/build
-          python3 ${GITHUB_WORKSPACE}/.github/scripts/profiler_ncu.py --input /root/${PROFILER_CSV} --output /root/summary_${PROFILER_CSV}
-
-      - name: Profiler - Nsight Systems
-        if: ${{ matrix.name == 'nvidia-l40s' }}
-        run: |
-          dnf config-manager --add-repo "https://developer.download.nvidia.com/devtools/repos/rhel$(source /etc/os-release; echo ${VERSION_ID%%.*})/$(rpm --eval '%{_arch}' | sed s/aarch/arm/)/"
-          dnf install --nogpgcheck -y nsight-systems-cli-2026.2.1
-          source /etc/profile.d/modules.sh
-          module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
-          cd ${STANDALONE_DIR}
-          nsys profile -o ${{ matrix.name }} ${TIMING_CA} --runs ${{ matrix.profiler_runs }}  # Generates ${{ matrix.name }}.nsys-rep
-          nsys stats --report cuda_gpu_kern_sum --timeunit usec --force-export=true --format csv ${{ matrix.name }}.nsys-rep > /root/${PROFILER_CSV}
-          rm -rf ${STANDALONE_DIR}/events/50kHz ${STANDALONE_DIR}/build
-          python3 ${GITHUB_WORKSPACE}/.github/scripts/profiler_nsys.py --input /root/${PROFILER_CSV} --output /root/summary_${PROFILER_CSV}
-
-      - name: Profiler - rocprofv2
-        if: ${{ matrix.name == 'amd-mi300x' || matrix.name == 'amd-w7900' }}
-        run: |
-          source /etc/profile.d/modules.sh
-          module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
-          cd ${STANDALONE_DIR}
-          rocprofv2 --output-directory /root --output-file-name ${{ matrix.name }} ${TIMING_CA} --runs ${{ matrix.standalone_runs }}  # Generates results_${{ matrix.name }}.csv
-          rm -rf ${STANDALONE_DIR}/events/50kHz ${STANDALONE_DIR}/build
-          mv /root/results_${{ matrix.name }}.csv /root/${PROFILER_CSV}
-          python3 ${GITHUB_WORKSPACE}/.github/scripts/profiler_rocprofv2.py --input /root/${PROFILER_CSV} --output /root/summary_${PROFILER_CSV}
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: ${{ matrix.name }}-artifact
-          path: "/root/*.csv"
+          ./ca ${TIMING_CA_ARGS} --runs $(( ${{ matrix.standalone_runs }} + WARMUP_RUNS )) --debug 1 --PROCdebugCSV ${ARTIFACT_DIR}/${BENCHMARK_CSV}
+          python3 ${ALICE_SOURCE_DIR}/.github/scripts/profiler_standalone.py --discard ${WARMUP_RUNS} --input ${ARTIFACT_DIR}/${BENCHMARK_CSV} --output ${ARTIFACT_DIR}/summary_${BENCHMARK_CSV}
 
       - name: Display table on GitHub web
         run: |
           source /etc/profile.d/modules.sh
-          module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 Clang/v20.1.7-9 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25
+          module load ${MODULES}
           mkdir -p ${STANDALONE_DIR}/baseline
-          curl -fL --retry 3 -o ${STANDALONE_DIR}/baseline/summary_${PROFILER_CSV} https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/baseline/summary_${PROFILER_CSV}
-          curl -fL --retry 3 -o ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV} https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/baseline/summary_${BENCHMARK_CSV}
-          python3 ${GITHUB_WORKSPACE}/.github/scripts/csv_to_md.py --runs ${{ matrix.profiler_runs }} --baseline ${STANDALONE_DIR}/baseline/summary_${PROFILER_CSV} --current /root/summary_${PROFILER_CSV} >> ${GITHUB_STEP_SUMMARY}
-          echo -e "\n\n" >> ${GITHUB_STEP_SUMMARY}
-          python3 ${GITHUB_WORKSPACE}/.github/scripts/csv_to_md.py --runs ${{ matrix.standalone_runs }} --baseline ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV} --current /root/summary_${BENCHMARK_CSV} >> ${GITHUB_STEP_SUMMARY}
+          rm -f ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV}
+          curl -fL --retry 3 -o ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV} https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/baseline/summary_${BENCHMARK_CSV} || true
+          if [ -s ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV} ]; then
+            python3 ${ALICE_SOURCE_DIR}/.github/scripts/csv_to_md.py --runs ${{ matrix.standalone_runs }} \
+            --baseline ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV} \
+            --current ${ARTIFACT_DIR}/summary_${BENCHMARK_CSV} >> ${GITHUB_STEP_SUMMARY}
+          else
+            echo "No baseline found for ${{ matrix.name }}, skipping comparison table." >> ${GITHUB_STEP_SUMMARY}
+          fi
           rm -rf ${STANDALONE_DIR}/baseline
-        if: ${{ matrix.name != 'cpu' }}
+
+      - name: Profiler - Nsight Systems
+        if: ${{ matrix.name == 'nvidia-h100' || matrix.name == 'nvidia-rtx6000' || matrix.name == 'nvidia-l40s' }}
+        run: |
+          dnf config-manager --add-repo "https://developer.download.nvidia.com/devtools/repos/rhel$(source /etc/os-release; echo ${VERSION_ID%%.*})/$(rpm --eval '%{_arch}' | sed s/aarch/arm/)/"
+          dnf install --nogpgcheck -y nsight-systems-cli-2026.5.1
+          source /etc/profile.d/modules.sh
+          module load ${MODULES}
+          cd ${STANDALONE_DIR}
+          nsys profile -o ${ARTIFACT_DIR}/${{ matrix.name }} ./ca ${TIMING_CA_ARGS} --runs ${{ matrix.profiler_runs }} --debug 0  # Generates ${ARTIFACT_DIR}/${{ matrix.name }}.nsys-rep
+
+      - name: Profiler - Nsight Compute
+        if: ${{ matrix.name == 'nvidia-h100' || matrix.name == 'nvidia-rtx6000' }}
+        run: |
+          dnf install -y cuda-nsight-compute-13-1
+          source /etc/profile.d/modules.sh
+          module load ${MODULES}
+          cd ${STANDALONE_DIR}
+          SECTION_ARGS=""
+          for section in ${{ matrix.metrics }}; do SECTION_ARGS="${SECTION_ARGS} --section ${section}"; done
+          ncu -k "regex:${PROFILING_KERNELS_REGEX}" --clock-control none ${SECTION_ARGS} \
+            --export ${ARTIFACT_DIR}/${{ matrix.name }} --force-overwrite \
+            ./ca ${TIMING_CA_ARGS} --runs 1 --debug 0
+          ncu --import ${ARTIFACT_DIR}/${{ matrix.name }}.ncu-rep --csv --print-summary per-kernel > ${ARTIFACT_DIR}/${{ matrix.name }}_detail.csv
+
+      - name: Profiler - rocprofv3
+        if: ${{ matrix.name == 'amd-mi300x' || matrix.name == 'amd-w7900' }}
+        run: |
+          source /etc/profile.d/modules.sh
+          module load ${MODULES}
+          cd ${STANDALONE_DIR}
+          env -u PYTHONHOME -u PYTHONPATH rocprofv3 --kernel-trace --stats --output-format csv pftrace -d ${ARTIFACT_DIR} -o ${{ matrix.name }} -- \
+          ./ca ${TIMING_CA_ARGS} --runs ${{ matrix.profiler_runs }} --debug 0  # Generates ${ARTIFACT_DIR}/${{ matrix.name }}{_kernel_stats.csv,_results.pftrace}
+          rm -f ${ARTIFACT_DIR}/${{ matrix.name }}_agent_info.csv ${ARTIFACT_DIR}/${{ matrix.name }}_domain_stats.csv ${ARTIFACT_DIR}/${{ matrix.name }}_kernel_trace.csv
+
+      - name: Profiler - rocprofv3 Detail
+        if: ${{ matrix.name == 'amd-mi300x' || matrix.name == 'amd-w7900' }}
+        run: |
+          source /etc/profile.d/modules.sh
+          module load ${MODULES}
+          cd ${STANDALONE_DIR}
+          env -u PYTHONHOME -u PYTHONPATH rocprofv3 --kernel-include-regex "${PROFILING_KERNELS_REGEX}" \
+            --pmc ${{ matrix.metrics }} \
+            --output-format csv -d ${ARTIFACT_DIR} -o ${{ matrix.name }}_detail \
+            -- ./ca ${TIMING_CA_ARGS} --runs 1 --debug 0  # One application run captures every invocation of every kernel matching PROFILING_KERNELS_REGEX
+          python3 ${ALICE_SOURCE_DIR}/.github/scripts/rocprofv3_detail_summary.py \
+            --input ${ARTIFACT_DIR}/${{ matrix.name }}_detail_counter_collection.csv \
+            --output ${ARTIFACT_DIR}/${{ matrix.name }}_detail.csv
+          rm -f ${ARTIFACT_DIR}/${{ matrix.name }}_detail_agent_info.csv ${ARTIFACT_DIR}/${{ matrix.name }}_detail_counter_collection.csv
+
+      - name: Profiler - perf
+        if: ${{ matrix.name == 'cpu' }}
+        run: |
+          dnf install -y perf
+          source /etc/profile.d/modules.sh
+          module load ${MODULES}
+          cd ${STANDALONE_DIR}
+          PERF_EVENTS="${{ matrix.metrics }}"
+          perf record -g -e "${PERF_EVENTS// /,}" -o ${ARTIFACT_DIR}/${{ matrix.name }}.perf.data -- ./ca ${TIMING_CA_ARGS} --runs ${{ matrix.profiler_runs }} --debug 0
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.name }}-artifact
+          path: |
+            ${{ env.ARTIFACT_DIR }}/*.csv
+            ${{ env.ARTIFACT_DIR }}/*.ncu-rep
+            ${{ env.ARTIFACT_DIR }}/*.nsys-rep
+            ${{ env.ARTIFACT_DIR }}/*.pftrace
+            ${{ env.ARTIFACT_DIR }}/*.perf.data
