@@ -31,7 +31,7 @@ set(GPUCA_BUILD_DEBUG 0)                      # Enable debug mode (-O0, -ggdb, e
 set(GPUCA_BUILD_DEBUG_SANITIZE 0)             # Enable undefined behavior and address sanitizers
 set(GPUCA_BUILD_DEBUG_HOSTONLY 0)             # Only compile host code in debug mode, GPU code compiled normally
 set(GPUCA_DETERMINISTIC_MODE 0 CACHE STRING "GPUCA_DETERMINISTIC_MODE")               # OFF / NO_FAST_MATH / OPTO2 / GPU / WHOLEO2
-set(GPUCA_DETERMINISTIC_NO_FTZ 0)             # If 1 and deterministic mode active, do not apply flush denormals to zero
+set(GPUCA_DETERMINISTIC_NO_FTZ 1)             # If 1 and deterministic mode active, do not apply flush denormals to zero
 #set(GPUCA_CUDA_GCCBIN c++-14)                # Override which GCC to use for CUDA
 #set(GPUCA_OPENCL_CLANGBIN clang-20)          # Override which clang to use for OpenCL
 set(HIP_AMDGPUTARGET "default" CACHE STRING "HIP_AMDGPUTARGET")               # Set AMD GPU tragets to compile for: e.g. "gfx906;gfx908;gfx90a"
