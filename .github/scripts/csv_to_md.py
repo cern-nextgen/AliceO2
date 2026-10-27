@@ -13,14 +13,14 @@ parser.add_argument('-c', '--current', required=True, help='Current CSV file')
 parser.add_argument('--alpha', type=float, default=0.05, help='Significance level (default 0.05 -> 95% CI)')
 args = parser.parse_args()
 
-def get_2d_list(csv_filename):
+def get_dict(csv_filename):
   with open(csv_filename) as csv_file:
     csv_reader = csv.reader(csv_file)
     next(csv_reader)
-    return [[str(name), float(mean), float(stdev), int(count)] for name, mean, stdev, count in csv_reader]
+    return {name: (float(mean), float(stdev), int(count)) for name, mean, stdev, count in csv_reader}
 
-table_baseline = get_2d_list(args.baseline)
-table_current = get_2d_list(args.current)
+dict_baseline = get_dict(args.baseline)
+dict_current = get_dict(args.current)
 
 def welch(x, sx, m, y, sy, n):
   """Welch's t-test for difference of means d = x - y.
@@ -55,28 +55,37 @@ def get_emoji(d, ci_half_width):
     return ':white_circle:'
 
 table = []
-for baseline, current in zip(table_baseline, table_current):
-  baseline_name, baseline_mean, baseline_stdev, baseline_count = baseline
-  name, mean, stdev, count = current
-  assert(baseline_name == name)
-  d, se, t, nu, ci_half_width = welch(mean, stdev, args.runs, baseline_mean, baseline_stdev, args.runs)
-  emoji = get_emoji(d, ci_half_width)
-  ci_low = d - ci_half_width
-  ci_high = d + ci_half_width
-  table.append([
-    name,
-    int(mean),
-    f'{stdev:.2f}',
-    count,
-    int(baseline_mean),
-    f'{baseline_stdev:.2f}',
-    baseline_count,
-    f'{d:.2f}',
-    f'[{ci_low:.2f}, {ci_high:.2f}]',
-    emoji,
-  ])
+for name in dict_current.keys() | dict_baseline.keys():
+  current = dict_current.get(name)
+  baseline = dict_baseline.get(name)
 
-table.sort(key = lambda row: row[1], reverse=True)
+  if current is not None:
+    mean, stdev, count = current
+    sort_key = mean
+    current_row = [int(mean), f'{stdev:.2f}', count]
+  else:
+    sort_key = float('-inf')
+    current_row = ['', '', '']
+
+  if baseline is not None:
+    baseline_mean, baseline_stdev, baseline_count = baseline
+    baseline_row = [int(baseline_mean), f'{baseline_stdev:.2f}', baseline_count]
+  else:
+    baseline_row = ['', '', '']
+
+  if current is not None and baseline is not None:
+    d, se, t, nu, ci_half_width = welch(mean, stdev, args.runs, baseline_mean, baseline_stdev, args.runs)
+    emoji = get_emoji(d, ci_half_width)
+    ci_low = d - ci_half_width
+    ci_high = d + ci_half_width
+    comparison_row = [f'{d:.2f}', f'[{ci_low:.2f}, {ci_high:.2f}]', emoji]
+  else:
+    comparison_row = ['', '', '']
+
+  table.append((sort_key, [name, *current_row, *baseline_row, *comparison_row]))
+
+table.sort(key = lambda row: row[0], reverse=True)
+table = [row for _, row in table]
 
 confidence_pct = int(round((1.0 - args.alpha) * 100))
 header = [
