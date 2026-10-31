@@ -3,6 +3,8 @@ name: run-standalone-verify
 description: Build the ALICE O2 standalone benchmark in deterministic mode and verify results against the reference output. Use when asked to verify, check correctness, or run a deterministic build of the O2 standalone benchmark.
 ---
 
+**Owned by the `build-verify` subagent** — delegate to that agent rather than running this skill directly from the main thread or another agent.
+
 [Run these 5 commands first, exactly as written, and use their output where each is named below. Run them one per call, or all in one Bash call joined with &&.]
 1. `module load ninja/fortran-v1.11.1.g9-15 Vc/1.4.5-10 boost/v1.83.0-alice2-57 fmt/11.1.2-14 CMake/v3.31.6-10 ms_gsl/4.2.1-3 TBB/v2022.3.0-3 ROOT/v6-36-04-alice9-15 ONNXRuntime/v1.22.0-71 GLFW/3.3.2-25`
 2. `cmake -B /scratch/build -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=90 -DGPUCA_DETERMINISTIC_MODE=GPU -DCMAKE_INSTALL_PREFIX=/scratch /root/alice/O2/GPU/GPUTracking/Standalone > /scratch/cmake-configure.log`
