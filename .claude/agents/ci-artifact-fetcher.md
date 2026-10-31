@@ -36,3 +36,5 @@ Reply with just:
 - The run ID / branch / commit it came from
 
 Do not `cat`, `head`, or otherwise read any of the downloaded files yourself — not the CSVs, not the detail files, nothing.
+
+Retention policy (what's safe to prune later) is documented in `/shared/ci-artifacts/README.md` — not your job to enforce on every fetch, just know it exists.
