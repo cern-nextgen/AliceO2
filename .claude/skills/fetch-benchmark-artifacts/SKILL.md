@@ -5,6 +5,8 @@ description: Fetch and interpret the CI artifacts produced by .github/workflows/
 
 Fetch the artifacts GitHub Actions produced for a run of `standalone-benchmark.yml`, then read the *profiler* data inside them — not just the overall runtime. The workflow already prints a timing-only summary table to the GitHub Actions step summary; the reason to reach for this skill is everything that table doesn't show: per-kernel occupancy, register pressure, warp/wavefront activity, memory-unit stalls, and the raw `.ncu-rep`/`.nsys-rep`/`.pftrace`/`.perf.data` traces.
 
+**Steps 1-3 (find/download) are owned by the `ci-artifact-fetcher` subagent** — it downloads into `/shared/ci-artifacts/<short-sha>/` instead of an arbitrary dest-dir, and caches by commit. Delegate to that agent to get artifacts onto disk; don't run steps 1-3 yourself from the main thread or another agent. Steps 4-5 (knowing the file shapes, interpreting them) are for whoever reads the files afterward — that part isn't the fetcher agent's job.
+
 ## 1. Check `gh` is available and authenticated
 
 ```
