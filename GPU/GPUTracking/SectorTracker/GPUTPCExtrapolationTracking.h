@@ -17,34 +17,22 @@
 
 #include "GPUGeneralKernels.h"
 #include "GPUConstantMem.h"
-#include "GPUTPCExtrapolationCandidate.h"
+#include "GPUTPCBaseTrackParam.h"
 
 namespace o2::gpu
 {
 class GPUTPCTracker;
 
-// Named functor, not an inline lambda, deliberately -- matching GPUTPCGMMergerSortTracks_comp's
-// own pattern (GPUTPCGMMerger.cxx). An inline lambda defined directly inside a
-// runKernelBackendTimed<> specialization (GPUReconstructionCUDAKernelsSpecialize.inc) hit an NVCC
-// extended-lambda compile error there; every comparator actually used from inside one of those
-// specializations in this codebase is a named functor, never a raw lambda.
+// Named functor, not a lambda -- NVCC rejects a lambda here (GPUReconstructionCUDAKernelsSpecialize.inc).
 struct GPUTPCExtrapolationCandidateRowIndex_comp {
   const int32_t* const mRowIndex;
-  GPUhd() GPUTPCExtrapolationCandidateRowIndex_comp(int32_t* rowIndex) : mRowIndex(rowIndex) {}
+  GPUhd() GPUTPCExtrapolationCandidateRowIndex_comp(const int32_t* rowIndex) : mRowIndex(rowIndex) {}
   GPUd() bool operator()(int32_t a, int32_t b) const { return mRowIndex[a] < mRowIndex[b]; }
 };
 
 class GPUTPCExtrapolationTracking : public GPUKernelTemplate
 {
  public:
-  // "sort" is a real dispatched kernel (needed so runKernel<> routes through runKernelBackendTimed,
-  // which GPUReconstructionCUDAKernelsSpecialize.inc intercepts on CUDA/HIP to call sortOnDevice
-  // instead -- see GPUChainTrackingSectorTracker.cxx for why that call can't live inline there).
-  // Thread<sort>'s own body below is the fallback for backends where that specialization isn't
-  // active (e.g. CPU-only builds): it still performs a real sort via sortDeviceDynamic, same
-  // #ifndef GPUCA_SPECIALIZE_THRUST_SORTS pattern as GPUTPCGMMerger::SortTracks/SortTracksQPt --
-  // needed so the extrapolated-track append order matches a CUDA/HIP build's sortOnDevice order
-  // bit-for-bit, since nothing re-sorts Tracks() after ExtrapolationTracking appends to it.
   enum K { defaultKernel = 0,
            sort = 1 };
 
@@ -65,8 +53,8 @@ class GPUTPCExtrapolationTracking : public GPUKernelTemplate
   GPUd() static void ExtrapolationTrackingSectorLeftRight(uint32_t iSector, uint32_t& left, uint32_t& right);
 
  private:
-  GPUd() static int32_t PerformExtrapolationTrackingRun(GPUTPCTracker& tracker, GPUsharedref() GPUSharedMemory& smem, MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> sourceParam, int32_t sourceLocalTrackId, uint32_t sourceSector, int32_t rowIndex, float angle, int32_t direction);
-  GPUd() static void ConsumeExtrapolationCandidates(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, uint32_t sourceSector, GPUsharedref() GPUSharedMemory& smem, GPUTPCTracker& sectorTarget, MemLayout::wrapper<GPUTPCExtrapolationCandidateSkeleton, MemLayout::pointer> cand, GPUglobalref() const int32_t* sortedIndex, uint32_t nCand, float angle);
+  GPUd() static int32_t PerformExtrapolationTrackingRun(GPUTPCTracker& tracker, GPUsharedref() GPUSharedMemory& smem, const GPUTPCBaseTrackParam& sourceParam, int32_t sourceLocalTrackId, uint32_t sourceSector, int32_t rowIndex, float angle, int32_t direction);
+  GPUd() static void ConsumeExtrapolationCandidates(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, const GPUTPCTracker& sourceTracker, uint32_t sourceSector, GPUsharedref() GPUSharedMemory& smem, GPUTPCTracker& sectorTarget, GPUglobalref() const int32_t* candLocalTrackId, GPUglobalref() const int32_t* candRowIndex, GPUglobalref() const int8_t* candDirection, GPUglobalref() const int32_t* sortedIndex, uint32_t nCand, float angle);
 };
 
 class GPUTPCExtrapolationTrackingCopyNumbers : public GPUKernelTemplate

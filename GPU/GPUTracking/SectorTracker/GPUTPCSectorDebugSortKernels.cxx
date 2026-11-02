@@ -87,24 +87,29 @@ GPUdii() void GPUTPCSectorDebugSortKernels::Thread<GPUTPCSectorDebugSortKernels:
 template <>
 GPUdii() void GPUTPCSectorDebugSortKernels::Thread<GPUTPCSectorDebugSortKernels::sectorTracks>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& GPUrestrict() tracker)
 {
-  if (iThread || iBlock) {
-    return;
+  if (iThread == 0 && iBlock == 0) {
+    auto sorter = [&tracker](MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> trk1, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> trk2) {
+      if (trk1.NHits() != trk2.NHits()) {
+        return trk1.NHits() > trk2.NHits();
+      }
+      if (trk1.Param().Y() != trk2.Param().Y()) {
+        return trk1.Param().Y() > trk2.Param().Y();
+      }
+      if (trk1.Param().Z() != trk2.Param().Z()) {
+        return trk1.Param().Z() > trk2.Param().Z();
+      }
+      if (tracker.TrackHits()[trk1.FirstHitID()].RowIndex() != tracker.TrackHits()[trk2.FirstHitID()].RowIndex()) {
+        return tracker.TrackHits()[trk1.FirstHitID()].RowIndex() > tracker.TrackHits()[trk2.FirstHitID()].RowIndex();
+      }
+      return tracker.TrackHits()[trk1.FirstHitID()].HitIndex() > tracker.TrackHits()[trk2.FirstHitID()].HitIndex();
+    };
+    GPUCommonAlgorithm::sortDeviceDynamic(tracker.Tracks(), tracker.Tracks() + tracker.CommonMemory()->nLocalTracks, sorter);
+    GPUCommonAlgorithm::sortDeviceDynamic(tracker.Tracks() + tracker.CommonMemory()->nLocalTracks, tracker.Tracks() + *tracker.NTracks(), sorter);
   }
-  auto sorter = [&tracker](MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> trk1, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> trk2) {
-    if (trk1.NHits() != trk2.NHits()) {
-      return trk1.NHits() > trk2.NHits();
-    }
-    if (trk1.Param().Y() != trk2.Param().Y()) {
-      return trk1.Param().Y() > trk2.Param().Y();
-    }
-    if (trk1.Param().Z() != trk2.Param().Z()) {
-      return trk1.Param().Z() > trk2.Param().Z();
-    }
-    if (tracker.TrackHits()[trk1.FirstHitID()].RowIndex() != tracker.TrackHits()[trk2.FirstHitID()].RowIndex()) {
-      return tracker.TrackHits()[trk1.FirstHitID()].RowIndex() > tracker.TrackHits()[trk2.FirstHitID()].RowIndex();
-    }
-    return tracker.TrackHits()[trk1.FirstHitID()].HitIndex() > tracker.TrackHits()[trk2.FirstHitID()].HitIndex();
-  };
-  GPUCommonAlgorithm::sortDeviceDynamic(tracker.Tracks(), tracker.Tracks() + tracker.CommonMemory()->nLocalTracks, sorter);
-  GPUCommonAlgorithm::sortDeviceDynamic(tracker.Tracks() + tracker.CommonMemory()->nLocalTracks, tracker.Tracks() + *tracker.NTracks(), sorter);
+  // Single block only -- GPUbarrier() doesn't sync across blocks.
+  GPUbarrier();
+  const uint32_t nLocalTracks = tracker.CommonMemory()->nLocalTracks;
+  for (uint32_t i = iThread; i < nLocalTracks; i += nThreads) {
+    tracker.LocalSlotOf()[tracker.Tracks()[i].LocalTrackId()] = i;
+  }
 }

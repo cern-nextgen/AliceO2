@@ -28,7 +28,6 @@
 #include "GPUTPCTrack.h"
 #include "GPUProcessor.h"
 #include "MemLayout.h"
-#include "GPUTPCExtrapolationCandidate.h"
 
 namespace o2::gpu
 {
@@ -72,9 +71,6 @@ class GPUTPCTracker : public GPUProcessor
     GPUAtomic(uint32_t) nTrackHits = 0; // number of track hits
     int32_t nLocalTrackHits = 0;        // see above
 
-    // Dense per-sector candidate lists for ExtrapolationTracking, filled by GPUTPCTrackletSelector
-    // as a side effect of writing each local track, so ExtrapolationTracking can consume them densely
-    // instead of re-scanning all local tracks and masking out the ones that don't qualify.
     GPUAtomic(uint32_t) nExtrapCandToLeft = 0;
     GPUAtomic(uint32_t) nExtrapCandToRight = 0;
   };
@@ -201,18 +197,26 @@ class GPUTPCTracker : public GPUProcessor
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NTrackHits() const { return &mCommonMem->nTrackHits; }
   GPUhd() GPUglobalref() GPUTPCHitId* TrackHits() const { return mTrackHits; }
 
-  GPUhd() GPUglobalref() auto ExtrapCandToLeft() const { return mExtrapCandToLeft; }
-  GPUhd() GPUglobalref() auto ExtrapCandToRight() const { return mExtrapCandToRight; }
+  GPUhd() GPUglobalref() int32_t* ExtrapCandLocalTrackIdToLeft() const { return mExtrapCandLocalTrackIdToLeft; }
+  GPUhd() GPUglobalref() int32_t* ExtrapCandLocalTrackIdToRight() const { return mExtrapCandLocalTrackIdToRight; }
+  GPUhd() GPUglobalref() int32_t* ExtrapCandRowIndexToLeft() const { return mExtrapCandRowIndexToLeft; }
+  GPUhd() GPUglobalref() int32_t* ExtrapCandRowIndexToRight() const { return mExtrapCandRowIndexToRight; }
+  GPUhd() GPUglobalref() int8_t* ExtrapCandDirectionToLeft() const { return mExtrapCandDirectionToLeft; }
+  GPUhd() GPUglobalref() int8_t* ExtrapCandDirectionToRight() const { return mExtrapCandDirectionToRight; }
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NExtrapCandToLeft() const { return &mCommonMem->nExtrapCandToLeft; }
   GPUhd() GPUglobalref() GPUAtomic(uint32_t) * NExtrapCandToRight() const { return &mCommonMem->nExtrapCandToRight; }
   GPUhd() GPUglobalref() int32_t* ExtrapCandSortedIndexToLeft() const { return mExtrapCandSortedIndexToLeft; }
   GPUhd() GPUglobalref() int32_t* ExtrapCandSortedIndexToRight() const { return mExtrapCandSortedIndexToRight; }
+  // Non-null only in deterministic mode; maps a track's original LocalTrackId to its current Tracks() slot.
+  GPUhd() GPUglobalref() int32_t* LocalSlotOf() const { return mLocalSlotOf; }
   // Persistent scratch for sortOnDevice's CUB temp storage (see GPUReconstructionCUDAKernelsSpecialize.inc)
   // -- passed in explicitly instead of letting sortOnDevice fall back to AllocateVolatileDeviceMemory(),
   // which is a single global non-reentrant allocator incompatible with calling sortOnDevice once per
   // sector, concurrently across streams (see GPUCommonAlgorithm.h's sortOnDevice comment).
   GPUhd() GPUglobalref() char* ExtrapCandSortTempMem() const { return mExtrapCandSortTempMem; }
-  GPUhd() static constexpr size_t ExtrapCandSortTempMemSize(uint32_t nMaxTracks) { return 16 * (size_t)nMaxTracks; } // generous margin over CUB's typical ~2*N*sizeof(int32_t) need
+  // CUB's DeviceMergeSort temp storage is ~2*N*sizeof(int32_t); this multiplier leaves a safety margin.
+  static constexpr size_t ExtrapCandSortTempMemMultiplier = 16;
+  GPUhd() static constexpr size_t ExtrapCandSortTempMemSize(uint32_t nMaxTracks) { return ExtrapCandSortTempMemMultiplier * (size_t)nMaxTracks; }
 
   GPUhd() GPUglobalref() GPUTPCRow* TrackingDataRows() const { return (mData.Rows()); }
   GPUhd() GPUglobalref() int32_t* RowStartHitCountOffset() const { return (mRowStartHitCountOffset); }
@@ -266,16 +270,17 @@ class GPUTPCTracker : public GPUProcessor
   GPUglobalref() MemLayout::interface<GPUTPCTrackSkeleton, MemLayout::pointer, GPUTPCTrackLayout>::type mTracks;       // reconstructed tracks
   GPUglobalref() GPUTPCHitId* mTrackHits = nullptr;                  // array of track hit numbers
 
-  // Dense ExtrapolationTracking candidate lists, filled by GPUTPCTrackletSelector, consumed by GPUTPCExtrapolationTracking
-  GPUglobalref() MemLayout::interface<GPUTPCExtrapolationCandidateSkeleton, MemLayout::pointer, GPUTPCExtrapolationCandidateLayout>::type mExtrapCandToLeft;
-  GPUglobalref() MemLayout::interface<GPUTPCExtrapolationCandidateSkeleton, MemLayout::pointer, GPUTPCExtrapolationCandidateLayout>::type mExtrapCandToRight;
+  GPUglobalref() int32_t* mExtrapCandLocalTrackIdToLeft = nullptr;
+  GPUglobalref() int32_t* mExtrapCandLocalTrackIdToRight = nullptr;
+  GPUglobalref() int32_t* mExtrapCandRowIndexToLeft = nullptr;
+  GPUglobalref() int32_t* mExtrapCandRowIndexToRight = nullptr;
+  GPUglobalref() int8_t* mExtrapCandDirectionToLeft = nullptr;
+  GPUglobalref() int8_t* mExtrapCandDirectionToRight = nullptr;
 
-  // Index permutation sorting ExtrapCandToLeft/ToRight by RowIndex -- GPUCommonAlgorithm::sortOnDevice
-  // needs a genuine contiguous T* array (see GPUChainTrackingSectorTracker.cxx), which the SoA-stored
-  // candidate records themselves aren't, so a plain uint32_t index array is sorted instead.
   GPUglobalref() int32_t* mExtrapCandSortedIndexToLeft = nullptr;
   GPUglobalref() int32_t* mExtrapCandSortedIndexToRight = nullptr;
   GPUglobalref() char* mExtrapCandSortTempMem = nullptr;
+  GPUglobalref() int32_t* mLocalSlotOf = nullptr;
 
   static int32_t StarthitSortComparison(const void* a, const void* b);
 };

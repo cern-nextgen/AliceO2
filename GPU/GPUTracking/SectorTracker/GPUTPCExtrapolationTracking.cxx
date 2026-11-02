@@ -25,7 +25,7 @@
 
 using namespace o2::gpu;
 
-GPUd() int32_t GPUTPCExtrapolationTracking::PerformExtrapolationTrackingRun(GPUTPCTracker& tracker, GPUsharedref() GPUSharedMemory& smem, MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> sourceParam, int32_t sourceLocalTrackId, uint32_t sourceSector, int32_t rowIndex, float angle, int32_t direction)
+GPUd() int32_t GPUTPCExtrapolationTracking::PerformExtrapolationTrackingRun(GPUTPCTracker& tracker, GPUsharedref() GPUSharedMemory& smem, const GPUTPCBaseTrackParam& sourceParam, int32_t sourceLocalTrackId, uint32_t sourceSector, int32_t rowIndex, float angle, int32_t direction)
 {
   /*for (int32_t j = 0;j < Tracks()[j].NHits();j++)
   {
@@ -121,49 +121,26 @@ GPUd() int32_t GPUTPCExtrapolationTracking::PerformExtrapolationTrackingRun(GPUT
   return (nHits >= tracker.Param().rec.tpc.extrapolationTrackingMinHits);
 }
 
-// Candidates in each of the 2 dense per-sector arrays (ToLeft/ToRight -- merged from an earlier
-// 4-array split by lower/upper edge, see GPUTPCExtrapolationCandidate.h's Direction() field) are
-// sorted by RowIndex ahead of ConsumeExtrapolationCandidates, so nearby threads in a warp process
-// candidates with similar remaining extrapolation length: row proximity to the sector edge is the
-// proxy, since PerformExtrapolationTrackingRun's per-row walk runs away from the edge until it
-// runs out of hits or leaves the Y range. Sorted via GPUCommonAlgorithm::sortOnDevice (host-launched,
-// CUB DeviceMergeSort) on a plain int32_t index permutation -- not the candidate records
-// themselves, since sortOnDevice needs a genuine contiguous T* array and the SoA-stored candidate
-// records don't have one. The actual sortOnDevice call lives in
-// GPUReconstructionCUDAKernelsSpecialize.inc (a runKernelBackendTimed<GPUTPCExtrapolationTracking,
-// sort> specialization, active on real CUDA/HIP builds), not in Thread<sort> below -- same pattern
-// GPUTPCGMMergerSortTracks/SortTracksQPt/GPUTPCGMO2Output::sort all use, and for the same reason:
-// sortOnDevice needs __CUDACC__/__HIPCC__ actually defined in the translation unit, which plain,
-// backend-agnostic .cxx files like GPUChainTrackingSectorTracker.cxx never have. An earlier version
-// called sortDeviceDynamic (device-side dynamic parallelism) directly on the candidate records;
-// measured via nsys to cost ~1.35 ms/call, 1.8x the consumer kernel it was meant to speed up --
-// dynamic parallelism's own launch overhead dominated.
+// CPU/non-specialized fallback; the real sortOnDevice call lives in GPUReconstructionCUDAKernelsSpecialize.inc.
 template <>
 GPUdii() void GPUTPCExtrapolationTracking::Thread<GPUTPCExtrapolationTracking::sort>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& GPUrestrict() tracker)
 {
 #ifndef GPUCA_SPECIALIZE_THRUST_SORTS
-  // Real fallback for backends without the sortOnDevice specialization active (e.g. CPU-only builds,
-  // where __CUDACC__/__HIPCC__ are never defined) -- mirrors GPUTPCGMMerger::SortTracks/SortTracksQPt's
-  // identical #ifndef GPUCA_SPECIALIZE_THRUST_SORTS pattern. This can't be a no-op: although each
-  // candidate's own PerformExtrapolationTrackingRun result is independent of visitation order,
-  // GPUTPCSectorDebugSortKernels::sectorTracks (the deterministic-mode canonicalizing sort) runs
-  // before ExtrapolationTracking's consumer appends any extrapolated tracks -- it never re-sorts
-  // Tracks() afterward. So the order ConsumeExtrapolationCandidates visits candidates in directly
-  // becomes the extrapolated-track append order in the dump. Leaving candidates unsorted here would
-  // make that order (CPU: original candidate-creation order) diverge from a CUDA/HIP build's order
-  // (RowIndex-sorted via sortOnDevice), breaking bit-exact cross-backend --debug 6 comparisons.
   if (iThread == 0 && iBlock == 0) {
-    GPUCommonAlgorithm::sortDeviceDynamic(tracker.ExtrapCandSortedIndexToLeft(), tracker.ExtrapCandSortedIndexToLeft() + *tracker.NExtrapCandToLeft(), GPUTPCExtrapolationCandidateRowIndex_comp(tracker.ExtrapCandToLeft().mRowIndex));
-    GPUCommonAlgorithm::sortDeviceDynamic(tracker.ExtrapCandSortedIndexToRight(), tracker.ExtrapCandSortedIndexToRight() + *tracker.NExtrapCandToRight(), GPUTPCExtrapolationCandidateRowIndex_comp(tracker.ExtrapCandToRight().mRowIndex));
+    GPUCommonAlgorithm::sortDeviceDynamic(tracker.ExtrapCandSortedIndexToLeft(), tracker.ExtrapCandSortedIndexToLeft() + *tracker.NExtrapCandToLeft(), GPUTPCExtrapolationCandidateRowIndex_comp(tracker.ExtrapCandRowIndexToLeft()));
+    GPUCommonAlgorithm::sortDeviceDynamic(tracker.ExtrapCandSortedIndexToRight(), tracker.ExtrapCandSortedIndexToRight() + *tracker.NExtrapCandToRight(), GPUTPCExtrapolationCandidateRowIndex_comp(tracker.ExtrapCandRowIndexToRight()));
   }
 #endif
 }
 
-GPUd() void GPUTPCExtrapolationTracking::ConsumeExtrapolationCandidates(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, uint32_t sourceSector, GPUsharedref() GPUSharedMemory& smem, GPUTPCTracker& GPUrestrict() sectorTarget, MemLayout::wrapper<GPUTPCExtrapolationCandidateSkeleton, MemLayout::pointer> cand, GPUglobalref() const int32_t* sortedIndex, uint32_t nCand, float angle)
+GPUd() void GPUTPCExtrapolationTracking::ConsumeExtrapolationCandidates(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, const GPUTPCTracker& GPUrestrict() sourceTracker, uint32_t sourceSector, GPUsharedref() GPUSharedMemory& smem, GPUTPCTracker& GPUrestrict() sectorTarget, GPUglobalref() const int32_t* candLocalTrackId, GPUglobalref() const int32_t* candRowIndex, GPUglobalref() const int8_t* candDirection, GPUglobalref() const int32_t* sortedIndex, uint32_t nCand, float angle)
 {
+  GPUglobalref() const int32_t* slotOf = sourceTracker.LocalSlotOf();
   for (uint32_t i = iBlock * nThreads + iThread; i < nCand; i += nThreads * nBlocks) {
     const int32_t itr = sortedIndex[i];
-    PerformExtrapolationTrackingRun(sectorTarget, smem, cand[itr].Param(), cand[itr].LocalTrackId(), sourceSector, cand[itr].RowIndex(), angle, cand[itr].Direction());
+    const int32_t localTrackId = candLocalTrackId[itr];
+    const int32_t slot = slotOf ? slotOf[localTrackId] : localTrackId;
+    PerformExtrapolationTrackingRun(sectorTarget, smem, sourceTracker.Tracks()[slot].Param(), localTrackId, sourceSector, candRowIndex[itr], angle, candDirection[itr]);
   }
 }
 
@@ -181,13 +158,8 @@ GPUdii() void GPUTPCExtrapolationTracking::Thread<0>(int32_t nBlocks, int32_t nT
   const GPUTPCTracker& GPUrestrict() left = tracker.GetConstantMem()->tpcTrackers[sectorLeft];
   const GPUTPCTracker& GPUrestrict() right = tracker.GetConstantMem()->tpcTrackers[sectorRight];
 
-  // Candidates were classified and compacted by GPUTPCTrackletSelector when each track was stored
-  // (see the piggyback block there) -- every entry in each of these 2 dense arrays is already known
-  // to qualify, so these are plain, fully-dense grid-strides, not gated scans over all local tracks.
-  // Direction (row-walk away from the lower vs upper edge) is now a per-candidate field rather than
-  // implied by which of 4 separate arrays it came from -- see GPUTPCExtrapolationCandidate.h.
-  ConsumeExtrapolationCandidates(nBlocks, nThreads, iBlock, iThread, sectorLeft, smem, tracker, left.ExtrapCandToRight(), left.ExtrapCandSortedIndexToRight(), *left.NExtrapCandToRight(), left.Param().dAlpha);
-  ConsumeExtrapolationCandidates(nBlocks, nThreads, iBlock, iThread, sectorRight, smem, tracker, right.ExtrapCandToLeft(), right.ExtrapCandSortedIndexToLeft(), *right.NExtrapCandToLeft(), -right.Param().dAlpha);
+  ConsumeExtrapolationCandidates(nBlocks, nThreads, iBlock, iThread, left, sectorLeft, smem, tracker, left.ExtrapCandLocalTrackIdToRight(), left.ExtrapCandRowIndexToRight(), left.ExtrapCandDirectionToRight(), left.ExtrapCandSortedIndexToRight(), *left.NExtrapCandToRight(), left.Param().dAlpha);
+  ConsumeExtrapolationCandidates(nBlocks, nThreads, iBlock, iThread, right, sectorRight, smem, tracker, right.ExtrapCandLocalTrackIdToLeft(), right.ExtrapCandRowIndexToLeft(), right.ExtrapCandDirectionToLeft(), right.ExtrapCandSortedIndexToLeft(), *right.NExtrapCandToLeft(), -right.Param().dAlpha);
 }
 
 GPUd() int32_t GPUTPCExtrapolationTracking::ExtrapolationTrackingSectorOrder(int32_t iSector)

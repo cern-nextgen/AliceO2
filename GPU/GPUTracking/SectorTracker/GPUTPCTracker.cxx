@@ -154,12 +154,20 @@ GPUhd() void* GPUTPCTracker::SetPointersOutput(void* mem)
 
 GPUhd() void* GPUTPCTracker::SetPointersExtrapolationCandidates(void* mem)
 {
-  auto extrapCand_helper = [&mem, this](auto& field) -> void { computePointerWithAlignment(mem, field, mNMaxTracks); };
-  ApplyRecursive{extrapCand_helper}(mExtrapCandToLeft);
-  ApplyRecursive{extrapCand_helper}(mExtrapCandToRight);
+  computePointerWithAlignment(mem, mExtrapCandLocalTrackIdToLeft, mNMaxTracks);
+  computePointerWithAlignment(mem, mExtrapCandLocalTrackIdToRight, mNMaxTracks);
+  computePointerWithAlignment(mem, mExtrapCandRowIndexToLeft, mNMaxTracks);
+  computePointerWithAlignment(mem, mExtrapCandRowIndexToRight, mNMaxTracks);
+  computePointerWithAlignment(mem, mExtrapCandDirectionToLeft, mNMaxTracks);
+  computePointerWithAlignment(mem, mExtrapCandDirectionToRight, mNMaxTracks);
   computePointerWithAlignment(mem, mExtrapCandSortedIndexToLeft, mNMaxTracks);
   computePointerWithAlignment(mem, mExtrapCandSortedIndexToRight, mNMaxTracks);
   computePointerWithAlignment(mem, mExtrapCandSortTempMem, ExtrapCandSortTempMemSize(mNMaxTracks));
+  if (mRec->GetProcessingSettings().deterministicGPUReconstruction) {
+    computePointerWithAlignment(mem, mLocalSlotOf, mNMaxTracks);
+  } else {
+    mLocalSlotOf = nullptr;
+  }
   return mem;
 }
 
