@@ -87,29 +87,35 @@ GPUdii() void GPUTPCSectorDebugSortKernels::Thread<GPUTPCSectorDebugSortKernels:
 template <>
 GPUdii() void GPUTPCSectorDebugSortKernels::Thread<GPUTPCSectorDebugSortKernels::sectorTracks>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& GPUrestrict() tracker)
 {
-  if (iThread == 0 && iBlock == 0) {
-    auto sorter = [&tracker](MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> trk1, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> trk2) {
-      if (trk1.NHits() != trk2.NHits()) {
-        return trk1.NHits() > trk2.NHits();
-      }
-      if (trk1.Param().Y() != trk2.Param().Y()) {
-        return trk1.Param().Y() > trk2.Param().Y();
-      }
-      if (trk1.Param().Z() != trk2.Param().Z()) {
-        return trk1.Param().Z() > trk2.Param().Z();
-      }
-      if (tracker.TrackHits()[trk1.FirstHitID()].RowIndex() != tracker.TrackHits()[trk2.FirstHitID()].RowIndex()) {
-        return tracker.TrackHits()[trk1.FirstHitID()].RowIndex() > tracker.TrackHits()[trk2.FirstHitID()].RowIndex();
-      }
-      return tracker.TrackHits()[trk1.FirstHitID()].HitIndex() > tracker.TrackHits()[trk2.FirstHitID()].HitIndex();
-    };
-    GPUCommonAlgorithm::sortDeviceDynamic(tracker.Tracks(), tracker.Tracks() + tracker.CommonMemory()->nLocalTracks, sorter);
-    GPUCommonAlgorithm::sortDeviceDynamic(tracker.Tracks() + tracker.CommonMemory()->nLocalTracks, tracker.Tracks() + *tracker.NTracks(), sorter);
+  if (iThread || iBlock) {
+    return;
   }
-  // Single block only -- GPUbarrier() doesn't sync across blocks.
-  GPUbarrier();
+  auto sorter = [&tracker](MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> trk1, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> trk2) {
+    if (trk1.NHits() != trk2.NHits()) {
+      return trk1.NHits() > trk2.NHits();
+    }
+    if (trk1.Param().Y() != trk2.Param().Y()) {
+      return trk1.Param().Y() > trk2.Param().Y();
+    }
+    if (trk1.Param().Z() != trk2.Param().Z()) {
+      return trk1.Param().Z() > trk2.Param().Z();
+    }
+    if (tracker.TrackHits()[trk1.FirstHitID()].RowIndex() != tracker.TrackHits()[trk2.FirstHitID()].RowIndex()) {
+      return tracker.TrackHits()[trk1.FirstHitID()].RowIndex() > tracker.TrackHits()[trk2.FirstHitID()].RowIndex();
+    }
+    return tracker.TrackHits()[trk1.FirstHitID()].HitIndex() > tracker.TrackHits()[trk2.FirstHitID()].HitIndex();
+  };
+  GPUCommonAlgorithm::sortDeviceDynamic(tracker.Tracks(), tracker.Tracks() + tracker.CommonMemory()->nLocalTracks, sorter);
+  GPUCommonAlgorithm::sortDeviceDynamic(tracker.Tracks() + tracker.CommonMemory()->nLocalTracks, tracker.Tracks() + *tracker.NTracks(), sorter);
+}
+
+// CPU backend forces nThreads == 1 for any kernel (GPUReconstructionCPU.cxx), so this can't be
+// folded into Thread<sectorTracks> above and still parallelize across more than one CPU host thread.
+template <>
+GPUdii() void GPUTPCSectorDebugSortKernels::Thread<GPUTPCSectorDebugSortKernels::localSlotOf>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& GPUrestrict() tracker)
+{
   const uint32_t nLocalTracks = tracker.CommonMemory()->nLocalTracks;
-  for (uint32_t i = iThread; i < nLocalTracks; i += nThreads) {
+  for (uint32_t i = iBlock * nThreads + iThread; i < nLocalTracks; i += nBlocks * nThreads) {
     tracker.LocalSlotOf()[tracker.Tracks()[i].LocalTrackId()] = i;
   }
 }

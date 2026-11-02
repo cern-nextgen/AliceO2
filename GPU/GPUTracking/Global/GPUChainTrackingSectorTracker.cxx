@@ -225,8 +225,8 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
     }
     runKernel<GPUTPCExtrapolationTrackingCopyNumbers>({{1, -ThreadCount(), useStream}, {iSector}}, 1);
     if (GetProcessingSettings().deterministicGPUReconstruction) {
-      // Must stay 1 block: Thread<sectorTracks>'s GPUbarrier() doesn't sync across blocks.
-      runKernel<GPUTPCSectorDebugSortKernels, GPUTPCSectorDebugSortKernels::sectorTracks>({GetGrid(256, 256, useStream), {iSector}});
+      runKernel<GPUTPCSectorDebugSortKernels, GPUTPCSectorDebugSortKernels::sectorTracks>({GetGrid(1, 1, useStream), {iSector}});
+      runKernel<GPUTPCSectorDebugSortKernels, GPUTPCSectorDebugSortKernels::localSlotOf>({GetGridAuto(useStream), {iSector}});
     }
     TransferMemoryResourceLinkToHost(RecoStep::TPCSectorTracking, trk.MemoryResCommon(), useStream, &mEvents->sector[iSector]);
     streamMap[iSector] = useStream;

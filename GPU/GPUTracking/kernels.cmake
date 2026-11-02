@@ -45,6 +45,7 @@ o2_gpu_add_kernel("GPUTPCCreateTrackingData"                              "= TPC
 o2_gpu_add_kernel("GPUTPCSectorDebugSortKernels, hitData"                 "= TPCTRACKER")
 o2_gpu_add_kernel("GPUTPCSectorDebugSortKernels, startHits"               "= TPCTRACKER")
 o2_gpu_add_kernel("GPUTPCSectorDebugSortKernels, sectorTracks"            "= TPCTRACKER")
+o2_gpu_add_kernel("GPUTPCSectorDebugSortKernels, localSlotOf"             "= TPCTRACKER")
 o2_gpu_add_kernel("GPUTPCGlobalDebugSortKernels, clearIds"                "= TPCMERGER"                                           NO int8_t parameter)
 o2_gpu_add_kernel("GPUTPCGlobalDebugSortKernels, sectorTracks"            "= TPCMERGER"                                           NO int8_t parameter)
 o2_gpu_add_kernel("GPUTPCGlobalDebugSortKernels, mergedTracks1"           "= TPCMERGER"                                           NO int8_t parameter)
