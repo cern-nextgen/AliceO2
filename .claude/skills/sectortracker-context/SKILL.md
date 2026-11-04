@@ -46,4 +46,6 @@ Scope: `GPU/GPUTracking/SectorTracker/`, specifically `GPUTPCTrackletConstructor
 
 Running, per-kernel notes live in `/shared/gpu-notes/`: [TrackletConstructor.md](/shared/gpu-notes/TrackletConstructor.md), [TrackletSelector.md](/shared/gpu-notes/TrackletSelector.md), [ExtrapolationTracking.md](/shared/gpu-notes/ExtrapolationTracking.md). Check the relevant file first before re-deriving a diagnosis from scratch, and append a new dated entry (don't overwrite history) after reaching a durable finding. The original combined doc, `/shared/ci-artifacts/tracklet-kernel-optimization-summary.md`, stays as the archival source these were split from.
 
+Cross-kernel design idea, not yet implemented: [bucket-sort-generalization.md](/shared/gpu-notes/bucket-sort-generalization.md) — generalizing the small-bounded-key bucket/counting sort already used by `GPUTPCStartHitsSorter` to also replace `TrackletSelector`'s and `ExtrapolationTracking`'s `sortOnDevice`/CUB-based sorts. Read before proposing a sort-related change to any of these three kernels.
+
 Known pitfalls already in memory (check these before proposing a design): persistent-lane row-sweep tracklet packing was tried and rejected; single-thread GPU kernels doing dependent-chain bookkeeping are catastrophically slow (no warp-level latency hiding).
