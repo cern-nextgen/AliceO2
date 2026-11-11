@@ -237,7 +237,7 @@ class GPUChainTracking : public GPUChain
 
   GPUChainTracking(GPUReconstruction* rec, uint32_t maxTPCHits = constants::GPU_MEM_MAX_TPC_CLUSTERS, uint32_t maxTRDTracklets = constants::GPU_MEM_MAX_TRD_TRACKLETS);
 
-  int32_t ExtrapolationTracking(uint32_t iSector, bool blocking);
+  int32_t ExtrapolationTracking(uint32_t sectorTarget, uint32_t sectorSource, bool fromLeftToRight, bool blocking);
 
   int32_t PrepareProfile();
   int32_t DoProfile();
