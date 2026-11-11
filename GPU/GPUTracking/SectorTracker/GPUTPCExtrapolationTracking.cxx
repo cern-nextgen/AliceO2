@@ -120,13 +120,15 @@ GPUd() int32_t GPUTPCExtrapolationTracking::PerformExtrapolationTrackingRun(GPUs
   return (nHits >= sectorTarget.Param().rec.tpc.extrapolationTrackingMinHits);
 }
 
-GPUd() void GPUTPCExtrapolationTracking::PerformExtrapolationTracking(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, GPUTPCTracker& sectorTarget, const GPUTPCTracker& GPUrestrict() sectorSource, bool fromLeftToRight)
+GPUd() void GPUTPCExtrapolationTracking::PerformExtrapolationTracking(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, GPUTPCTracker& sectorTarget, const GPUTPCTracker& GPUrestrict() sectorSource)
 {
   uint32_t nExtrapolationCandidates;
   const int32_t* extrapolationCandidates;
   const int32_t* direction;
 
-  if (fromLeftToRight) {
+  bool extrapolateFromLeftToRight = (sectorTarget.ISector() + GPUTPCGeometry::NSECTORS / 2 - sectorSource.ISector()) % (GPUTPCGeometry::NSECTORS / 2) == 1;
+ 
+  if (extrapolateFromLeftToRight) {
     nExtrapolationCandidates = *sectorSource.NExtrapolationCandidatesRight();
     extrapolationCandidates = sectorSource.ExtrapolationCandidatesRight();
     direction = sectorSource.ExtrapolationCandidatesRightDirection();
@@ -139,13 +141,13 @@ GPUd() void GPUTPCExtrapolationTracking::PerformExtrapolationTracking(int32_t nB
   for (uint32_t i = iBlock * nThreads + iThread; i < nExtrapolationCandidates; i += nThreads * nBlocks) {
     const int32_t localTrackId = extrapolationCandidates[i];
     int32_t rowIndex = sectorSource.TrackHits()[sectorSource.Tracks()[localTrackId].FirstHitID() + (direction[i] == 1 ? sectorSource.Tracks()[localTrackId].NHits() - 1 : 0)].RowIndex();
-    float dAlpha = (fromLeftToRight ? 1.0f : -1.0f) * sectorSource.Param().dAlpha;
+    float dAlpha = (extrapolateFromLeftToRight ? 1.0f : -1.0f) * sectorSource.Param().dAlpha;
     PerformExtrapolationTrackingRun(smem, sectorTarget, sectorSource, localTrackId, rowIndex, dAlpha, direction[i]);
   }
 }
 
 template <>
-GPUdii() void GPUTPCExtrapolationTracking::Thread<0>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& GPUrestrict() sectorTarget, int32_t iSectorSource, bool fromLeftToRight)
+GPUdii() void GPUTPCExtrapolationTracking::Thread<0>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& GPUrestrict() sectorTarget, int32_t iSectorSource)
 {
   GPUCA_SHARED_CACHE(&smem.mRows[0], sectorTarget.TrackingDataRows(), GPUTPCGeometry::NROWS * sizeof(GPUTPCRow));
   GPUbarrier();
@@ -154,7 +156,7 @@ GPUdii() void GPUTPCExtrapolationTracking::Thread<0>(int32_t nBlocks, int32_t nT
     return;
   }
   
-  PerformExtrapolationTracking(nBlocks, nThreads, iBlock, iThread, smem, sectorTarget, sectorTarget.GetConstantMem()->tpcTrackers[iSectorSource], fromLeftToRight);
+  PerformExtrapolationTracking(nBlocks, nThreads, iBlock, iThread, smem, sectorTarget, sectorTarget.GetConstantMem()->tpcTrackers[iSectorSource]);
 }
 
 GPUd() int32_t GPUTPCExtrapolationTracking::ExtrapolationTrackingSectorOrder(int32_t iSector)
