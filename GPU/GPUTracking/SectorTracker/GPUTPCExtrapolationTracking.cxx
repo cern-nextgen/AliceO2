@@ -159,28 +159,6 @@ GPUdii() void GPUTPCExtrapolationTracking::Thread<0>(int32_t nBlocks, int32_t nT
   PerformExtrapolationTracking(nBlocks, nThreads, iBlock, iThread, smem, sectorTarget, sectorTarget.GetConstantMem()->tpcTrackers[iSectorSource]);
 }
 
-GPUd() int32_t GPUTPCExtrapolationTracking::ExtrapolationTrackingSectorOrder(int32_t iSector)
-{
-  iSector++;
-  if (iSector == GPUTPCGeometry::NSECTORS / 2) {
-    iSector = 0;
-  }
-  if (iSector == GPUTPCGeometry::NSECTORS) {
-    iSector = GPUTPCGeometry::NSECTORS / 2;
-  }
-  return iSector;
-}
-
-GPUd() void GPUTPCExtrapolationTracking::ExtrapolationTrackingSectorLeftRight(uint32_t iSector, uint32_t& left, uint32_t& right)
-{
-  left = (iSector + (GPUTPCGeometry::NSECTORS / 2 - 1)) % (GPUTPCGeometry::NSECTORS / 2);
-  right = (iSector + 1) % (GPUTPCGeometry::NSECTORS / 2);
-  if (iSector >= (int32_t)GPUTPCGeometry::NSECTORS / 2) {
-    left += GPUTPCGeometry::NSECTORS / 2;
-    right += GPUTPCGeometry::NSECTORS / 2;
-  }
-}
-
 template <>
 GPUdii() void GPUTPCExtrapolationTrackingCopyNumbers::Thread<0>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& GPUrestrict() tracker, int32_t n)
 {

@@ -40,14 +40,10 @@ uint32_t GPUChainTracking::StreamForSector(uint32_t sector) const
   return sector % mRec->NStreams();
 }
 
-int32_t GPUChainTracking::ExtrapolationTracking(uint32_t sectorTarget, uint32_t sectorSource, bool blocking)
+int32_t GPUChainTracking::ExtrapolationTracking(uint32_t sectorTarget, uint32_t sectorSource, uint32_t stream)
 {
-  const uint32_t stream = StreamForSector(sectorTarget);
   runKernel<GPUTPCExtrapolationTracking>({GetGridBlk(256, stream), {sectorTarget}}, sectorSource);
   TransferMemoryResourceLinkToHost(RecoStep::TPCSectorTracking, processors()->tpcTrackers[sectorTarget].MemoryResCommon(), stream);
-  if (blocking) {
-    SynchronizeStream(stream);
-  }
   return (0);
 }
 
@@ -233,26 +229,18 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
 
   if (doGPU || GetProcessingSettings().debugLevel >= 1) {
     if (param().rec.tpc.extrapolationTracking) {
-      std::vector<bool> blocking(NSECTORS * mRec->NStreams());
-      for (uint32_t iSector = 0; iSector < NSECTORS; iSector++) {
-        for (uint32_t iStream = 0; iStream < mRec->NStreams(); iStream++) {
-          blocking[iSector * mRec->NStreams() + iStream] = StreamForSector(iSector) == iStream;
-        }
-      }
-      for (uint32_t iSector = 0; iSector < NSECTORS; iSector++) {
-        uint32_t targetSector = GPUTPCExtrapolationTracking::ExtrapolationTrackingSectorOrder(iSector);
-        uint32_t sectorLeft, sectorRight;
-        GPUTPCExtrapolationTracking::ExtrapolationTrackingSectorLeftRight(targetSector, sectorLeft, sectorRight);
-        if (doGPU && !blocking[targetSector * mRec->NStreams() + StreamForSector(sectorRight)]) {
-          StreamWaitForEvents(StreamForSector(targetSector), &mEvents->sector[sectorRight]);
-          blocking[targetSector * mRec->NStreams() + StreamForSector(sectorRight)] = true;
-        }
-        ExtrapolationTracking(targetSector, sectorRight, false);
-        if (doGPU && !blocking[targetSector * mRec->NStreams() + StreamForSector(sectorLeft)]) {
-          StreamWaitForEvents(StreamForSector(targetSector), &mEvents->sector[sectorLeft]);
-          blocking[targetSector * mRec->NStreams() + StreamForSector(sectorLeft)] = true;
-        }
-        ExtrapolationTracking(targetSector, sectorLeft, false);
+      uint32_t NSECTORS_HALF = NSECTORS / 2;
+      for (uint32_t leftSector = 0; leftSector < NSECTORS_HALF; leftSector++) {
+        uint32_t rightSector = (leftSector + 1) % NSECTORS_HALF;
+        uint32_t stream = StreamForSector(leftSector);
+        StreamWaitForEvents(stream, &mEvents->sector[rightSector]);
+        ExtrapolationTracking(rightSector, leftSector, stream);
+        ExtrapolationTracking(leftSector, rightSector, stream);
+
+        stream = StreamForSector(leftSector + NSECTORS_HALF);
+        StreamWaitForEvents(stream, &mEvents->sector[rightSector + NSECTORS_HALF]);
+        ExtrapolationTracking(rightSector + NSECTORS_HALF, leftSector + NSECTORS_HALF, stream);
+        ExtrapolationTracking(leftSector + NSECTORS_HALF, rightSector + NSECTORS_HALF, stream);
       }
     }
     if (doGPU) {
@@ -262,12 +250,16 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
       }
     }
   } else {
-    mRec->runParallelOuterLoop(doGPU, NSECTORS, [&](uint32_t iSector) {
+    mRec->runParallelOuterLoop(doGPU, NSECTORS, [&](uint32_t leftSector) {
       if (param().rec.tpc.extrapolationTracking) {
-        uint32_t sectorLeft, sectorRight;
-        GPUTPCExtrapolationTracking::ExtrapolationTrackingSectorLeftRight(iSector, sectorLeft, sectorRight);
-        ExtrapolationTracking(iSector, sectorRight, false);
-        ExtrapolationTracking(iSector, sectorLeft, true);
+        uint32_t NSECTORS_HALF = NSECTORS / 2;
+        uint32_t rightSector = (leftSector + 1) % NSECTORS_HALF;
+        if (leftSector >= NSECTORS_HALF) {
+          rightSector += NSECTORS_HALF;
+        }
+        uint32_t stream = StreamForSector(leftSector);
+        ExtrapolationTracking(leftSector, rightSector, stream);
+        ExtrapolationTracking(rightSector, leftSector, stream);
       }
     });
     mRec->SetNActiveThreadsOuterLoop(1);
