@@ -232,15 +232,22 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
       uint32_t NSECTORS_HALF = NSECTORS / 2;
       for (uint32_t leftSector = 0; leftSector < NSECTORS_HALF; leftSector++) {
         uint32_t rightSector = (leftSector + 1) % NSECTORS_HALF;
-        uint32_t stream = StreamForSector(leftSector);
-        StreamWaitForEvents(stream, &mEvents->sector[rightSector]);
-        ExtrapolationTracking(rightSector, leftSector, stream);
-        ExtrapolationTracking(leftSector, rightSector, stream);
 
-        stream = StreamForSector(leftSector + NSECTORS_HALF);
-        StreamWaitForEvents(stream, &mEvents->sector[rightSector + NSECTORS_HALF]);
-        ExtrapolationTracking(rightSector + NSECTORS_HALF, leftSector + NSECTORS_HALF, stream);
-        ExtrapolationTracking(leftSector + NSECTORS_HALF, rightSector + NSECTORS_HALF, stream);
+        uint32_t leftStream = StreamForSector(leftSector);
+        StreamWaitForEvents(leftStream, &mEvents->sector[rightSector]);
+        ExtrapolationTracking(leftSector, rightSector, leftStream);
+
+        uint32_t rightStream = StreamForSector(rightSector);
+        StreamWaitForEvents(rightStream, &mEvents->sector[leftSector]);
+        ExtrapolationTracking(rightSector, leftSector, rightStream);
+
+        leftStream = StreamForSector(leftSector + NSECTORS_HALF);
+        StreamWaitForEvents(leftStream, &mEvents->sector[rightSector + NSECTORS_HALF]);
+        ExtrapolationTracking(leftSector + NSECTORS_HALF, rightSector + NSECTORS_HALF, leftStream);
+
+        rightStream = StreamForSector(rightSector + NSECTORS_HALF);
+        StreamWaitForEvents(rightStream, &mEvents->sector[leftSector + NSECTORS_HALF]);
+        ExtrapolationTracking(rightSector + NSECTORS_HALF, leftSector + NSECTORS_HALF, rightStream);
       }
     }
     if (doGPU) {
