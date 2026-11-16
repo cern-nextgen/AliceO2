@@ -120,43 +120,31 @@ GPUd() int32_t GPUTPCExtrapolationTracking::PerformExtrapolationTrackingRun(GPUs
   return (nHits >= sectorTarget.Param().rec.tpc.extrapolationTrackingMinHits);
 }
 
-GPUd() void GPUTPCExtrapolationTracking::PerformExtrapolationTracking(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, GPUTPCTracker& sectorTarget, const GPUTPCTracker& GPUrestrict() sectorSource)
-{
-  uint32_t nExtrapolationCandidates;
-  const int32_t* extrapolationCandidates;
-  const int32_t* direction;
-
-  bool extrapolateFromLeftToRight = (sectorTarget.ISector() + GPUTPCGeometry::NSECTORS / 2 - sectorSource.ISector()) % (GPUTPCGeometry::NSECTORS / 2) == 1;
- 
-  if (extrapolateFromLeftToRight) {
-    nExtrapolationCandidates = *sectorSource.NExtrapolationCandidatesRight();
-    extrapolationCandidates = sectorSource.ExtrapolationCandidatesRight();
-    direction = sectorSource.ExtrapolationCandidatesRightDirection();
-  } else {
-    nExtrapolationCandidates = *sectorSource.NExtrapolationCandidatesLeft();
-    extrapolationCandidates = sectorSource.ExtrapolationCandidatesLeft();
-    direction = sectorSource.ExtrapolationCandidatesLeftDirection();
-  }
-
-  for (uint32_t i = iBlock * nThreads + iThread; i < nExtrapolationCandidates; i += nThreads * nBlocks) {
-    const int32_t localTrackId = extrapolationCandidates[i];
-    int32_t rowIndex = sectorSource.TrackHits()[sectorSource.Tracks()[localTrackId].FirstHitID() + (direction[i] == 1 ? sectorSource.Tracks()[localTrackId].NHits() - 1 : 0)].RowIndex();
-    float dAlpha = (extrapolateFromLeftToRight ? 1.0f : -1.0f) * sectorSource.Param().dAlpha;
-    PerformExtrapolationTrackingRun(smem, sectorTarget, sectorSource, localTrackId, rowIndex, dAlpha, direction[i]);
-  }
-}
-
 template <>
-GPUdii() void GPUTPCExtrapolationTracking::Thread<0>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& GPUrestrict() sectorTarget, int32_t iSectorSource)
+GPUdii() void GPUTPCExtrapolationTracking::Thread<0>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& GPUrestrict() leftSector, int32_t iRightSector)
 {
-  GPUCA_SHARED_CACHE(&smem.mRows[0], sectorTarget.TrackingDataRows(), GPUTPCGeometry::NROWS * sizeof(GPUTPCRow));
+  GPUTPCTracker& GPUrestrict() rightSector = leftSector.GetConstantMem()->tpcTrackers[iRightSector];
+  uint32_t leftToRightCandidates = *leftSector.NExtrapolationCandidatesRight();
+  uint32_t leftToRightCandidatesPadded = ((leftToRightCandidates + nThreads - 1) / nThreads) * nThreads;
+
+  GPUCA_SHARED_CACHE(&smem.mRows[0], ((iBlock * nThreads) < leftToRightCandidatesPadded ? rightSector : leftSector).TrackingDataRows(), GPUTPCGeometry::NROWS * sizeof(GPUTPCRow));
   GPUbarrier();
 
-  if (sectorTarget.NHitsTotal() == 0) {
-    return;
+  for (uint32_t i = iBlock * nThreads + iThread; i < leftToRightCandidatesPadded + *rightSector.NExtrapolationCandidatesLeft(); i += nThreads * nBlocks) {
+    if (i < leftToRightCandidates && rightSector.NHitsTotal() != 0) {
+      // Extrapolate from left sector to right sector
+      const int32_t localTrackId = leftSector.ExtrapolationCandidatesRight()[i];
+      const int32_t direction = leftSector.ExtrapolationCandidatesRightDirection()[i];
+      int32_t rowIndex = leftSector.TrackHits()[leftSector.Tracks()[localTrackId].FirstHitID() + (direction == 1 ? leftSector.Tracks()[localTrackId].NHits() - 1 : 0)].RowIndex();
+      PerformExtrapolationTrackingRun(smem, rightSector, leftSector, localTrackId, rowIndex, leftSector.Param().dAlpha, direction);
+    } else if (i >= leftToRightCandidatesPadded && leftSector.NHitsTotal() != 0) {
+      // Extrapolate from right sector to left sector
+      const int32_t localTrackId = rightSector.ExtrapolationCandidatesLeft()[i - leftToRightCandidatesPadded];
+      const int32_t direction = rightSector.ExtrapolationCandidatesLeftDirection()[i - leftToRightCandidatesPadded];
+      int32_t rowIndex = rightSector.TrackHits()[rightSector.Tracks()[localTrackId].FirstHitID() + (direction == 1 ? rightSector.Tracks()[localTrackId].NHits() - 1 : 0)].RowIndex();
+      PerformExtrapolationTrackingRun(smem, leftSector, rightSector, localTrackId, rowIndex, -rightSector.Param().dAlpha, direction);
+    }
   }
-  
-  PerformExtrapolationTracking(nBlocks, nThreads, iBlock, iThread, smem, sectorTarget, sectorTarget.GetConstantMem()->tpcTrackers[iSectorSource]);
 }
 
 template <>

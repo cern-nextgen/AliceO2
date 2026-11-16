@@ -40,10 +40,11 @@ uint32_t GPUChainTracking::StreamForSector(uint32_t sector) const
   return sector % mRec->NStreams();
 }
 
-int32_t GPUChainTracking::ExtrapolationTracking(uint32_t sectorTarget, uint32_t sectorSource, uint32_t stream)
+int32_t GPUChainTracking::ExtrapolationTracking(uint32_t sectorLeft, uint32_t sectorRight, uint32_t stream)
 {
-  runKernel<GPUTPCExtrapolationTracking>({GetGridBlk(256, stream), {sectorTarget}}, sectorSource);
-  TransferMemoryResourceLinkToHost(RecoStep::TPCSectorTracking, processors()->tpcTrackers[sectorTarget].MemoryResCommon(), stream);
+  runKernel<GPUTPCExtrapolationTracking>({GetGridBlk(256, stream), {sectorLeft}}, sectorRight);
+  TransferMemoryResourceLinkToHost(RecoStep::TPCSectorTracking, processors()->tpcTrackers[sectorLeft].MemoryResCommon(), stream);
+  TransferMemoryResourceLinkToHost(RecoStep::TPCSectorTracking, processors()->tpcTrackers[sectorRight].MemoryResCommon(), stream);
   return (0);
 }
 
@@ -234,12 +235,10 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
         uint32_t rightSector = (leftSector + 1) % NSECTORS_HALF;
         uint32_t stream = StreamForSector(leftSector);
         StreamWaitForEvents(stream, &mEvents->sector[rightSector]);
-        ExtrapolationTracking(rightSector, leftSector, stream);
         ExtrapolationTracking(leftSector, rightSector, stream);
 
         stream = StreamForSector(leftSector + NSECTORS_HALF);
         StreamWaitForEvents(stream, &mEvents->sector[rightSector + NSECTORS_HALF]);
-        ExtrapolationTracking(rightSector + NSECTORS_HALF, leftSector + NSECTORS_HALF, stream);
         ExtrapolationTracking(leftSector + NSECTORS_HALF, rightSector + NSECTORS_HALF, stream);
       }
     }
@@ -257,9 +256,7 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
         if (leftSector >= NSECTORS_HALF) {
           rightSector += NSECTORS_HALF;
         }
-        uint32_t stream = StreamForSector(leftSector);
-        ExtrapolationTracking(leftSector, rightSector, stream);
-        ExtrapolationTracking(rightSector, leftSector, stream);
+        ExtrapolationTracking(leftSector, rightSector, StreamForSector(leftSector));
       }
     });
     mRec->SetNActiveThreadsOuterLoop(1);
