@@ -35,11 +35,6 @@
 
 using namespace o2::gpu;
 
-uint32_t GPUChainTracking::StreamForSector(uint32_t sector) const
-{
-  return sector % mRec->NStreams();
-}
-
 int32_t GPUChainTracking::ExtrapolationTracking(uint32_t sectorLeft, uint32_t sectorRight, uint32_t stream)
 {
   runKernel<GPUTPCExtrapolationTracking>({GetGridBlk(256, stream), {sectorLeft}}, sectorRight);
@@ -145,7 +140,7 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
   mRec->runParallelOuterLoop(doGPU, NSECTORS, [&](uint32_t iSector) {
     GPUTPCTracker& trk = processors()->tpcTrackers[iSector];
     GPUTPCTracker& trkShadow = doGPU ? processorsShadow()->tpcTrackers[iSector] : trk;
-    int32_t useStream = StreamForSector(iSector);
+    int32_t useStream = mRec->StreamForSector(iSector);
 
     if (GetProcessingSettings().debugLevel >= 3) {
       GPUInfo("Creating Sector Data (Sector %d)", iSector);
@@ -230,16 +225,16 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
 
   if (doGPU || GetProcessingSettings().debugLevel >= 1) {
     if (param().rec.tpc.extrapolationTracking) {
-      uint32_t NSECTORS_HALF = NSECTORS / 2;
-      for (uint32_t leftSector = 0; leftSector < NSECTORS_HALF; leftSector++) {
-        uint32_t rightSector = (leftSector + 1) % NSECTORS_HALF;
-        uint32_t stream = StreamForSector(leftSector);
+      constexpr uint32_t nSectorsHalf = NSECTORS / 2;
+      for (uint32_t leftSector = 0; leftSector < nSectorsHalf; leftSector++) {
+        uint32_t rightSector = (leftSector + 1) % nSectorsHalf;
+        uint32_t stream = mRec->StreamForSector(leftSector);
         StreamWaitForEvents(stream, &mEvents->sector[rightSector]);
         ExtrapolationTracking(leftSector, rightSector, stream);
 
-        stream = StreamForSector(leftSector + NSECTORS_HALF);
-        StreamWaitForEvents(stream, &mEvents->sector[rightSector + NSECTORS_HALF]);
-        ExtrapolationTracking(leftSector + NSECTORS_HALF, rightSector + NSECTORS_HALF, stream);
+        stream = mRec->StreamForSector(leftSector + nSectorsHalf);
+        StreamWaitForEvents(stream, &mEvents->sector[rightSector + nSectorsHalf]);
+        ExtrapolationTracking(leftSector + nSectorsHalf, rightSector + nSectorsHalf, stream);
       }
     }
     if (doGPU) {
@@ -251,12 +246,12 @@ int32_t GPUChainTracking::RunTPCTrackingSectors_internal()
   } else {
     mRec->runParallelOuterLoop(doGPU, NSECTORS, [&](uint32_t leftSector) {
       if (param().rec.tpc.extrapolationTracking) {
-        uint32_t NSECTORS_HALF = NSECTORS / 2;
-        uint32_t rightSector = (leftSector + 1) % NSECTORS_HALF;
-        if (leftSector >= NSECTORS_HALF) {
-          rightSector += NSECTORS_HALF;
+        constexpr uint32_t nSectorsHalf = NSECTORS / 2;
+        uint32_t rightSector = (leftSector + 1) % nSectorsHalf;
+        if (leftSector >= nSectorsHalf) {
+          rightSector += nSectorsHalf;
         }
-        ExtrapolationTracking(leftSector, rightSector, StreamForSector(leftSector));
+        ExtrapolationTracking(leftSector, rightSector, mRec->StreamForSector(leftSector));
       }
     });
     mRec->SetNActiveThreadsOuterLoop(1);

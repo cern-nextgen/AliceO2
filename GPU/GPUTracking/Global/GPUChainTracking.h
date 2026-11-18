@@ -324,7 +324,6 @@ class GPUChainTracking : public GPUChain
   void SortClusters(bool buildNativeGPU, bool propagateMCLabels, o2::tpc::ClusterNativeAccess* clusterAccess, o2::tpc::ClusterNative* clusters);
   template <int32_t I>
   int32_t RunTRDTrackingInternal();
-  uint32_t StreamForSector(uint32_t sector) const;
 
   std::mutex mMutexUpdateCalib;
   std::unique_ptr<GPUChainTrackingFinalContext> mPipelineFinalizationCtx;
