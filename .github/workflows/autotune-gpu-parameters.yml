@@ -1,0 +1,205 @@
+name: Autotune GPU Parameters
+
+on:
+  workflow_dispatch:
+    inputs:
+      time_budget:
+        description: "Optuna time budget per GPU (e.g. 30m, 1h, 2h30m)"
+        required: false
+        default: "30m"
+      dataset:
+        description: "Event dataset for the tuner to benchmark against"
+        required: false
+        default: "50kHz"
+      autotuner_ref:
+        description: "git ref of cima22/O2GPU-autotuner to tune with"
+        required: false
+        default: "main"
+      o2_ref:
+        description: "O2 commit/branch/tag to build and tune (blank = latest commit of the branch this is dispatched from)"
+        required: false
+        default: ""
+      step:
+        description: "Tune-space step to optimize"
+        required: false
+        type: choice
+        default: "all"
+        options:
+          - all
+          - clusterizer
+          - compressionStep1unattached
+          - mergerCollect
+          - mergerSectorRefit
+          - mergerTrackFit
+          - multikernel
+          - tracklet
+
+jobs:
+  autotune:
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: registry.cern.ch/alisw/slc9-gpu-builder@sha256:55ffe1c2c5fa8449403fc011e425ee983fe34ebc79799e7ab9f44eeab8aee7fc
+      options: --cap-add=SYS_PTRACE --cap-add=PERFMON
+    concurrency:
+      group: gpu-runner-${{ matrix.runner }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [nvidia-h100, nvidia-rtx6000, nvidia-l40s, amd-mi300x, amd-w7900]
+        include:
+          - name: nvidia-h100
+            runner: cern-nextgen-h100
+            cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=90
+            csv_arch_column: HOPPER
+            param_file: defaultParamsNVIDIA.h
+            tuner_backend: nvidia
+          - name: nvidia-rtx6000
+            runner: cern-nextgen-rtx6000
+            cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=120
+            csv_arch_column: BLACKWELL
+            param_file: defaultParamsNVIDIA.h
+            tuner_backend: nvidia
+          - name: nvidia-l40s
+            runner: cern-nextgen-l40s
+            cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=89
+            csv_arch_column: ADA
+            param_file: defaultParamsNVIDIA.h
+            tuner_backend: nvidia
+          - name: amd-mi300x
+            runner: cern-nextgen-mi300x
+            cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx942
+            csv_arch_column: MI300
+            param_file: defaultParamsAMD.h
+            tuner_backend: amd
+          - name: amd-w7900
+            runner: cern-nextgen-w7900
+            cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx1100
+            csv_arch_column: RDNA
+            param_file: defaultParamsAMD.h
+            tuner_backend: amd
+    env:
+      WORK_DIR: /cvmfs/alice.cern.ch
+      ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
+      MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
+      MODULES: Vc/1.4.5-23 fmt/11.1.2-25 ms_gsl/4.2.1-16 TBB/v2022.3.0-15 ROOT/v6-36-10-alice4-5
+      ARTIFACT_DIR: /scratch/artifacts
+      ALICE_SOURCE_DIR: /scratch/alice
+      STANDALONE_DIR: /scratch/standalone
+      AUTOTUNER_DIR: /scratch/O2GPU-autotuner
+      TUNER_WORKDIR: /scratch/standalone
+      TUNER_PARAMETER_FILE: /scratch/tuner_seed/seeded_params.h
+      TUNER_DATASET: ${{ inputs.dataset }}
+
+    name: ${{ matrix.name }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.o2_ref != '' && inputs.o2_ref || github.ref }}
+
+      - name: Create Directories and Copy Source
+        run: |
+          mkdir -p ${ARTIFACT_DIR}
+          mkdir -p ${ALICE_SOURCE_DIR}
+          cp -r ${GITHUB_WORKSPACE}/. ${ALICE_SOURCE_DIR}/
+
+      - name: Download Files
+        run: |
+          mkdir -p ${STANDALONE_DIR}/events
+          curl -fL --retry 3 -o ${STANDALONE_DIR}/events/50kHz.tar.xz https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/events/50kHz.tar.xz
+          tar -xf ${STANDALONE_DIR}/events/50kHz.tar.xz -C ${STANDALONE_DIR}/events
+
+      - name: Build Non-Deterministic
+        run: |
+          source /etc/profile.d/modules.sh
+          module load ${MODULES}
+          mkdir -p ${STANDALONE_DIR}
+          cmake -B ${STANDALONE_DIR}/build ${{ matrix.cmake_args }} -DGPUCA_DETERMINISTIC_MODE=OFF -DCMAKE_INSTALL_PREFIX=${STANDALONE_DIR} ${ALICE_SOURCE_DIR}/GPU/GPUTracking/Standalone/
+          cmake --build ${STANDALONE_DIR}/build --target install -j 8
+
+      - name: Seed tuner baseline from GPUParameters.csv
+        run: |
+          mkdir -p /scratch/tuner_seed
+          python3 ${ALICE_SOURCE_DIR}/.github/scripts/header_csv_converter.py \
+            --from ${ALICE_SOURCE_DIR}/GPU/GPUTracking/Definitions/Parameters/GPUParameters.csv \
+            --to /scratch/tuner_seed/seeded_params.h \
+            --arch ${{ matrix.csv_arch_column }}
+
+      - name: Install O2GPU-autotuner
+        run: |
+          git clone --depth 1 --branch ${{ inputs.autotuner_ref }} https://github.com/cima22/O2GPU-autotuner.git ${AUTOTUNER_DIR}
+          pip install -e ${AUTOTUNER_DIR}
+
+      - name: Install Nsight Systems CLI
+        if: ${{ matrix.tuner_backend == 'nvidia' }}
+        run: |
+          dnf config-manager --add-repo "https://developer.download.nvidia.com/devtools/repos/rhel$(source /etc/os-release; echo ${VERSION_ID%%.*})/$(rpm --eval '%{_arch}' | sed s/aarch/arm/)/"
+          dnf install --nogpgcheck -y nsight-systems-cli-2026.5.1
+
+      - name: Run autotuner
+        run: |
+          source /etc/profile.d/modules.sh
+          module load ${MODULES}
+          mkdir -p ${ARTIFACT_DIR}/tuning
+          if [ "${{ inputs.step }}" = "all" ]; then
+            TUNE_SPACE_DIR=${AUTOTUNER_DIR}/O2GPU_autotuner/tune_spaces
+          else
+            TUNE_SPACE_DIR=/scratch/tune_space_selected
+            mkdir -p ${TUNE_SPACE_DIR}
+            cp ${AUTOTUNER_DIR}/O2GPU_autotuner/tune_spaces/${{ inputs.step }}.yaml ${TUNE_SPACE_DIR}/
+          fi
+          env -u PYTHONHOME -u PYTHONPATH TUNE_SPACE_DIR=${TUNE_SPACE_DIR} \
+            o2gpu-tune --time-budget ${{ inputs.time_budget }} --backend ${{ matrix.tuner_backend }} --output ${ARTIFACT_DIR}/tuning
+
+      - name: Analyze results
+        run: |
+          source /etc/profile.d/modules.sh
+          module load ${MODULES}
+          env -u PYTHONHOME -u PYTHONPATH o2gpu-analyze ${ARTIFACT_DIR}/tuning > ${ARTIFACT_DIR}/tuning/analyze_report.txt
+          echo "## ${{ matrix.name }} tuning result" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          sed -n '/========== TIMING RESULTS ==========/,$p' ${ARTIFACT_DIR}/tuning/analyze_report.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.name }}-tuning-artifact
+          path: ${{ env.ARTIFACT_DIR }}/tuning/optimized.h
+
+  merge-results:
+    needs: autotune
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.o2_ref != '' && inputs.o2_ref || github.ref }}
+
+      - name: Download all per-GPU optimized headers
+        uses: actions/download-artifact@v7
+        with:
+          pattern: "*-tuning-artifact"
+          path: artifacts
+
+      - name: Merge all architectures into one GPUParameters.csv
+        run: |
+          CSV=GPU/GPUTracking/Definitions/Parameters/GPUParameters.csv
+          declare -A ARCH=( [nvidia-h100]=HOPPER [nvidia-rtx6000]=BLACKWELL [nvidia-l40s]=ADA [amd-mi300x]=MI300 [amd-w7900]=RDNA )
+          for dir in artifacts/*-tuning-artifact; do
+            name=$(basename "$dir" -tuning-artifact)
+            arch=${ARCH[$name]}
+            if [ -z "$arch" ] || [ ! -f "$dir/optimized.h" ]; then
+              echo "::warning::Skipping $name (no artifact or unknown architecture mapping)"
+              continue
+            fi
+            python3 .github/scripts/header_csv_converter.py --from "$dir/optimized.h" --to "$CSV" --arch "$arch"
+          done
+
+      - name: Upload GPUParameters.csv
+        uses: actions/upload-artifact@v7
+        with:
+          name: GPUParameters.csv
+          path: GPU/GPUTracking/Definitions/Parameters/GPUParameters.csv
