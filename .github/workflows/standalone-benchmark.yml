@@ -2,10 +2,11 @@ name: Standalone Benchmark
 
 on:
   workflow_dispatch:
-  pull_request:
-  push:
-    branches:
-      - '**'
+    inputs:
+      o2_ref:
+        description: "O2 commit/branch/tag (blank = latest commit of the branch this is dispatched from)"
+        required: false
+        default: ""
 
 jobs:
   benchmark:
@@ -16,16 +17,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [cpu, nvidia-h100, nvidia-rtx6000, nvidia-l40s, amd-mi300x, amd-w7900]
+        name: [nvidia-h100, nvidia-rtx6000, nvidia-l40s, amd-mi300x, amd-w7900, cpu]
         include:
-          - name: cpu
-            runner: cern-nextgen-highfreq-4c
-            cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=0
-            cmake_jobs: 4
-            profiler_runs: 12
-            standalone_runs: 42
-            backend: "-c"
-            metrics: cycles instructions cache-misses branch-misses
           - name: nvidia-h100
             runner: cern-nextgen-h100
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=90
@@ -66,6 +59,12 @@ jobs:
             standalone_runs: 42
             backend: "-g"
             metrics: Wavefronts
+          - name: cpu
+            runner: cern-nextgen-highfreq-4c
+            cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=0
+            cmake_jobs: 4
+            standalone_runs: 42
+            backend: "-c"
     env:
       WORK_DIR: /cvmfs/alice.cern.ch
       ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
@@ -84,6 +83,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.o2_ref != '' && inputs.o2_ref || github.ref }}
 
       - name: Create Directories and Copy Source
         run: |
@@ -199,16 +200,6 @@ jobs:
             --output ${ARTIFACT_DIR}/${{ matrix.name }}_detail.csv
           rm -f ${ARTIFACT_DIR}/${{ matrix.name }}_detail_agent_info.csv ${ARTIFACT_DIR}/${{ matrix.name }}_detail_counter_collection.csv
 
-      - name: Profiler - perf
-        if: ${{ matrix.name == 'cpu' }}
-        run: |
-          dnf install -y perf
-          source /etc/profile.d/modules.sh
-          module load ${MODULES}
-          cd ${STANDALONE_DIR}
-          PERF_EVENTS="${{ matrix.metrics }}"
-          perf record -g -e "${PERF_EVENTS// /,}" -o ${ARTIFACT_DIR}/${{ matrix.name }}.perf.data -- ./ca ${TIMING_CA_ARGS} --runs ${{ matrix.profiler_runs }} --debug 0
-
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
         with:
@@ -218,4 +209,3 @@ jobs:
             ${{ env.ARTIFACT_DIR }}/*.ncu-rep
             ${{ env.ARTIFACT_DIR }}/*.nsys-rep
             ${{ env.ARTIFACT_DIR }}/*.pftrace
-            ${{ env.ARTIFACT_DIR }}/*.perf.data
