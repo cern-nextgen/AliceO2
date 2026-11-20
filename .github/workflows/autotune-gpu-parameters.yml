@@ -37,6 +37,7 @@ on:
 jobs:
   autotune:
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 1440
     container:
       image: registry.cern.ch/alisw/slc9-gpu-builder@sha256:55ffe1c2c5fa8449403fc011e425ee983fe34ebc79799e7ab9f44eeab8aee7fc
       options: --cap-add=SYS_PTRACE --cap-add=PERFMON
