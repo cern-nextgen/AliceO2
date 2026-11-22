@@ -127,7 +127,7 @@ GPUdii() void GPUTPCExtrapolationTracking::Thread<0>(int32_t nBlocks, int32_t nT
   uint32_t leftToRightCandidates = *leftSector.NExtrapolationCandidatesRight();
   uint32_t leftToRightCandidatesPadded = ((leftToRightCandidates + nThreads - 1) / nThreads) * nThreads;
 
-  GPUCA_SHARED_CACHE(&smem.mRows[0], ((iBlock * nThreads) < leftToRightCandidatesPadded ? rightSector : leftSector).TrackingDataRows(), GPUTPCGeometry::NROWS * sizeof(GPUTPCRow));
+  GPUCA_SHARED_CACHE(&smem.mRows[0], ((iBlock * nThreads) < (int32_t)leftToRightCandidatesPadded ? rightSector : leftSector).TrackingDataRows(), GPUTPCGeometry::NROWS * sizeof(GPUTPCRow));
   GPUbarrier();
 
   for (uint32_t i = iBlock * nThreads + iThread; i < leftToRightCandidatesPadded + *rightSector.NExtrapolationCandidatesLeft(); i += nThreads * nBlocks) {
