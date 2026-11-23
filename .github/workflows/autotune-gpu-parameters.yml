@@ -124,7 +124,7 @@ jobs:
           mkdir -p /scratch/tuner_seed
           python3 ${ALICE_SOURCE_DIR}/.github/scripts/header_csv_converter.py \
             --from ${ALICE_SOURCE_DIR}/GPU/GPUTracking/Definitions/Parameters/GPUParameters.csv \
-            --to /scratch/tuner_seed/seeded_params.h \
+            --to ${TUNER_PARAMETER_FILE} \
             --arch ${{ matrix.csv_arch_column }}
 
       - name: Install O2GPU-autotuner
