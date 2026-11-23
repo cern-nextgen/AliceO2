@@ -124,9 +124,11 @@ def parse_header_defines(header_path):
             else:
                 continue
 
-            if re.match(r"^\d+\s*,\s*\d+$", value):
-                nums = [int(x.strip()) for x in value.split(",")]
-                cell = f"[{nums[0]}, {nums[1]}]"
+            pair_match = re.match(r"^(\w+)\s*,\s*(\d+)$", value)
+            if pair_match:
+                first, second = pair_match.groups()
+                first = first if first.isdigit() else f'"{first}"'
+                cell = f"[{first}, {second}]"
             elif re.match(r"^\d+$", value):
                 cell = value
             else:
@@ -142,9 +144,11 @@ def header_to_csv(header_path, arch, csv_path):
     rows = read_csv_rows(csv_path)
     header_row = rows[0]
     arch_idx = find_column(header_row, arch)
+    default_idx = find_column(header_row, "default")
 
     current_section = None
     changes = []
+    skipped_unchanged = 0
     for row in rows[1:]:
         if not row or row[0].strip() == "":
             continue
@@ -165,15 +169,23 @@ def header_to_csv(header_path, arch, csv_path):
         defines[match_key]["matched"] = True
         new_value = defines[match_key]["cell"]
         old_value = row[arch_idx].strip() if arch_idx < len(row) else ""
+        default_value = row[default_idx].strip() if default_idx < len(row) else ""
+        # A blank arch cell inherits `default` (same convention as csv_to_header's
+        # `arch_cell or default_cell`). Only write if the value actually changed from
+        # what's already in effect - otherwise an untuned kernel that merely passed
+        # through the seed file unmodified would wrongly turn into an explicit
+        # per-architecture override.
+        effective_old = old_value or default_value
+        if new_value == effective_old:
+            skipped_unchanged += 1
+            continue
 
         while len(row) <= arch_idx:
             row.append("")
         row[arch_idx] = new_value
+        changes.append((key, old_value or "(empty)", new_value))
 
-        if old_value != new_value:
-            changes.append((key, old_value or "(empty)", new_value))
-
-    print(f"[INFO] {len(changes)} row(s) changed for column '{arch}':", file=sys.stderr)
+    print(f"[INFO] {len(changes)} row(s) changed for column '{arch}' ({skipped_unchanged} unchanged, left as-is):", file=sys.stderr)
     for key, old_value, new_value in changes:
         print(f"  {key}: {old_value} -> {new_value}", file=sys.stderr)
 
