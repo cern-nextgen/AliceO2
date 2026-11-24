@@ -298,8 +298,6 @@ class GPUChainTracking : public GPUChain
 
   // Synchronization and Locks
   eventStruct* mEvents = nullptr;
-  std::array<int8_t, NSECTORS> mExtrapolationTrackingDone;
-
   std::vector<outputQueueEntry> mOutputQueue;
 
  private:
