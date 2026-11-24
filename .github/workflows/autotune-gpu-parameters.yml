@@ -89,8 +89,8 @@ jobs:
       STANDALONE_DIR: /scratch/standalone
       AUTOTUNER_DIR: /scratch/O2GPU-autotuner
       TUNER_WORKDIR: /scratch/standalone
-      TUNER_PARAMETER_FILE: /scratch/tuner_seed/seeded_params.h
       TUNER_DATASET: ${{ inputs.dataset }}
+      TUNER_PARAMETER_FILE: /scratch/artifacts/seeded_params.h
 
     name: ${{ matrix.name }}
     steps:
@@ -121,7 +121,6 @@ jobs:
 
       - name: Seed tuner baseline from GPUParameters.csv
         run: |
-          mkdir -p /scratch/tuner_seed
           python3 ${ALICE_SOURCE_DIR}/.github/scripts/header_csv_converter.py \
             --from ${ALICE_SOURCE_DIR}/GPU/GPUTracking/Definitions/Parameters/GPUParameters.csv \
             --to ${TUNER_PARAMETER_FILE} \
@@ -142,7 +141,6 @@ jobs:
         run: |
           source /etc/profile.d/modules.sh
           module load ${MODULES}
-          mkdir -p ${ARTIFACT_DIR}/tuning
           if [ "${{ inputs.step }}" = "all" ]; then
             TUNE_SPACE_DIR=${AUTOTUNER_DIR}/O2GPU_autotuner/tune_spaces
           else
@@ -151,23 +149,25 @@ jobs:
             cp ${AUTOTUNER_DIR}/O2GPU_autotuner/tune_spaces/${{ inputs.step }}.yaml ${TUNE_SPACE_DIR}/
           fi
           env -u PYTHONHOME -u PYTHONPATH TUNE_SPACE_DIR=${TUNE_SPACE_DIR} \
-            o2gpu-tune --time-budget ${{ inputs.time_budget }} --backend ${{ matrix.tuner_backend }} --output ${ARTIFACT_DIR}/tuning
+            o2gpu-tune --time-budget ${{ inputs.time_budget }} --backend ${{ matrix.tuner_backend }} --output ${ARTIFACT_DIR}
 
       - name: Analyze results
         run: |
           source /etc/profile.d/modules.sh
           module load ${MODULES}
-          env -u PYTHONHOME -u PYTHONPATH o2gpu-analyze ${ARTIFACT_DIR}/tuning > ${ARTIFACT_DIR}/tuning/analyze_report.txt
+          env -u PYTHONHOME -u PYTHONPATH o2gpu-analyze ${ARTIFACT_DIR} > ${ARTIFACT_DIR}/analyze_report.txt
           echo "## ${{ matrix.name }} tuning result" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          sed -n '/========== TIMING RESULTS ==========/,$p' ${ARTIFACT_DIR}/tuning/analyze_report.txt >> $GITHUB_STEP_SUMMARY
+          sed -n '/========== TIMING RESULTS ==========/,$p' ${ARTIFACT_DIR}/analyze_report.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.name }}-tuning-artifact
-          path: ${{ env.ARTIFACT_DIR }}/tuning/optimized.h
+          path: |
+            ${{ env.ARTIFACT_DIR }}/optimized.h
+            ${{ env.ARTIFACT_DIR }}/seeded_params.h
 
   merge-results:
     needs: autotune
