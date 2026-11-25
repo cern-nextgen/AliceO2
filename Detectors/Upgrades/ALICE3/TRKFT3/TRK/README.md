@@ -15,6 +15,9 @@ Configurables for various sub-detectors are presented in the following Table:
 | Subsystem          | Available options                                       | Comments                                                         |
 | ------------------ | ------------------------------------------------------- | ---------------------------------------------------------------- |
 | `TRKBase.layoutVD` | `kIRIS4` (default), `kIRISFullCyl`, `kIRIS5`, `kIRIS4a` | [link to definitions](./base/include/TRKBase/TRKBaseParam.h) |
+| `TRKBase.irisOpenFraction` | `0` (default, closed) to `1` (fully open) | IRIS opening (injection position), petal layouts `kIRIS4`, `kIRIS5`, `kIRIS4a` only. As in the real IRIS, each petal slides without rotating, perpendicular to its bisector (counter-clockwise seen from +z), along the edge it shares with its neighbour. The full slide is the one that opens the beam aperture to `irisOpenAperture`, stopped earlier if the petals come within `irisOpenBeamPipeMargin` of the beam pipe (r = 5.6 cm); the petals slide this fraction of it, e.g. `0.25`, `0.5`, `0.75`, `1`. The slide and the resulting aperture are printed in the log |
+| `TRKBase.irisOpenAperture` | radius in cm (default `1.5`) | beam aperture the petals slide open to when fully open |
+| `TRKBase.irisOpenBeamPipeMargin` | clearance in cm (default `0.05`) | gap kept between the open petals and the beam pipe |
 | `TRKBase.layoutMLOT` | `kCylindrical`, `kSegmented` (default), `kSimplifiedRealistic` | `kCylindrical`: simple silicon tubes. `kSegmented`: Turbo ML + solid-module OT. `kSimplifiedRealistic`: same ML as `kSegmented`, but a detailed OT barrel (see below) |
 | `TRKBase.layoutSRV` | `kPeacockv1` (default), `kLOISymm` | `kLOISymm` produces radially symmetric service volumes, as used in the LoI |
 | `TRKBase.otBarrelWallThickness` | thickness in cm (default `0.2`) | Carbon fibre separation walls of the OT quarter barrels — side panels and mid-rapidity disks (`kPeacockv1` + `kSimplifiedRealistic`); `0` disables them. Does not cover the load-bearing outer shell (4 mm) |
@@ -28,6 +31,13 @@ For example, a geometry with fully cylindrical tracker barrel (for all layers in
 o2-sim-serial-run5 -n 1 -g pythia8hi -m A3IP TRK TF3 \
   --configKeyValues "TRKBase.layoutVD=kIRISFullCyl;TRKBase.layoutMLOT=kCylindrical"
 ```
+
+and the IRIS4 vertex detector in the open position (injection) with
+```bash
+o2-sim-serial-run5 -n 1 -g pythia8hi -m A3IP TRK TF3 \
+  --configKeyValues "TRKBase.layoutVD=kIRIS4;TRKBase.irisOpenFraction=1"
+```
+and half open with `"TRKBase.layoutVD=kIRIS4;TRKBase.irisOpenFraction=0.5"`.
 
 ## Custom Geometry Configuration
 
@@ -68,12 +78,14 @@ Both layouts use the same configuration-file syntax (only the OT geometry implem
 
 **Middle Layers (ML) - Indices 0 to 4**
 The first 5 valid lines are parsed as `TRKMLLayer` objects. These layers **require** a 6th parameter for the staggering offset (`stagOffset`).
-* **Format:** `rInn` \t `thick` \t `tiltAngle` \t `nStaves` \t `nMods` \t `stagOffset` \t `[optional_mode]`
+* **Format:** `rInn` \t `thick` \t `tiltAngle` \t `nStaves` \t `nMods` \t `stagOffset` \t `[optional_mode]` \t `[optional_rInnRow]` \t `[optional_phiOffset]`
+* Layers 3 and 4 are staggered: one stave out of two sits at `rInn`, the others are shifted by `stagOffset`. By default the even staves are at `rInn`; `rInnRow` = 1 puts the odd staves there instead, i.e. stave 0 in the shifted row. In the flipped layer 3 the `rInn` row is the outer one and the shift points inwards, so there `rInnRow` = 1 puts stave 0 in the inner row; in layer 4 in the outer row. To give `rInnRow`, the mode column must be written too.
+* `phiOffset` (degrees, counterclockwise, default 0) rotates the whole layer about the beam axis; each stave keeps its tilt. It requires the mode and `rInnRow` columns.
 
 **Outer Layers (OT) - Indices 5 and above**
 From the 6th valid line onwards, lines are parsed as OT layer objects (`TRKOTLayer` for `kSegmented`, `TRKOTLayerRealistic` for `kSimplifiedRealistic`). These layers do **not** have a staggering offset. The optional mode parameter shifts to the 6th column.
 * **Format:** `rInn` \t `thick` \t `tiltAngle` \t `nStaves` \t `nMods` \t `[optional_mode]`
-* *(Note: for `kSimplifiedRealistic`, `nStaves` is recomputed internally from the average radius and stave width to guarantee the neighbour overlap; the value in the file is ignored for the OT.)*
+* *(Note: for `kSimplifiedRealistic`, `nStaves` is the number of staves per ring and must be even; if it is 0 the count is derived from the radius as the smallest one giving the required neighbour overlap.)*
 
 **Example for `kSegmented`:**
 
@@ -111,7 +123,7 @@ The geometry specification is based on [ALICE3 OT WP1 Material (26.06.2025)](htt
 
 **End-of-stave card** — one readout PCB per stave (`constants::OT::eosCard`), mounted past the last module at the outer z end, coplanar with the two rows: a 120 × 80 mm, 1.5 mm board carrying four copper planes spread symmetrically through the thickness, the remainder FR4. The copper is what sets the card material budget: at the default 122 µm per plane the card is **4.0 % x/X₀** for a track crossing it perpendicularly (copper 3.40 %, FR4 0.60 %). It is tunable through `TRKBase.otEosCardCuThickness`, which changes only the copper/FR4 split inside the fixed 1.5 mm envelope, so the card dimensions and the layer envelopes stay put and only the radiation length moves. The cards reach |z| ≈ 141 cm, just short of the OT barrel service disk, which places them at |η| ≈ 1.84–1.88 on the innermost OT layer and |η| ≈ 1.27–1.32 on the outermost — inside the tracking acceptance, so they matter for forward-disk performance.
 
-**Barrel** — each layer is built in **four parts**: two z-half-barrels (±η), each split azimuthally into two 180° halves. Both η half-barrels are cut on the **same vertical plane** (x = 0), so the region where the vertical beam-pipe supports run is free of staves over the whole barrel (the supports themselves are not in the geometry). Neighbouring staves overlap (≥ 1 mm active double-coverage); at the cut plane the two azimuthal halves instead leave a gap wide enough for the separation wall plus `barrelWallClearance` on each side. The stave count is the smallest even number that still meets the required overlap at the layer radius, so the OT radii (440, 615, 793 mm) are chosen at the top of a stave-count band, giving 30/42/54 staves per ring with 1.5-1.9 mm of overlap. The cooling pipe faces the larger radius on the inner two OT layers and the smaller radius on the flipped outer layer.
+**Barrel** — each layer is built in **four parts**: two z-half-barrels (±η), each split azimuthally into two 180° halves. Both η half-barrels are cut on the **same vertical plane** (x = 0), so the region where the vertical beam-pipe supports run is free of staves over the whole barrel (the supports themselves are not in the geometry). Neighbouring staves overlap (≥ 1 mm active double-coverage); at the cut plane the two azimuthal halves instead leave a gap wide enough for the separation wall plus `barrelWallClearance` on each side. The default paving uses OT radii 442, 620 and 820 mm with 30, 42 and 56 staves per ring (15/21/28 per quarter barrel); L9 and L10 follow the mechanical CAD, L8 is placed as close in as the 1 mm active-overlap requirement allows for 30 staves. This gives 8.4-9.0 mm of border-to-border neighbour overlap in the stave plane. Each module's FPC extends 2.1 mm beyond the chips for wire bonding (`constants::OT::fpc::wireBondMargin`). The cooling pipe faces the larger radius on the inner two OT layers and the smaller radius on the flipped outer layer.
 
 **Separation walls** — the quarter barrels are closed on every side but the one carrying the end-of-stave cards (`TRKServices::createOTBarrelWalls`, `kPeacockv1` + `kSimplifiedRealistic`): radially by the ML/OT and outer carbon shells, azimuthally by a rectangular carbon fibre wall in the cut plane, and at mid-rapidity by a half disk at z = 0, one per quarter barrel.
 

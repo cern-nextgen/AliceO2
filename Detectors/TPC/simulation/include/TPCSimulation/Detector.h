@@ -82,6 +82,7 @@ class Detector : public o2::base::DetImpl<Detector>
 
   /**      Initialization of the detector is done here    */
   void InitializeO2Detector() override;
+  bool isMTSafe() const override { return true; }
 
   /**       this method is called for each step during simulation
    *       (see FairMCApplication::Stepping())
@@ -155,7 +156,8 @@ class Detector : public o2::base::DetImpl<Detector>
   int mHitCounter = 0;
   int mElectronCounter = 0;
   int mStepCounter = 0;
-  ElementalHit mHitLast{}; ///<! buffer last processed hit to be able to fill it to mHitsPerSectorCollection
+  double mLastReferenceR = 0;        ///<! track length at the last stored track reference (cm)
+  ElementalHit mHitLast{};           ///<! buffer last processed hit to be able to fill it to mHitsPerSectorCollection
   HitGroup* mCurrentGroup = nullptr; ///<! hit group currently being filled
   int mOldTrackId = -1;              ///<! track of the current hit group
   int mOldSectorId = -1;             ///<! sector of the current hit group

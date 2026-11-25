@@ -17,6 +17,7 @@
 #include <Generators/BoxGenerator.h>
 #include <fairlogger/Logger.h>
 #include <SimConfig/SimConfig.h>
+#include <SimConfig/G4Params.h>
 #include <Generators/GeneratorFromFile.h>
 #include <Generators/GeneratorTParticle.h>
 #include <Generators/GeneratorTParticleParam.h>
@@ -39,6 +40,7 @@
 #include <rapidjson/ostreamwrapper.h>
 #include <fstream>
 #include <unistd.h>
+#include <algorithm>
 #endif
 #include <Generators/PrimaryGenerator.h>
 #include <Generators/BoxGunParam.h>
@@ -55,17 +57,33 @@ namespace eventgen
 {
 
 #if defined(GENERATORS_WITH_PYTHIA8) && defined(GENERATORS_WITH_HEPMC3)
-// Builds a parallel GeneratorHybrid JSON configuration out of
-// 8 (Generator::NHyperloopParallelGenerators) identical "external" sub-generator entries,
-// using the configured GeneratorExternalParam. This makes the simulation parallelisation automatic
-// on Hyperloop.
+// Maximum number of parallel sub-generators on Hyperloop. Fixed rather than taken from the host
+// core count, which does not reflect the CPU slot assigned to the job: 8 is the largest slot
+// available on GRID/Hyperloop nodes.
+constexpr int MaxHyperloopParallelGenerators = 8;
+
+// Number of identical sub-generators the external generator is expanded into on Hyperloop:
+// one sub-generator per GeneratorHybrid.num_workers (1 by default), capped to
+// MaxHyperloopParallelGenerators.
+int getHyperloopNParallelGenerators()
+{
+  const int nWorkers = GeneratorHybridParam::Instance().num_workers;
+  if (nWorkers > MaxHyperloopParallelGenerators) {
+    LOG(warning) << "GeneratorHybrid.num_workers = " << nWorkers << " exceeds the maximum of "
+                 << MaxHyperloopParallelGenerators << " parallel sub-generators: capping to " << MaxHyperloopParallelGenerators;
+  }
+  return std::clamp(nWorkers, 1, MaxHyperloopParallelGenerators);
+}
+
+// Builds a parallel GeneratorHybrid JSON configuration out of nGenerators
+// identical "external" sub-generator entries, using the configured GeneratorExternalParam.
+// This makes the simulation parallelisation automatic on Hyperloop.
 // To-do: Define the behaviour with ini configuration which are already definining a hybrid gen
 //
-// Note on GeneratorHybrid.num_workers: expanding to 8 sub-generators does not by itself raise
-// the number of TBB workers that actually run them in parallel. This is controlled by
-// the parameter GeneratorHybrid.num_workers. On Hyperloop this will be part
-// of the standard train configuration
-std::string buildHyperloopExternalHybridConfig(GeneratorExternalParam const& extparams)
+// Note on GeneratorHybrid.num_workers: it controls both the number of TBB workers running the
+// sub-generators in parallel and nGenerators (see getHyperloopNParallelGenerators).
+// On Hyperloop it is part of the standard train configuration for MCGen datasets
+std::string buildHyperloopExternalHybridConfig(GeneratorExternalParam const& extparams, int nGenerators)
 {
   rapidjson::Document doc;
   doc.SetObject();
@@ -74,7 +92,7 @@ std::string buildHyperloopExternalHybridConfig(GeneratorExternalParam const& ext
 
   rapidjson::Value generators(rapidjson::kArrayType);
   rapidjson::Value fractions(rapidjson::kArrayType);
-  for (int i = 0; i < Generator::NHyperloopParallelGenerators; ++i) {
+  for (int i = 0; i < nGenerators; ++i) {
     rapidjson::Value config(rapidjson::kObjectType);
     config.AddMember("fileName", rapidjson::Value(extparams.fileName.c_str(), alloc), alloc);
     config.AddMember("funcName", rapidjson::Value(extparams.funcName.c_str(), alloc), alloc);
@@ -140,7 +158,13 @@ void GeneratorFactory::setPrimaryGenerator(o2::conf::SimConfig const& conf, Fair
 
   /** generators **/
 
-  o2::O2DatabasePDG::addALICEParticles(TDatabasePDG::Instance());
+  // Monopole configurable mass, set before the particles get registered
+  const double monopoleMass = o2::conf::G4Params::Instance().monopoleMass;
+  o2::O2DatabasePDG::setMonopoleMass(monopoleMass);
+  auto* pdgDB = o2::O2DatabasePDG::Instance(); //--> ALICE particles are added once in this call
+  if (!o2::O2DatabasePDG::hasMonopoleMass(pdgDB, monopoleMass)) {
+    LOG(fatal) << "Monopoles were registered in TDatabasePDG with a mass other than G4.monopoleMass = " << monopoleMass << " GeV";
+  }
   auto genconfig = conf.getGenerator();
 #if defined(GENERATORS_WITH_PYTHIA8) && defined(GENERATORS_WITH_HEPMC3)
   std::string hyperloopExtHybridConfigFile; // set when IS_HYPERLOOP is defined
@@ -150,12 +174,18 @@ void GeneratorFactory::setPrimaryGenerator(o2::conf::SimConfig const& conf, Fair
       genconfig = "hybrid";
     } else if (Generator::isHyperloop()) {
       // Running under Hyperloop: transparently expand the single external generator
-      // configuration into a parallel hybrid of Generator::NHyperloopParallelGenerators
-      // clones, to increase on-the-fly MC-generation throughput.
-      LOG(info) << "IS_HYPERLOOP detected: expanding external generator into "
-                << Generator::NHyperloopParallelGenerators << " parallel hybrid sub-generators";
-      hyperloopExtHybridConfigFile = buildHyperloopExternalHybridConfig(GeneratorExternalParam::Instance());
-      genconfig = "hybrid";
+      // configuration into a parallel hybrid of clones (one per worker, capped to
+      // MaxHyperloopParallelGenerators), to increase on-the-fly MC-generation throughput.
+      // A single clone brings no parallelism, so the plain external generator is kept.
+      const int nGenerators = getHyperloopNParallelGenerators();
+      if (nGenerators > 1) {
+        LOG(info) << "IS_HYPERLOOP detected: expanding external generator into "
+                  << nGenerators << " parallel hybrid sub-generators";
+        hyperloopExtHybridConfigFile = buildHyperloopExternalHybridConfig(GeneratorExternalParam::Instance(), nGenerators);
+        genconfig = "hybrid";
+      } else {
+        LOG(info) << "IS_HYPERLOOP detected: single worker requested, keeping the external generator as is";
+      }
     }
   }
 #endif

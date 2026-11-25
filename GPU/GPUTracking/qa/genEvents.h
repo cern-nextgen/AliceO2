@@ -16,7 +16,7 @@
 #define GENEVENTS_H
 
 #include "GPUCommonDef.h"
-#include <cmath>
+#include "GPUCommonMath.h"
 
 namespace o2::gpu
 {
@@ -28,7 +28,7 @@ class genEvents
 {
  public:
   genEvents(GPUChainTracking* rec) {}
-  void InitEventGenerator() {}
+  void InitEventGenerator(const std::string& dir) {}
   int32_t GenerateEvent(const GPUParam& sectorParam, const char* filename) { return 1; }
   void FinishEventGenerator() {}
 
@@ -41,7 +41,7 @@ class genEvents
 {
  public:
   genEvents(GPUChainTracking* rec) : mRec(rec) {}
-  void InitEventGenerator();
+  void InitEventGenerator(const std::string& dir);
   int32_t GenerateEvent(const GPUParam& sectorParam, const char* filename);
   void FinishEventGenerator();
 
@@ -66,7 +66,7 @@ class genEvents
     uint32_t id;
   };
 
-  const double mTwoPi = 2 * M_PI;
+  const double mTwoPi = 2 * CAMath::Pi();
   const double mSectorDAngle = mTwoPi / 18.;
   const double mSectorAngleOffset = mSectorDAngle / 2;
 

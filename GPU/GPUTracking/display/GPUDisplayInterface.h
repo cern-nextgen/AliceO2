@@ -57,10 +57,9 @@ class GPUDisplayFrontendInterface
   virtual ~GPUDisplayFrontendInterface();
   static GPUDisplayFrontendInterface* getFrontend(const char* type);
   virtual void StopDisplay() = 0;
-  virtual bool EnableSendKey() = 0;
   virtual int32_t getDisplayControl() const = 0;
   virtual void setDisplayControl(int32_t v) = 0;
-  virtual void sendKey(int32_t v) = 0;
+  virtual void sendExternalGUIKey(int32_t v, uint32_t translationMode = 0, uint64_t extendedKey = 0) = 0; // translationMode != 0: key from extendedKey (1 = console escape sequence, up to 8 characters after the ESC)
   virtual const char* frontendName() const = 0;
 
  protected:

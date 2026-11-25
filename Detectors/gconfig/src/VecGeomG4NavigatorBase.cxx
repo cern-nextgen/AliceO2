@@ -24,14 +24,6 @@
 
 #include <algorithm>
 
-namespace
-{
-/// Longest run of Geant4 levels one flattened VecGeom placement can stand for.
-constexpr std::size_t kMaxChain = 16;
-/// Deepest Geant4 touchable the ALICE geometry can produce, with headroom.
-constexpr int kMaxDepth = 64;
-} // namespace
-
 namespace o2::simsetup
 {
 
@@ -63,11 +55,11 @@ G4VPhysicalVolume* VecGeomG4NavigatorBase::historyFromState(vecgeom::NavigationS
 {
   // Collect the Geant4 volumes the state stands for, then keep the levels the history already has
   // right and rebuild only from the first difference down: NewLevel composes a transform per level.
-  G4VPhysicalVolume* want[kMaxDepth];
+  G4VPhysicalVolume* want[kMaxHistoryDepth];
   int n = 0;
   if (!state.IsOutside()) {
     const int levels = state.GetCurrentLevel();
-    for (int l = 0; l < levels && n < kMaxDepth; ++l) {
+    for (int l = 0; l < levels && n < kMaxHistoryDepth; ++l) {
       auto const* placed = state.At(l);
       if (placed == nullptr) {
         break;
@@ -78,7 +70,7 @@ G4VPhysicalVolume* VecGeomG4NavigatorBase::historyFromState(vecgeom::NavigationS
         LOG(fatal) << "VecGeom placement " << placed->GetLabel() << " (id " << placed->id() << ") at level " << l
                    << " has no Geant4 counterpart";
       }
-      for (unsigned c = 0; c < size && n < kMaxDepth; ++c) {
+      for (unsigned c = 0; c < size && n < kMaxHistoryDepth; ++c) {
         want[n++] = chain[c];
       }
     }
@@ -111,49 +103,81 @@ G4VPhysicalVolume* VecGeomG4NavigatorBase::historyFromState(vecgeom::NavigationS
   return fHistory.GetTopVolume();
 }
 
-bool VecGeomG4NavigatorBase::stateFromHistory(vecgeom::NavigationState& state) const
+G4VPhysicalVolume* VecGeomG4NavigatorBase::updateHistory(vecgeom::NavigationState const& state)
 {
-  // A run of levels that ends in a Geant4 volume several placements share is settled by comparing
-  // the run against the placements' recorded chains, which is exact.
-  state.Clear();
-  if (mMap.world() == nullptr || fHistory.GetVolume(0) == nullptr) {
+  if (mHistoryValid && state.HasSamePathAsOther(mHistoryState)) {
+    return fHistory.GetTopVolume();
+  }
+  if (mHistoryExact && updateHistoryByOneLevel(state)) {
+    ++mHistoryStepCount;
+    return fHistory.GetTopVolume();
+  }
+  ++mHistoryRebuildCount;
+  mHistoryState = state;
+  mHistoryValid = true;
+  auto* top = historyFromState(state);
+  // A history at the depth limit may have been cut short.
+  mHistoryExact = static_cast<int>(fHistory.GetDepth()) + 1 < kMaxHistoryDepth;
+  return top;
+}
+
+/// The levels and transforms are those historyFromState makes: it keeps the common Geant4 levels and calls
+/// NewLevel for the rest, as here.
+bool VecGeomG4NavigatorBase::updateHistoryByOneLevel(vecgeom::NavigationState const& state)
+{
+  if (state.IsOutside() || mHistoryState.IsOutside()) {
     return false;
   }
-  state.Push(mMap.world());
-  const std::size_t depth = fHistory.GetDepth();
-  std::size_t l = mMap.chainSize(mMap.world()->id());
-  while (l <= depth) {
-    G4VPhysicalVolume* run[kMaxChain];
-    vecgeom::VPlacedVolume const* found = nullptr;
-    std::size_t n = 0;
-    for (std::size_t e = l; e <= depth && n < kMaxChain; ++e, ++n) {
-      run[n] = fHistory.GetVolume(e);
-      auto const* candidate = mMap.toVecGeom(run[n]->GetInstanceID());
-      if (candidate == nullptr) {
-        continue; // an assembly level; the chain reaches further down
-      }
-      if (candidate == VecGeomG4Map::ambiguous()) {
-        for (auto const* c : mMap.candidates(run[n]->GetInstanceID())) {
-          if (mMap.chainMatches(c, run, n + 1)) {
-            found = c;
-            break;
-          }
-        }
-      } else if (mMap.chainMatches(candidate, run, n + 1)) {
-        found = candidate;
-      }
-      if (found != nullptr) {
-        break;
-      }
-    }
-    if (found == nullptr) {
-      state.Clear();
+  const int cur = state.GetCurrentLevel();
+  const int old = mHistoryState.GetCurrentLevel();
+  const int levels = static_cast<int>(fHistory.GetDepth()) + 1;
+  unsigned left = 0, size = 0;
+  G4VPhysicalVolume* const* chain = nullptr;
+  if (cur == old + 1) { // into a daughter
+    mHistoryChild = state;
+    mHistoryChild.Pop();
+    if (!mHistoryChild.HasSamePathAsOther(mHistoryState)) {
       return false;
     }
-    state.Push(found);
-    l += mMap.chainSize(found->id());
+    chain = mMap.chain(state.Top()->id(), size);
+  } else if (cur + 1 == old) { // out to the mother
+    mHistoryParent = mHistoryState;
+    mHistoryParent.Pop();
+    if (!mHistoryParent.HasSamePathAsOther(state)) {
+      return false;
+    }
+    mMap.chain(mHistoryState.Top()->id(), left);
+  } else if (cur == old && cur > 1) { // into a sibling
+    mHistoryChild = state;
+    mHistoryChild.Pop();
+    mHistoryParent = mHistoryState;
+    mHistoryParent.Pop();
+    if (!mHistoryChild.HasSamePathAsOther(mHistoryParent)) {
+      return false;
+    }
+    mMap.chain(mHistoryState.Top()->id(), left);
+    chain = mMap.chain(state.Top()->id(), size);
+  } else {
+    return false;
   }
+  if ((chain != nullptr && size == 0) || (cur <= old && left == 0) || static_cast<int>(left) >= levels ||
+      levels - static_cast<int>(left) + static_cast<int>(size) > kMaxHistoryDepth) {
+    return false;
+  }
+  if (left > 0) {
+    fHistory.BackLevel(left);
+  }
+  for (unsigned c = 0; c < size; ++c) {
+    // The copy number is filled exactly as historyFromState fills it.
+    fHistory.NewLevel(chain[c], kNormal, chain[c]->GetCopyNo());
+  }
+  mHistoryState = state;
   return true;
+}
+
+bool VecGeomG4NavigatorBase::stateFromHistory(vecgeom::NavigationState& state) const
+{
+  return mMap.stateFromPath([this](std::size_t level) { return fHistory.GetVolume(level); }, fHistory.GetDepth(), state);
 }
 
 } // namespace o2::simsetup

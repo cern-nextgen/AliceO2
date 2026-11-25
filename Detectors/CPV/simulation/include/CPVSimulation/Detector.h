@@ -70,6 +70,7 @@ class Detector : public o2::base::DetImpl<Detector>
   /// Initializing detector
   ///
   void InitializeO2Detector() final;
+  bool isMTSafe() const override { return true; }
 
   ///
   /// Processing hit creation in the CPV crystalls
@@ -157,6 +158,7 @@ class Detector : public o2::base::DetImpl<Detector>
 
   // Simulation
   std::vector<Hit>* mHits = nullptr; //! Collection of CPV hits
+  int mTrackRefLastTrackID = -1;     //! last track that received a TrackReference in the current event
 
   template <typename Det>
   friend class o2::base::DetImpl;

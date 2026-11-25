@@ -16,7 +16,11 @@
 #define GPUTPCGEOMETRY_H
 
 #include "GPUCommonDef.h"
+#include "GPUCommonMath.h"
 #include "DataFormatsTPC/Constants.h"
+#ifndef GPUCA_GPUCODE_DEVICE
+#include <cmath>
+#endif
 
 namespace o2::gpu
 {
@@ -121,8 +125,7 @@ class GPUTPCGeometry
   GPUd() static constexpr int32_t MaxNPadsPerRow() { return 138; }
   GPUd() static constexpr float PadWidth(int32_t row) { return (gputpcgeometry_internal::mPadWidthRow[row]); }
 #else
-  GPUd() static constexpr int32_t GetRegion(int32_t row) { return (row < 63 ? 0 : row < 63 + 64 ? 1
-                                                                                                : 2); }
+  GPUd() static constexpr int32_t GetRegion(int32_t row) { return (row < 63 ? 0 : (row < 63 + 64 ? 1 : 2)); }
   GPUd() static constexpr int32_t GetRegionRows(int32_t region) { return 0; }  // dummy
   GPUd() static constexpr int32_t GetRegionStart(int32_t region) { return 0; } // dummy
   GPUd() static constexpr int32_t GetROC(int32_t row) { return GetRegion(row); }
@@ -175,6 +178,8 @@ class GPUTPCGeometry
     const float v = (sector >= NSECTORS / 2) ? -z : z;
     return (250.f - v) * FACTOR_Z2T; // Used in compression, must remain constant at 250cm
   }
+
+  GPUd() static constexpr float kSectAngle() { return 2 * CAMath::Pi() / 18.f; }
 };
 
 } // namespace o2::gpu

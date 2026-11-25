@@ -258,12 +258,8 @@ bool GPUChainTracking::ValidateSteps()
 bool GPUChainTracking::ValidateSettings()
 {
   int32_t gatherMode = mRec->GetProcessingSettings().tpcCompressionGatherMode == -1 ? mRec->getGPUParameters(mRec->GetRecoStepsGPU() & gpudatatypes::RecoStep::TPCCompression).par_COMP_GATHER_MODE : mRec->GetProcessingSettings().tpcCompressionGatherMode;
-  if ((param().rec.tpc.nWays & 1) == 0) {
-    GPUError("nWay setting musst be odd number!");
-    return false;
-  }
-  if (param().rec.tpc.mergerInterpolateErrors && param().rec.tpc.nWays < 3) {
-    GPUError("Cannot do error interpolation with NWays < 3!");
+  if (param().rec.tpc.rebuildTrackInFit && (param().rec.tpc.rebuildTrackInFitClusterCandidates == 0 || param().rec.tpc.rebuildTrackInFitClusterCandidates > 13)) {
+    GPUError("Need between 1 and 13 cluster candidates to rebuild tracks during fit");
     return false;
   }
   if (param().continuousMaxTimeBin > (int32_t)GPUSettings::TPC_MAX_TF_TIME_BIN) {
@@ -849,24 +845,32 @@ int32_t GPUChainTracking::RunChainFinalize()
 
     mEventDisplay->WaitTillEventShown();
 
-    if (GetProcessingSettings().eventDisplay->EnableSendKey()) {
+    if (GetProcessingSettings().runsStandalone) {
       while (kbhit()) {
         getch();
       }
       GPUInfo("Press key for next event!");
     }
-
     int32_t iKey;
     do {
       usleep(10000);
-      if (GetProcessingSettings().eventDisplay->EnableSendKey()) {
+      if (GetProcessingSettings().runsStandalone) {
         iKey = kbhit() ? getch() : 0;
+        if (iKey == 27 && kbhit()) { // Escape sequence (arrow keys, ...), not the ESC key: the display translates up to 8 characters after the ESC
+          uint64_t extendedKey = 0;
+          for (uint32_t i = 0; kbhit(); i++) {
+            const int32_t c = getch();
+            extendedKey |= i < 8 ? (uint64_t)(uint8_t)c << (8 * i) : 0;
+          }
+          GetProcessingSettings().eventDisplay->sendExternalGUIKey(0, 1, extendedKey);
+          iKey = 0;
+        }
         if (iKey == 27) {
           GetProcessingSettings().eventDisplay->setDisplayControl(2);
         } else if (iKey == 'n') {
           break;
         } else if (iKey) {
-          GetProcessingSettings().eventDisplay->sendKey(iKey);
+          GetProcessingSettings().eventDisplay->sendExternalGUIKey(iKey);
         }
       }
     } while (GetProcessingSettings().eventDisplay->getDisplayControl() == 0);
@@ -1015,6 +1019,7 @@ void GPUChainTracking::ApplySyncSettings(GPUSettingsProcessing& proc, GPUSetting
 {
   if (syncMode) {
     rec.useMatLUT = false;
+    rec.tpc.rebuildTrackMaxNonIntCov = 0.f; // TODO: Check if this yields a performance benefit
   }
   if (proc.rtc.optSpecialCode == -1) {
     proc.rtc.optSpecialCode = syncMode;

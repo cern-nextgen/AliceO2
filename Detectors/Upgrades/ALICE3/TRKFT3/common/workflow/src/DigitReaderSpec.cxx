@@ -9,6 +9,8 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
+#include "Framework/DeviceSpec.h"
+#include "Framework/TimingInfo.h"
 #include <vector>
 
 #include "TTree.h"
@@ -17,11 +19,15 @@
 #include "Framework/ConfigParamRegistry.h"
 #include "Framework/Logger.h"
 #include "TRKWorkflow/DigitReaderSpec.h"
+#include "TRKBase/AlmiraParam.h"
 #include "SimulationDataFormat/MCCompLabel.h"
 #include "SimulationDataFormat/ConstMCTruthContainer.h"
 #include "SimulationDataFormat/MCTruthContainer.h"
 #include "SimulationDataFormat/IOMCTruthContainerView.h"
+#include <algorithm>
 #include <cassert>
+#include <cctype>
+#include <string>
 
 using namespace o2::framework;
 using namespace o2::itsmft;
@@ -33,7 +39,8 @@ namespace trk
 
 DigitReader::DigitReader(o2::detectors::DetID id, bool useMC, bool useCalib)
 {
-  assert(id == o2::detectors::DetID::TRK);
+  assert(id == o2::detectors::DetID::TRK || id == o2::detectors::DetID::FT3);
+  mLayers = id == o2::detectors::DetID::TRK ? static_cast<int>(o2::trk::AlmiraParam::kNLayers) : o2::trk::constants::MLOTDisks::nLayers;
   mDetNameLC = mDetName = id.getName();
   mDigTreeName = "o2sim";
 
@@ -60,7 +67,7 @@ void DigitReader::init(InitContext& ic)
 
 void DigitReader::run(ProcessingContext& pc)
 {
-  auto ent = mTree->GetReadEntry() + 1;
+  long ent = pc.services().get<o2::framework::TimingInfo>().timeslice;
   // A timeframe holds no collision at all whenever the interaction rate is low enough, and
   // the tree then has no entry to read. Publish empty containers instead of reading past the
   // end and pushing branch addresses that GetEntry has not filled, so that the consumers
@@ -68,7 +75,7 @@ void DigitReader::run(ProcessingContext& pc)
   // every production build since ENABLE_CASSERT defaults to OFF.)
   const bool noEntry = ent >= mTree->GetEntries();
   if (noEntry) {
-    LOG(info) << "no entry to read, publishing empty output";
+    LOGP(warning, "No entry {} to read, tree contains {} entries, publishing empty output", ent, mTree->GetEntries());
   } else {
     mTree->GetEntry(ent);
   }
@@ -101,7 +108,7 @@ void DigitReader::run(ProcessingContext& pc)
     pc.outputs().snapshot(Output{mOrigin, "GBTCALIB", 0}, mCalib);
   }
 
-  if (noEntry || mTree->GetReadEntry() + 1 >= mTree->GetEntries()) {
+  if (noEntry || mTree->GetReadEntry() + pc.services().get<const o2::framework::DeviceSpec>().maxInputTimeslices >= mTree->GetEntries()) {
     pc.services().get<ControlService>().endOfStream();
     pc.services().get<ControlService>().readyToQuit(QuitRequest::Me);
   }
@@ -154,28 +161,45 @@ void DigitReader::setBranchAddress(const std::string& base, Ptr& addr, int layer
   }
 }
 
-DataProcessorSpec getTRKDigitReaderSpec(bool useMC, bool useCalib, std::string defname)
+namespace
 {
-  static constexpr int nLayers = o2::trk::AlmiraParam::kNLayers;
+template <int DetID, typename Reader>
+DataProcessorSpec getDigitReaderSpecT(bool useMC, bool useCalib, std::string defname)
+{
+  constexpr auto origin = DetID == o2::detectors::DetID::TRK ? o2::header::gDataOriginTRK : o2::header::gDataOriginFT3;
   std::vector<OutputSpec> outputSpec;
-  for (int iLayer = 0; iLayer < nLayers; ++iLayer) {
-    outputSpec.emplace_back("TRK", "DIGITS", iLayer, Lifetime::Timeframe);
-    outputSpec.emplace_back("TRK", "DIGITSROF", iLayer, Lifetime::Timeframe);
+  constexpr int NLayers = DetID == o2::detectors::DetID::TRK ? static_cast<int>(o2::trk::AlmiraParam::kNLayers) : o2::trk::constants::MLOTDisks::nLayers;
+  for (int iLayer = 0; iLayer < NLayers; ++iLayer) {
+    outputSpec.emplace_back(origin, "DIGITS", iLayer, Lifetime::Timeframe);
+    outputSpec.emplace_back(origin, "DIGITSROF", iLayer, Lifetime::Timeframe);
     if (useMC) {
-      outputSpec.emplace_back("TRK", "DIGITSMCTR", iLayer, Lifetime::Timeframe);
+      outputSpec.emplace_back(origin, "DIGITSMCTR", iLayer, Lifetime::Timeframe);
     }
   }
   if (useCalib) {
-    outputSpec.emplace_back("TRK", "GBTCALIB", 0, Lifetime::Timeframe);
+    outputSpec.emplace_back(origin, "GBTCALIB", 0, Lifetime::Timeframe);
   }
 
+  std::string detNameLC = o2::detectors::DetID(DetID).getName();
+  std::transform(detNameLC.begin(), detNameLC.end(), detNameLC.begin(), ::tolower);
   return DataProcessorSpec{
-    "trk-digit-reader",
-    Inputs{},
-    outputSpec,
-    AlgorithmSpec{adaptFromTask<TRKDigitReader>(useMC, useCalib)},
-    Options{
-      {"trk-digit-infile", VariantType::String, defname, {"Name of the input digit file"}}}};
+    .name = detNameLC + "-digit-reader",
+    .inputs = Inputs{},
+    .outputs = outputSpec,
+    .algorithm = AlgorithmSpec{adaptFromTask<Reader>(useMC, useCalib)},
+    .options = Options{
+      {detNameLC + "-digit-infile", VariantType::String, defname, {"Name of the input digit file"}}}};
+}
+} // namespace
+
+DataProcessorSpec getTRKDigitReaderSpec(bool useMC, bool useCalib, std::string defname)
+{
+  return getDigitReaderSpecT<o2::detectors::DetID::TRK, TRKDigitReader>(useMC, useCalib, std::move(defname));
+}
+
+DataProcessorSpec getFT3DigitReaderSpec(bool useMC, bool useCalib, std::string defname)
+{
+  return getDigitReaderSpecT<o2::detectors::DetID::FT3, FT3DigitReader>(useMC, useCalib, std::move(defname));
 }
 
 } // namespace trk

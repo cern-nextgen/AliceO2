@@ -30,6 +30,8 @@
 #include "TPCCalibration/CorrMapParam.h"
 
 #include <fairlogger/Logger.h>
+#include <TRandom3.h>
+#include <mutex>
 
 ClassImp(o2::tpc::Digitizer);
 
@@ -39,13 +41,96 @@ Digitizer::~Digitizer() = default;
 
 Digitizer::Digitizer() = default;
 
+namespace
+{
+/// serialises the calls that read calibrations through the CDBInterface, which is not thread safe
+std::mutex& calibrationMutex()
+{
+  static std::mutex mutex;
+  return mutex;
+}
+
+// splitmix64 finaliser, to derive well separated seeds from the base seed
+ULong64_t mixSeed(ULong64_t x)
+{
+  x += 0x9e3779b97f4a7c15ULL;
+  x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+  x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+  return x ^ (x >> 31);
+}
+
+// TRandom3 takes 32 bits of the seed and treats 0 as a request for a random seed
+UInt_t toTRandom3Seed(ULong64_t x)
+{
+  const UInt_t seed = static_cast<UInt_t>(x ^ (x >> 32));
+  return seed ? seed : 1;
+}
+} // namespace
+
+ElectronTransport& Digitizer::electronTransport()
+{
+  return mElectronTransport ? *mElectronTransport : ElectronTransport::instance();
+}
+
+GEMAmplification& Digitizer::gemAmplification()
+{
+  return mGEMAmplification ? *mGEMAmplification : GEMAmplification::instance();
+}
+
+SAMPAProcessing& Digitizer::sampaProcessing()
+{
+  return mSAMPAProcessing ? *mSAMPAProcessing : SAMPAProcessing::instance();
+}
+
+void Digitizer::setUseSectorSeeding(ULong64_t seed)
+{
+  mUseSectorSeeding = true;
+  mSeed = seed;
+}
+
+void Digitizer::initSectorSeeding()
+{
+  if (mUseSectorSeeding && !mGEMAmplification) {
+    // the rings are filled once, in the construction order of the singletons
+    TRandom3 rng(toTRandom3Seed(mixSeed(mSeed)));
+    mGEMAmplification = std::make_unique<GEMAmplification>(&rng);
+    mElectronTransport = std::make_unique<ElectronTransport>(&rng);
+    mSAMPAProcessing = std::make_unique<SAMPAProcessing>(&rng);
+    mDigitContainer.setSAMPAProcessing(mSAMPAProcessing.get());
+  }
+}
+
+void Digitizer::setSectorSeedingFrom(Digitizer& other)
+{
+  other.initSectorSeeding();
+  mUseSectorSeeding = other.mUseSectorSeeding;
+  mSeed = other.mSeed;
+  if (other.mGEMAmplification) {
+    mGEMAmplification = std::make_unique<GEMAmplification>(*other.mGEMAmplification);
+    mElectronTransport = std::make_unique<ElectronTransport>(*other.mElectronTransport);
+    mSAMPAProcessing = std::make_unique<SAMPAProcessing>(*other.mSAMPAProcessing);
+    mDigitContainer.setSAMPAProcessing(mSAMPAProcessing.get());
+  }
+}
+
 void Digitizer::init()
 {
-  auto& gemAmplification = GEMAmplification::instance();
-  gemAmplification.updateParameters();
-  auto& electronTransport = ElectronTransport::instance();
+  std::lock_guard<std::mutex> lock(calibrationMutex());
+  if (mUseSectorSeeding) {
+    initSectorSeeding();
+    const ULong64_t sectorSeed = mixSeed(mSeed ^ mixSeed(static_cast<ULong64_t>(mSector) + 1));
+    TRandom3 rng(toTRandom3Seed(mixSeed(sectorSeed ^ mixSeed(mSeedingTimeframe))));
+    mGEMAmplification->setRandomRingPositions(rng);
+    mElectronTransport->setRandomRingPositions(rng);
+    mSAMPAProcessing->setRandomRingPositions(rng);
+  }
+  auto& gemAmplification = this->gemAmplification();
+  gemAmplification.updateParameters(mUseGainMapMC);
+  auto& electronTransport = this->electronTransport();
   electronTransport.updateParameters(mVDrift);
-  auto& sampaProcessing = SAMPAProcessing::instance();
+  auto& sampaProcessing = this->sampaProcessing();
+  // the calibration update may reload FEE parameters from file, so SAMPAProcessing picks up its pointers afterwards
+  mDigitContainer.updateCalibrations();
   sampaProcessing.updateParameters(mVDrift);
 }
 
@@ -57,14 +142,13 @@ void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
   auto& eleParam = ParameterElectronics::Instance();
   auto& gemParam = ParameterGEM::Instance();
 
-  auto& gemAmplification = GEMAmplification::instance();
-  auto& electronTransport = ElectronTransport::instance();
-  auto& sampaProcessing = SAMPAProcessing::instance();
+  auto& gemAmplification = this->gemAmplification();
+  auto& electronTransport = this->electronTransport();
+  auto& sampaProcessing = this->sampaProcessing();
 
   const int nShapedPoints = eleParam.NShapedPoints;
   const auto amplificationMode = gemParam.AmplMode;
-  static std::vector<float> signalArray;
-  signalArray.resize(nShapedPoints);
+  mSignalArray.resize(nShapedPoints);
 
   /// Reserve space in the digit container for the current event
   mDigitContainer.reserve(sampaProcessing.getTimeBinFromTime(mEventTime - mOutputDigitTimeOffset));
@@ -83,7 +167,7 @@ void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
       if (mDistortionScaleType == 1) {
         mSpaceCharge->distortElectron(posEle);
       } else if (mDistortionScaleType == 2) {
-        mSpaceCharge->distortElectron(posEle, (mUseScaledDistortions ? nullptr : mSpaceChargeDer.get()), mLumiScaleFactor);
+        mSpaceCharge->distortElectron(posEle, (mUseScaledDistortions ? nullptr : mSpaceChargeDer), mLumiScaleFactor);
       }
 
       /// Remove electrons that end up more than three sigma of the hit's average diffusion away from the current sector
@@ -152,11 +236,11 @@ void Digitizer::process(const std::vector<o2::tpc::HitGroup>& hits,
         const GlobalPadNumber globalPad = mapper.globalPadNumber(digiPadPos.getGlobalPadPos());
         const float ADCsignal = sampaProcessing.getADCvalue(static_cast<float>(nElectronsGEM));
         const MCCompLabel label(MCTrackID, eventID, sourceID, false);
-        sampaProcessing.getShapedSignal(ADCsignal, absoluteTime, signalArray);
+        sampaProcessing.getShapedSignal(ADCsignal, absoluteTime, mSignalArray);
         for (float i = 0; i < nShapedPoints; ++i) {
           const float time = absoluteTime + i * eleParam.ZbinWidth;
           mDigitContainer.addDigit(label, digiPadPos.getCRU(), sampaProcessing.getTimeBinFromTime(time), globalPad,
-                                   signalArray[i]);
+                                   mSignalArray[i]);
         }
         /// TODO: add ion backflow to space-charge density
       }
@@ -170,10 +254,10 @@ void Digitizer::flush(std::vector<o2::tpc::Digit>& digits,
                       std::vector<o2::tpc::CommonMode>& commonModeOutput,
                       bool finalFlush)
 {
-  SAMPAProcessing& sampaProcessing = SAMPAProcessing::instance();
+  SAMPAProcessing& sampaProcessing = this->sampaProcessing();
   mDigitContainer.fillOutputContainer(digits, labels, commonModeOutput, mSector, sampaProcessing.getTimeBinFromTime(mEventTime - mOutputDigitTimeOffset), mIsContinuous, finalFlush);
   // flushing debug output to file
-  if (((finalFlush && mIsContinuous) || (!mIsContinuous)) && mSpaceCharge) {
+  if (mFlushDebugStreamer && ((finalFlush && mIsContinuous) || (!mIsContinuous)) && mSpaceCharge) {
     o2::utils::DebugStreamer::instance()->flush();
   }
 }
@@ -182,7 +266,8 @@ void Digitizer::setUseSCDistortions(const SCDistortionType& distortionType, cons
 {
   mUseSCDistortions = true;
   if (!mSpaceCharge) {
-    mSpaceCharge = std::make_unique<SC>();
+    mSpaceChargeOwned = std::make_unique<SC>();
+    mSpaceCharge = mSpaceChargeOwned.get();
   }
   mSpaceCharge->setSCDistortionType(distortionType);
   if (hisInitialSCDensity) {
@@ -194,14 +279,17 @@ void Digitizer::setUseSCDistortions(const SCDistortionType& distortionType, cons
 void Digitizer::setUseSCDistortions(SC* spaceCharge)
 {
   mUseSCDistortions = true;
-  mSpaceCharge.reset(spaceCharge);
+  if (spaceCharge != mSpaceChargeOwned.get()) {
+    mSpaceChargeOwned.reset();
+  }
+  mSpaceCharge = spaceCharge;
   mSpaceCharge->initAfterReadingFromFile();
   mSpaceCharge->printMetaData();
 }
 
 void Digitizer::setSCDistortionsDerivative(SC* spaceCharge)
 {
-  mSpaceChargeDer.reset(spaceCharge);
+  mSpaceChargeDer = spaceCharge;
   mSpaceChargeDer->initAfterReadingFromFile();
   mSpaceChargeDer->printMetaData();
 }
@@ -210,7 +298,8 @@ void Digitizer::setUseSCDistortions(std::string_view finp)
 {
   mUseSCDistortions = true;
   if (!mSpaceCharge) {
-    mSpaceCharge = std::make_unique<SC>();
+    mSpaceChargeOwned = std::make_unique<SC>();
+    mSpaceCharge = mSpaceChargeOwned.get();
   }
 
   // in case analytical distortions are loaded from file they are applied
@@ -226,11 +315,24 @@ void Digitizer::setStartTime(double time)
   // this is setting the first timebin index for the digit container
   // note that negative times w.r.t start of timeframe/data-taking == mOutputDigitTimeOffset
   // will yield the 0-th bin (due to casting logic in sampaProcessing)
-  SAMPAProcessing& sampaProcessing = SAMPAProcessing::instance();
-  sampaProcessing.updateParameters(mVDrift);
+  SAMPAProcessing& sampaProcessing = this->sampaProcessing();
+  {
+    std::lock_guard<std::mutex> lock(calibrationMutex());
+    sampaProcessing.updateParameters(mVDrift);
+  }
   const auto timediff = time - mOutputDigitTimeOffset;
   const auto starttimebin = sampaProcessing.getTimeBinFromTime(timediff);
   mDigitContainer.setStartTime(starttimebin);
+}
+
+void Digitizer::setSCDistortionsFrom(const Digitizer& other)
+{
+  mSpaceChargeOwned.reset();
+  mSpaceCharge = other.mSpaceCharge;
+  mSpaceChargeDer = other.mSpaceChargeDer;
+  mUseSCDistortions = other.mUseSCDistortions;
+  mLumiScaleFactor = other.mLumiScaleFactor;
+  mUseScaledDistortions = other.mUseScaledDistortions;
 }
 
 void Digitizer::setLumiScaleFactor()
@@ -249,6 +351,14 @@ void Digitizer::setMeanLumiDistortionsDerivative(float meanLumi)
   mSpaceChargeDer->setMeanLumi(meanLumi);
 }
 
+void Digitizer::setRecalcDistortionsMethod(int method)
+{
+  if ((method != 0) && (method != 1)) {
+    LOGP(fatal, "Unknown method {} for the recalculation of the distortions (0: inversion of the scaled corrections, 1: scaled derivative corrections applied to the distortions)", method);
+  }
+  mRecalcDistortionsMethod = method;
+}
+
 void Digitizer::recalculateDistortions()
 {
   if (!mSpaceCharge || !mSpaceChargeDer) {
@@ -260,15 +370,24 @@ void Digitizer::recalculateDistortions()
   if (mSpaceCharge->getMeanLumi() != CorrMapParam::Instance().lumiInst) {
     for (int iside = 0; iside < 2; ++iside) {
       const o2::tpc::Side side = (iside == 0) ? Side::A : Side::C;
-      // this needs to be done only once
-      LOGP(info, "Calculating corrections for average distortions");
-      mSpaceCharge->calcGlobalCorrWithGlobalDistIterative(side, nullptr, 0);
-
       LOGP(info, "Calculating corrections for derivative distortions");
       mSpaceChargeDer->calcGlobalCorrWithGlobalDistIterative(side, nullptr, 0);
 
-      LOGP(info, "Calculating scaled distortions with scaling factor {}", mLumiScaleFactor);
-      mSpaceCharge->calcGlobalDistWithGlobalCorrIterativeLinearCartesian(side, mSpaceChargeDer.get(), mLumiScaleFactor);
+      if (mRecalcDistortionsMethod == 0) {
+        // invert the average distortions, then invert the scaled corrections C_avg + s * C_der
+        LOGP(info, "Calculating corrections for average distortions");
+        mSpaceCharge->calcGlobalCorrWithGlobalDistIterative(side, nullptr, 0);
+
+        LOGP(info, "Calculating scaled distortions with scaling factor {}", mLumiScaleFactor);
+        mSpaceCharge->calcGlobalDistWithGlobalCorrIterativeLinearCartesian(side, mSpaceChargeDer, mLumiScaleFactor);
+      } else {
+        // apply the scaled derivative corrections directly to the average distortions (no inversion of the average distortions)
+        LOGP(info, "Scaling distortions with the derivative corrections and scaling factor {}", mLumiScaleFactor);
+        if (!mSpaceCharge->scaleGlobalDistWithDerivativeCorr(side, *mSpaceChargeDer, mLumiScaleFactor)) {
+          // continuing would use the unscaled average distortions for the rest of the job
+          LOGP(fatal, "Distortions of side {} could not be scaled with the derivative map", static_cast<int>(side));
+        }
+      }
     }
     // set new lumi of avg map
     mSpaceCharge->setMeanLumi(CorrMapParam::Instance().lumiInst);

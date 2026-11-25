@@ -58,6 +58,7 @@ namespace o2::gpu
 // class GPUTRDTrackerGPU;
 class GPUTPCGPUTracker;
 class GPUDisplayInterface;
+struct GPUSettingsDisplay;
 class GPUQA;
 class GPUTPCClusterStatistics;
 class GPUTRDGeometry;
@@ -158,6 +159,7 @@ class GPUChainTracking : public GPUChain
   const GPUQA* GetQA() const { return mQAFromForeignChain ? mQAFromForeignChain->mQA.get() : mQA.get(); }
   GPUQA* GetQA() { return mQAFromForeignChain ? mQAFromForeignChain->mQA.get() : mQA.get(); }
   int32_t ForceInitQA();
+  void GenerateCompressionMCLabels(const GPUChainTracking& chainSync);
   void SetQAFromForeignChain(GPUChainTracking* chain) { mQAFromForeignChain = chain; }
   const GPUSettingsDisplay* GetEventDisplayConfig() const { return mConfigDisplay; }
   const GPUSettingsQA* GetQAConfig() const { return mConfigQA; }
@@ -320,6 +322,9 @@ class GPUChainTracking : public GPUChain
   template <int32_t I>
   int32_t RunTRDTrackingInternal();
   uint32_t StreamForSector(uint32_t sector) const;
+
+  // Debug
+  void DoDebugMergerNClDump(const GPUTPCGMMerger& merger);
 
   std::mutex mMutexUpdateCalib;
   std::unique_ptr<GPUChainTrackingFinalContext> mPipelineFinalizationCtx;

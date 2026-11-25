@@ -28,7 +28,7 @@ using namespace o2::gpu;
 #include <cstring>
 #include <tuple>
 
-#include "utils/qconfigrtc.h"
+#include "utils/qconfig_rtc.h"
 
 void GPUParam::SetDefaults(float solenoidBz, bool assumeConstantBz)
 {
@@ -113,6 +113,7 @@ void GPUParam::UpdateSettings(const GPUSettingsGRP* g, const GPUSettingsProcessi
   if (d) {
     rec.dyn = *d;
   }
+  rec.tpc.nWays = 1 + 2 * ((rec.tpc.mergerInitial3wayFit > 0) + (rec.tpc.mergerInterpolateErrors > 0) + (rec.tpc.rebuildTrackInFit > 0));
 }
 
 void GPUParam::UpdateBzOnly(float newSolenoidBz, bool assumeConstantBz)

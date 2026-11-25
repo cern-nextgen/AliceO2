@@ -18,7 +18,6 @@
 #include "TVirtualMC.h"
 #include "TGeoPhysicalNode.h"
 
-#include "FairGeoNode.h"
 #include "FairRootManager.h"
 #include "FairVolume.h"
 
@@ -33,6 +32,7 @@
 
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/range/irange.hpp>
+#include "DetectorsBase/SimRandom.h"
 
 using namespace o2::phos;
 
@@ -108,7 +108,7 @@ void Detector::FinishEvent()
   first = mHits->begin();
   last = mHits->end();
   while (first != last) {
-    float light = gRandom->Poisson(first->GetEnergyLoss() * o2::phos::PHOSSimParams::Instance().mLightYieldPerGeV);
+    float light = o2::base::simRandom()->Poisson(first->GetEnergyLoss() * o2::phos::PHOSSimParams::Instance().mLightYieldPerGeV);
     first->SetEnergyLoss(light / o2::phos::PHOSSimParams::Instance().mLightYieldPerGeV);
     first++;
   }
@@ -163,11 +163,15 @@ Bool_t Detector::ProcessHits(FairVolume* v)
 
   if (isNewPartile) { // mark track to be kept by stack
     stack->addHit(GetDetId());
+    stack->addTrackReference(o2::TrackReference(*fMC, GetDetId())); // PHOS entry (new superparent)
   }
 
   Double_t lostenergy = fMC->Edep();
   if (lostenergy < DBL_EPSILON && !isNewPartile) {
     return false; // do not create hits with zero energy deposition
+  }
+  if (!isNewPartile) { // track deposits into a hit of its super-parent
+    stack->modifiesHit(GetDetId());
   }
 
   Int_t moduleNumber;

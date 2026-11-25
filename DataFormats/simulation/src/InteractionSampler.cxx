@@ -168,12 +168,11 @@ bool NonUniformMuInteractionSampler::setBCIntensityScales(const std::vector<floa
 {
   // Sets the intensity scales per bunch crossing index
   // The length of this vector needs to be compatible with the bunch filling chosen
-  mBCIntensityScales = scales_from_vector;
-
   if (scales_from_vector.size() != mInteractingBCs.size()) {
     LOG(error) << "Scaling factors and bunch filling scheme are not compatible. Not doing anything";
     return false;
   }
+  mBCIntensityScales = scales_from_vector;
 
   float sum = 0.;
   for (auto v : mBCIntensityScales) {
@@ -190,7 +189,7 @@ bool NonUniformMuInteractionSampler::setBCIntensityScales(const std::vector<floa
       v = std::abs(v) * norm;
     }
   }
-  return false;
+  return true;
 }
 
 // ________________________________________________
@@ -222,7 +221,7 @@ int NonUniformMuInteractionSampler::getBCJump() const
   double U = gRandom->Rndm();    // uniform (0,1)
   double T = -std::log(1.0 - U); // threshold
   double sumMu = 0.0;
-  int offset = 0;
+  int offset = 1;
   auto bcStart = mCurrBCIdx; // the current bc
 
   while (sumMu < T) {

@@ -69,7 +69,7 @@ set(SRCS_DATATYPES DataTypes/GPUDataTypesConfig.cxx DataTypes/GPUConfigDump.cxx 
 
 set(HDRS_CINT_O2 Merger/GPUTPCGMTrackParam.h Merger/GPUTPCGMMergedTrack.h Merger/GPUTPCGMSectorTrack.h Merger/GPUTPCGMBorderTrack.h TRDTracking/GPUTRDInterfaces.h)
 set(HDRS_CINT_DATATYPES DataTypes/GPUTPCGMMergedTrackHit.h)
-set(HDRS_CINT_O2_ADDITIONAL DataTypes/GPUSettings.h Definitions/GPUSettingsList.h DataTypes/GPUDataTypesIO.h DataTypes/GPUDataTypesConfig.h DataTypes/GPUDataTypesQA.h DataTypes/GPUTRDTrack.h DataTypes/GPUTRDRecoParam.h DataTypes/CalibdEdxTrackTopologyPol.h DataTypes/CalibdEdxTrackTopologySpline.h) # Manual dependencies for ROOT dictionary generation
+set(HDRS_CINT_O2_ADDITIONAL DataTypes/GPUSettings.h DataTypes/GPUSettingsTypes.h Definitions/GPUSettingsListDisplay.h Definitions/GPUSettingsList.h DataTypes/GPUDataTypesIO.h DataTypes/GPUDataTypesConfig.h DataTypes/GPUDataTypesQA.h DataTypes/GPUTRDTrack.h DataTypes/GPUTRDRecoParam.h DataTypes/CalibdEdxTrackTopologyPol.h DataTypes/CalibdEdxTrackTopologySpline.h) # Manual dependencies for ROOT dictionary generation
 
 set(SRCS_NO_CINT
     DataTypes/GPUMemorySizeScalers.cxx
@@ -120,6 +120,7 @@ set(HDRS_INSTALL
     Base/GPUReconstructionIncludesITS.h
     Base/GPUReconstructionKernelMacros.h
     Base/GPUReconstructionCPUKernels.h
+    Base/GPUStdSystemHeaders.h
     DataCompression/GPUTPCClusterRejection.h
     DataCompression/GPUTPCCompressionKernels.inc
     DataCompression/TPCClusterDecompressionCore.inc
@@ -156,6 +157,7 @@ set(HDRS_INSTALL
     SectorTracker/GPUTPCMCInfo.h
     SectorTracker/GPUTPCTracklet.h
     SectorTracker/GPUTPCTrackLinearisation.h
+    SectorTracker/GPUTPCRow.h
     TPCConvert/GPUTPCConvertImpl.h
     TRDTracking/GPUTRDGeometry.h
     TRDTracking/GPUTRDSpacePoint.h
@@ -165,6 +167,8 @@ set(HDRS_INSTALL
     TRDTracking/GPUTRDTrackPoint.h
     TRDTracking/GPUTRDTrackPoint.h
     DataTypes/GPUTPCGMPolynomialField.h
+    DataTypes/GPUSettingsParam.h
+    Definitions/GPUSettingsListStandalone.h
 )
 
 set(SRCS_NO_CINT ${SRCS_NO_CINT} display/GPUDisplayInterface.cxx)
@@ -476,9 +480,11 @@ elseif(CUDA_ENABLED OR OPENCL_ENABLED OR HIP_ENABLED)
     set(PARAMFILE ${CMAKE_CURRENT_BINARY_DIR}/genGPUArch/gpu_const_param_${GPU_ARCH}.par)
     add_custom_command(
       OUTPUT ${PARAMFILE}
+      COMMAND ${CMAKE_COMMAND} -E rm -f ${PARAMFILE}
       COMMAND bash -c
               "echo -e '#define GPUCA_GPUTYPE_${GPU_ARCH}\\n#define PARAMETER_FILE \"GPUDefParametersDefaults.h\"\\ngInterpreter->AddIncludePath(\"${CMAKE_CURRENT_SOURCE_DIR}/Definitions\");\\ngInterpreter->AddIncludePath(\"${ON_THE_FLY_DIR}\");\\n.x ${CMAKE_CURRENT_SOURCE_DIR}/Standalone/tools/dumpGPUDefParam.C(\"${PARAMFILE}\")\\n.q\\n'"
               | root -l -b > /dev/null
+      COMMAND test -f ${PARAMFILE} # root returns 0 also if the macro fails
       VERBATIM
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/genGPUArch
       MAIN_DEPENDENCY Standalone/tools/dumpGPUDefParam.C
@@ -507,9 +513,7 @@ if(CPUDEVICE_ENABLED)
 endif()
 
 if(ALIGPU_BUILD_TYPE STREQUAL "O2" OR ALIGPU_BUILD_TYPE STREQUAL "Standalone")
-  if(NOT ${CMAKE_SYSTEM} MATCHES Darwin)
-    add_subdirectory(Standalone/Benchmark)
-  endif()
+  add_subdirectory(Standalone/Benchmark)
 endif()
 
 if(GPUCA_DETERMINISTIC_MODE GREATER_EQUAL ${GPUCA_DETERMINISTIC_MODE_MAP_GPU})

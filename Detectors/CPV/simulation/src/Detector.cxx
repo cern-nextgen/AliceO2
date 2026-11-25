@@ -18,7 +18,6 @@
 #include "TVirtualMC.h"
 #include "TGeoPhysicalNode.h"
 
-#include "FairGeoNode.h"
 #include "FairRootManager.h"
 #include "FairVolume.h"
 
@@ -33,6 +32,7 @@
 
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/range/irange.hpp>
+#include "DetectorsBase/SimRandom.h"
 
 using namespace o2::cpv;
 
@@ -106,6 +106,7 @@ void Detector::Reset()
   if (!o2::utils::ShmManager::Instance().isOperational()) {
     mHits->clear();
   }
+  mTrackRefLastTrackID = -1;
 }
 
 void Detector::Register() { FairRootManager::Instance()->RegisterAny(addNameTo("Hit").data(), mHits, kTRUE); }
@@ -123,6 +124,13 @@ Bool_t Detector::ProcessHits(FairVolume* v)
   // ported from AliRoot 2019
   // ------------------------------------------------------------------------
 
+  if (fMC->IsTrackEntering() && !fMC->IsNewTrack() && fMC->TrackCharge() != 0) { // one reference per charged particle, first entry from outside
+    auto o2stack = static_cast<o2::data::Stack*>(fMC->GetStack());
+    if (o2stack->GetCurrentTrackNumber() != mTrackRefLastTrackID) {
+      mTrackRefLastTrackID = o2stack->GetCurrentTrackNumber();
+      o2stack->addTrackReference(o2::TrackReference(*fMC, GetDetId()));
+    }
+  }
   // analyze only charged
   if (fMC->TrackCharge() == 0) {
     fMC->SetMaxStep(1.e10);
@@ -164,7 +172,7 @@ Bool_t Detector::ProcessHits(FairVolume* v)
   float dZY = pZ / pNorm * cpvparam.mCPVGasThickness;
   float dXY = pX / pNorm * cpvparam.mCPVGasThickness;
   float rnor1 = 0., rnor2 = 0.;
-  gRandom->Rannor(rnor1, rnor2);
+  o2::base::simRandom()->Rannor(rnor1, rnor2);
   float eloss = cpvparam.mdEdx * (1 + cpvparam.mDetR * rnor1) *
                 TMath::Sqrt((1. + (pow(dZY, 2) + pow(dXY, 2)) / pow(cpvparam.mCPVGasThickness, 2)));
   float zhit1 = hitZ + cpvparam.mPadSizeZ * cpvparam.mnCellZ / 2 - dZY / 2;
