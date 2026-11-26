@@ -21,7 +21,7 @@
 
 namespace o2::gpu
 {
-constexpr MemLayout::Flag GPUTPCTrackletLayout = MemLayout::Flag::aos;
+constexpr MemLayout::Flag GPUTPCTrackletLayout = MemLayout::Flag::soa;
 
 /**
  * @class GPUTPCTracklet
