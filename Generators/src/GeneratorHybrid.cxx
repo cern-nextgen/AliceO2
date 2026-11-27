@@ -10,6 +10,7 @@
 // or submit itself to any jurisdiction.
 
 #include "Generators/GeneratorHybrid.h"
+#include <chrono>
 #include <fairlogger/Logger.h>
 #include <algorithm>
 #include <tbb/concurrent_queue.h>
@@ -191,11 +192,38 @@ GeneratorHybrid::GeneratorHybrid(const std::string& inputgens)
 GeneratorHybrid::~GeneratorHybrid()
 {
   LOG(info) << "Destructor of generator hybrid called";
+  // stop() is the designated shutdown hook (called via GeneratorService::stopGenerators),
+  // normally running end-of-stream, in which case this is a no-op. It is not reached on every exit path, e.g. when the
+  // driver quits before the event budget or the TTL is up, so it is repeated here.
+  stop();
+}
+
+void GeneratorHybrid::stop()
+{
   mStopFlag = true;
+  // The worker lambdas reference mInputTaskQueue, mResultQueue and mTaskArena, which are
+  // destroyed together with this object, so they must not be left running.
+  // We wait for the thread to finish, which will happen once the worker lambdas notice mStopFlag.
+  if (mTBBTaskPoolRunner.joinable()) {
+    auto t0 = std::chrono::steady_clock::now();
+    mTBBTaskPoolRunner.join();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+    LOG(info) << "HybridGen: stop() joined TBB task pool after " << ms << " ms";
+  }
+  // Forward the hook to the sub-generators
+  for (auto& gen : gens) {
+    if (gen) {
+      gen->stop();
+    }
+  }
 }
 
 Bool_t GeneratorHybrid::Init()
 {
+  // protection against additional Init() which would assign over a joinable mTBBTaskPoolRunner, which calls std::terminate
+  if (mIsInitialized) {
+    return true;
+  }
   // init all sub-gens
   int count = 0;
   for (auto& gen : mGens) {
@@ -223,8 +251,10 @@ Bool_t GeneratorHybrid::Init()
       LOG(info) << "Setting Trigger mode of generator " << gen << " to: " << mTriggerModes[count];
       o2::eventgen::Trigger trigger = nullptr;
       o2::eventgen::DeepTrigger deeptrigger = nullptr;
+      int nTriggersSet = 0;
       for (int trg = 0; trg < mTriggerMacros[count].size(); trg++) {
-        if (mTriggerMacros[count][trg].empty() || mTriggerFuncs[count][trg].empty()) {
+        // an empty function name is derived from the macro file name by GetFromMacro
+        if (mTriggerMacros[count][trg].empty()) {
           continue;
         }
         std::string expandedMacro = o2::utils::expandShellVarsInFileName(mTriggerMacros[count][trg]);
@@ -237,9 +267,8 @@ Bool_t GeneratorHybrid::Init()
           deeptrigger = o2::conf::GetFromMacro<o2::eventgen::DeepTrigger>(expandedMacro, mTriggerFuncs[count][trg], "o2::eventgen::DeepTrigger", "deeptrigger");
         }
         if (!trigger && !deeptrigger) {
-          LOG(warn) << "Failed to retrieve \'external trigger\': problem with configuration";
-          LOG(warn) << "Trigger " << trg << " of generator " << gen << " will not be included";
-          continue;
+          LOG(fatal) << "Failed to retrieve trigger " << trg << " of generator " << gen << ": problem with configuration";
+          return false;
         } else {
           LOG(info) << "Trigger " << trg << " of generator " << gen << " successfully set";
         }
@@ -248,6 +277,11 @@ Bool_t GeneratorHybrid::Init()
         } else {
           gens[count]->addDeepTrigger(deeptrigger);
         }
+        ++nTriggersSet;
+      }
+      if (nTriggersSet == 0) {
+        LOG(fatal) << "Trigger mode set for generator " << gen << " but no trigger macro given";
+        return false;
       }
     }
     count++;
@@ -301,8 +335,16 @@ Bool_t GeneratorHybrid::Init()
     // in sequential mode we have one queue per generator
     mResultQueue.resize(gens.size());
   }
-  // Create a task arena with a specified number of threads
-  mTaskArena.initialize(GeneratorHybridParam::Instance().num_workers);
+  // Create a task arena with a specified number of threads.
+  // Workers beyond the number of generators defined in the JSON are
+  // never busy so a cap is applied to avoid wasting resources
+  const int requestedWorkers = GeneratorHybridParam::Instance().num_workers;
+  const int nWorkers = std::max(1, std::min(requestedWorkers, static_cast<int>(gens.size())));
+  if (nWorkers != requestedWorkers) {
+    LOG(info) << "GeneratorHybrid.num_workers = " << requestedWorkers << " adjusted to " << nWorkers
+              << " (number of generators: " << gens.size() << ")";
+  }
+  mTaskArena.initialize(nWorkers);
 
   // the process task function actually calls event generation
   // when it is done it notifies the outside world by pushing it's index into an appropriate queue
@@ -320,7 +362,7 @@ Bool_t GeneratorHybrid::Init()
       // }
     }
     bool isTriggered = false;
-    while (!isTriggered) {
+    while (!isTriggered && !mStopFlag) {
       generator->clearParticles();
       generator->generateEvent();
       generator->importParticles();
@@ -355,8 +397,8 @@ Bool_t GeneratorHybrid::Init()
 
   // let the TBB task system run in it's own thread
   mTBBTaskPoolRunner = std::thread([this, worker_function]() { mTaskArena.execute([&]() { tbb::parallel_for(0, mTaskArena.max_concurrency(), [&](int) { worker_function(); }); }); });
-  mTBBTaskPoolRunner.detach(); // detaching because we don't like to wait on the thread to finish
-                               // some of the generators might still be generating when we are done
+  // NOTE: thread deliberately NOT detached. We never wait for it during the run, but the
+  // pool must be joined in the destructor before the queues and the arena are destroyed.
 
   // let's also push initial generation tasks for each event generator
   for (size_t genindex = 0; genindex < gens.size(); ++genindex) {
@@ -456,10 +498,15 @@ bool GeneratorHybrid::importParticles()
   // this is important when using event pools where the full header information is forwarded from the generator
   // otherwise some events might have mixed header information from different generators
   mMCEventHeader.Reset();
+  // Once the event budget is exhausted there is no further event to prepare, and re-queueing a
+  // sub-generator would start an event nobody consumes and that stop() then has to wait for
+  const bool queueNextEvent = getTotalNEvents() == 0 || mEventCounter + 1 < getTotalNEvents();
   if (mCocktailMode) {
     // in cocktail mode we need to merge the particles from the different generators
     for (auto subIndex : subGenIndex) {
-      LOG(info) << "Importing particles for task " << subIndex;
+      if (!mIsHyperloop) {
+        LOG(info) << "Importing particles for task " << subIndex;
+      }
       auto subParticles = gens[subIndex]->getParticles();
 
       auto time_unit = gens[subIndex]->getTimeUnit();
@@ -484,11 +531,15 @@ bool GeneratorHybrid::importParticles()
         gens[subIndex]->updateHeader(&mMCEventHeader);
         mHeaderGeneratorIndex = subIndex; // store index of generator updating the header
       }
-      mInputTaskQueue.push(subIndex);
-      mTasksStarted++;
+      if (queueNextEvent) {
+        mInputTaskQueue.push(subIndex);
+        mTasksStarted++;
+      }
     }
   } else {
-    LOG(info) << "Importing particles for task " << genIndex;
+    if (!mIsHyperloop) {
+      LOG(info) << "Importing particles for task " << genIndex;
+    }
     // at this moment the mIndex-th generator is ready to be used
     mParticles = gens[genIndex]->getParticles();
 
@@ -506,8 +557,10 @@ bool GeneratorHybrid::importParticles()
     // fetch the event Header information from the underlying generator
     gens[genIndex]->updateHeader(&mMCEventHeader);
     mHeaderGeneratorIndex = genIndex; // store index of generator updating the header
-    mInputTaskQueue.push(genIndex);
-    mTasksStarted++;
+    if (queueNextEvent) {
+      mInputTaskQueue.push(genIndex);
+      mTasksStarted++;
+    }
   }
 
   mseqCounter++;
@@ -720,6 +773,12 @@ Bool_t GeneratorHybrid::parseJSON(const std::string& path)
         mGroups.back().push_back(mInputGens.size() - 1);
       }
     }
+  }
+
+  // parallel mode takes each event from one shared queue and never collects the members of a cocktail
+  if (mGenerationMode == GenMode::kParallel && mCocktailMode) {
+    LOG(fatal) << "Cocktails cannot be used in parallel mode: use the sequential mode";
+    return false;
   }
 
   // Get fractions and put them in mFractions

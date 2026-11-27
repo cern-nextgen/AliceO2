@@ -10,6 +10,9 @@
 // or submit itself to any jurisdiction.
 
 #include <cstdlib>
+#include <optional>
+#include <string>
+#include <utility>
 
 #include <Steer/O2MCApplication.h>
 #include <fairmq/Channel.h>
@@ -36,11 +39,14 @@
 #include <CommonUtils/FileSystemUtils.h>
 #include "SimConfig/GlobalProcessCutSimParam.h"
 #include <FairRunSim.h>
+#include <FairSink.h>
+#include <FairModule.h>
 #include <FairField.h> // full type: FairField derives from TVirtualMagField
 #include <TVirtualMC.h>
 #include "DetectorsBase/GeometryManagerParam.h"
 #include <TGeoParallelWorld.h>
 #include <TGeoVolume.h>
+#include <TGeoVoxelFinder.h>
 #include <TBuffer3D.h>
 #include <TGeoTessellated.h>
 #include <DetectorsBase/O2Tessellated.h>
@@ -50,6 +56,10 @@
 #include <TLorentzVector.h>
 #include <TRandom.h>
 #include <cstring>
+#include "DetectorsBase/SimRandom.h"
+#include "DetectorsBase/MTWorkerHooks.h"
+#include <TRandom3.h>
+#include <mutex>
 
 namespace o2
 {
@@ -59,7 +69,7 @@ namespace steer
 template <typename T>
 void TypedVectorAttach(const char* name, fair::mq::Channel& channel, fair::mq::Parts& parts)
 {
-  static auto mgr = FairRootManager::Instance();
+  auto mgr = FairRootManager::Instance();
   auto vector = mgr->InitObjectAs<const std::vector<T>*>(name);
   if (vector) {
     auto buffer = (char*)&(*vector)[0];
@@ -184,6 +194,9 @@ bool O2MCApplicationBase::seedsInPreTrack() const
 
 void O2MCApplicationBase::PreTrack()
 {
+  if (auto& beginTrack = o2::base::MTWorkerHooks::instance().beginTrack) {
+    beginTrack();
+  }
   if (mCutParams.trackSeed && seedsInPreTrack()) {
     // Per-track seeding for engines that do not go through
     // o2::data::Stack::PopNextTrack(). Geant4 is one: it takes primaries via
@@ -194,7 +207,7 @@ void O2MCApplicationBase::PreTrack()
     // step, so a suspended track is not reseeded mid-flight.
     auto hash = hashCurrentTrack(fMC);
     // TRandom::SetSeed(0) means "seed from the clock" -- never let that happen.
-    gRandom->SetSeed(hash == 0 ? 1 : hash);
+    o2::base::simRandom()->SetSeed(hash == 0 ? 1 : hash);
     o2::base::VMCSeederService::instance().setSeed();
   }
 
@@ -271,19 +284,27 @@ void O2MCApplicationBase::initStepFilterHook()
 
 void O2MCApplicationBase::InitGeometry()
 {
+  // set up the engine seeding here, on the main thread, so that transport threads never JIT-compile it
+  o2::base::VMCSeederService::instance();
   // load special cuts which might be given from the outside first.
+  // the media cuts are set up once, on the master; the worker threads of multithreaded Geant4 share them
   auto& matMgr = o2::base::MaterialManager::Instance();
-  matMgr.loadCutsAndProcessesFromJSON(o2::base::MaterialManager::ESpecial::kTRUE);
-  matMgr.SetLowEnergyNeutronTransport(mCutParams.lowneut);
+  if (IsMasterApplication()) {
+    matMgr.loadCutsAndProcessesFromJSON(o2::base::MaterialManager::ESpecial::kTRUE);
+    matMgr.SetLowEnergyNeutronTransport(mCutParams.lowneut);
+  }
   // During the following, FairModule::SetSpecialPhysicsCuts will be called for each module
   FairMCApplication::InitGeometry();
-  matMgr.writeCutsAndProcessesToJSON();
   // now the sensitive volumes are set up in fVolMap and we can query them
   for (auto e : fVolMap) {
     // since fVolMap contains multiple entries (if multiple copies), this may
     // write to the same entry multiple times
     mSensitiveVolumes[e.first] = e.second->GetName();
   }
+  if (!IsMasterApplication()) {
+    return;
+  }
+  matMgr.writeCutsAndProcessesToJSON();
   std::ofstream sensvolfile("MCStepLoggerSenVol.dat");
   for (auto e : mSensitiveVolumes) {
     sensvolfile << e.first << ":" << e.second << "\n";
@@ -309,7 +330,8 @@ bool O2MCApplicationBase::MisalignGeometry()
 
   // apply alignment for included detectors AFTER exporting ideal geometry
   auto& aligner = o2::base::Aligner::Instance();
-  aligner.applyAlignment(confref.getTimestamp());
+  // the simulation needs no original matrices, so the physical nodes are not kept
+  aligner.applyAlignment(confref.getTimestamp(), o2::detectors::DetID::FullMask, false);
 
   // export aligned geometry into different file
   auto alignedgeomfile = o2::base::NameConf::getAlignedGeomFileName(confref.getOutPrefix());
@@ -336,6 +358,24 @@ bool O2MCApplicationBase::MisalignGeometry()
 
   // performs possible optimizations (shape replacements on the runtime geometry)
   fixTGeoRuntimeShapes();
+
+  // alignment leaves voxels and assembly boxes to be rebuilt lazily during navigation, which
+  // is a data race between Geant4 transport threads; rebuild them here once
+  TIter nextvol(gGeoManager->GetListOfVolumes());
+  while (auto vol = static_cast<TGeoVolume*>(nextvol())) {
+    if (vol->IsAssembly()) {
+      vol->GetShape()->ComputeBBox();
+    }
+  }
+  nextvol.Reset();
+  int nvoxelized = 0;
+  while (auto vol = static_cast<TGeoVolume*>(nextvol())) {
+    if (auto voxels = vol->GetVoxels(); voxels && voxels->NeedRebuild()) {
+      voxels->Voxelize();
+      ++nvoxelized;
+    }
+  }
+  LOG(info) << "Rebuilt the voxels of " << nvoxelized << " volumes after alignment";
 
   // return original return value of misalignment procedure
   return true;
@@ -1751,6 +1791,27 @@ void addSpecialParticles()
   //Sexaquark (uuddss): compact, neutral and stable hypothetical bound state (arxiv.org/abs/1708.08951)
   TVirtualMC::GetMC()->DefineParticle(900000020, "Sexaquark", kPTUndefined, 2.0, 0.0, 4.35e+17, "Hadron", 0.0, 0, 1, 0, 0, 0, 0, 0, 2, kTRUE);
   TVirtualMC::GetMC()->DefineParticle(-900000020, "AntiSexaquark", kPTUndefined, 2.0, 0.0, 4.35e+17, "Hadron", 0.0, 0, 1, 0, 0, 0, 0, 0, -2, kTRUE);
+
+  // BSM Monopoles, defined only when their physics is enabled (G4.monopole=1), so that a
+  // monopole primary without it is reported by the engine instead of crossing the detector unseen.
+  // The transported mass has to match the one the generator used; see
+  // G4Params.monopoleMass and o2::sim::MonopoleMassDefaultGeV.
+  // To-do: find a way to define multiple masses for monopoles species
+  if (!o2::conf::G4Params::Instance().monopole) {
+    return;
+  }
+  const double monopoleMass = o2::conf::G4Params::Instance().monopoleMass;
+  if (!(monopoleMass > 0.)) {
+    LOG(fatal) << "G4.monopoleMass must be positive, got " << monopoleMass;
+  }
+  // kPTUndefined: Geant4-VMC attaches no process to them (a kPTHadron would get hIoni and hmsc);
+  // their ionisation and transport are attached by O2MonopolePhysics
+  // Symmetric monopoles: same electric and magnetic charge
+  TVirtualMC::GetMC()->DefineParticle(4110000, "Monopole_symm", kPTUndefined, monopoleMass, 0.0, 1e10, "BSM", 0.0, 0, 0, 0, 0, 0, 0, 0, 0, kTRUE);
+  TVirtualMC::GetMC()->DefineParticle(-4110000, "AntiMonopole_symm", kPTUndefined, monopoleMass, 0.0, 1e10, "BSM", 0.0, 0, 0, 0, 0, 0, 0, 0, 0, kTRUE);
+  // Asymmetric monopoles: opposite electric and magnetic charge
+  TVirtualMC::GetMC()->DefineParticle(4120000, "Monopole_asymm", kPTUndefined, monopoleMass, 0.0, 1e10, "BSM", 0.0, 0, 0, 0, 0, 0, 0, 0, 0, kTRUE);
+  TVirtualMC::GetMC()->DefineParticle(-4120000, "AntiMonopole_asymm", kPTUndefined, monopoleMass, 0.0, 1e10, "BSM", 0.0, 0, 0, 0, 0, 0, 0, 0, 0, kTRUE);
 }
 
 void O2MCApplicationBase::AddParticles()
@@ -1798,7 +1859,20 @@ void O2MCApplicationBase::initTrackRefHook()
 
 void O2MCApplication::initLate()
 {
-  o2::utils::ShmManager::Instance().occupySegment();
+  const bool isMT = fRun && fRun->IsMT();
+  if (isMT) {
+    // detectors are enabled for multithreaded Geant4 one by one; other modules make no hits
+    for (auto det : listActiveDetectors) {
+      auto o2det = dynamic_cast<o2::base::Detector*>(det);
+      if (o2det && !o2det->isMTSafe()) {
+        LOG(fatal) << "Detector " << det->GetName() << " is not yet supported in multithreaded mode (--isMT)";
+      }
+    }
+  }
+  o2::utils::ShmManager::Instance().occupySegment(isMT);
+  if (isMT) {
+    return; // the hit buffers belong to the detector clones of the worker threads
+  }
   for (auto det : listActiveDetectors) {
     if (dynamic_cast<o2::base::Detector*>(det)) {
       ((o2::base::Detector*)det)->initializeLate();
@@ -1858,5 +1932,153 @@ void O2MCApplication::SendData()
   LOG(info) << "sending message with " << simdataparts.Size() << " parts";
   mSimDataChannel->Send(simdataparts);
 }
+
+namespace
+{
+// serialises the set-up of the worker threads of multithreaded Geant4
+std::mutex gWorkerSetupMutex;
+
+// the sink of a worker thread in multithreaded mode: its output goes to the hit merger with every event
+class WorkerSink : public FairSink
+{
+ public:
+  Bool_t InitSink() override { return kTRUE; }
+  void Close() override {}
+  void Reset() override {}
+  Sink_Type GetSinkType() override { return kONLINESINK; }
+  void SetOutTree(TTree*) override {}
+  void Fill() override {}
+  Int_t Write(const char*, Int_t, Int_t) override { return 0; }
+  void RegisterImpl(const char*, const char*, void*) override {}
+  void RegisterAny(const char*, const std::type_info&, const std::type_info&, void*) override {}
+  void WriteFolder() override {}
+  bool CreatePersistentBranchesAny() override { return true; }
+  void WriteObject(TObject*, const char*, Int_t) override {}
+  void WriteGeometry() override {}
+  FairSink* CloneSink() override { return new WorkerSink(); }
+};
+} // namespace
+
+O2MCApplication::O2MCApplication(const O2MCApplication& rhs) : O2MCApplicationBase(rhs)
+{
+}
+
+TVirtualMCApplication* O2MCApplication::CloneForWorker() const
+{
+  std::lock_guard<std::mutex> lock(gWorkerSetupMutex);
+  // the run object of the worker thread (FairRunSim::Instance() is thread-local), without generator
+  auto workerRun = new FairRunSim(kFALSE);
+  workerRun->SetName(fRun->GetName());
+  workerRun->SetIsMT(kTRUE);
+  workerRun->SetSink(new WorkerSink());
+  return new O2MCApplication(*this);
+}
+
+void O2MCApplication::InitOnWorker()
+{
+  std::lock_guard<std::mutex> lock(gWorkerSetupMutex);
+  mIsMTWorker = true;
+  fRootManager = FairRootManager::Instance();
+  fRootManager->InitSink();
+  fRun = FairRunSim::Instance();
+  fMC = TVirtualMC::GetMC();
+  fMC->SetStack(fStack);
+  fMC->SetMagField(fxField);
+  // the modules were cloned before this thread's MC existed
+  for (auto obj : *fModules) {
+    if (auto module = dynamic_cast<FairModule*>(obj)) {
+      module->SetMC(fMC);
+    }
+  }
+  // the stack's output branches in this thread's FairRootManager
+  fStack->Register();
+  // this thread's own transport random generator
+  mWorkerRandom = std::make_unique<TRandom3>();
+  o2::base::setSimRandom(mWorkerRandom.get());
+  // this thread's own external decayer; set here, before Geant4 builds the physics of this thread
+  auto& hooks = o2::base::MTWorkerHooks::instance();
+  if (hooks.initOnWorker) {
+    hooks.initOnWorker();
+  }
+  if (hooks.makeDecayer) {
+    fMC->SetExternalDecayer(hooks.makeDecayer());
+  }
+}
+
+void O2MCApplication::BeginRunOnWorker()
+{
+  if (auto& hook = o2::base::MTWorkerHooks::instance().beginRunOnWorker) {
+    hook();
+  }
+}
+
+void O2MCApplication::FinishRunOnWorker()
+{
+  // nothing to finish on a worker: its output went to the hit merger with every event
+}
+
+void O2MCApplication::BeginEvent()
+{
+  if (mIsMTWorker) {
+    fetchWorkerChunk();
+  }
+  O2MCApplicationBase::BeginEvent();
+}
+
+bool O2MCApplication::isSelectedSubEvent(int eventID, int part)
+{
+  static const auto selection = []() -> std::optional<std::pair<int, int>> {
+    auto env = getenv("O2SIM_RESTRICT_EVENTPART");
+    if (!env) {
+      return std::nullopt;
+    }
+    const std::string value(env);
+    const auto pos = value.find(':');
+    if (pos == std::string::npos) {
+      return std::make_pair(0, 0);
+    }
+    return std::make_pair(std::atoi(value.substr(0, pos).c_str()), std::atoi(value.substr(pos + 1).c_str()));
+  }();
+  return !selection || (selection->first == eventID && selection->second == part);
+}
+
+void O2MCApplication::fetchWorkerChunk()
+{
+  auto& hooks = o2::base::MTWorkerHooks::instance();
+  if (!mWorkerInitialized) { // the first sub-event of this thread
+    mSimDataChannel = hooks.dataChannel();
+    for (auto det : listActiveDetectors) {
+      if (auto o2det = dynamic_cast<o2::base::Detector*>(det)) {
+        o2det->initializeLate();
+      }
+    }
+    mWorkerInitialized = true;
+  }
+  auto chunk = hooks.fetchChunk();
+  mIsEndOfWork = !chunk;
+  if (mIsEndOfWork) {
+    // transport an empty event and leave the event loop after it
+    mPrimaries.clear();
+    mWorkerSubEventInfo = o2::data::SubEventInfo{};
+    setSubEventInfo(&mWorkerSubEventInfo);
+    hooks.stopWorker();
+    return;
+  }
+  mWorkerSubEventInfo = chunk->mSubEventInfo;
+  if (isSelectedSubEvent(mWorkerSubEventInfo.eventID, mWorkerSubEventInfo.part)) {
+    setPrimaries(std::move(chunk->mParticles));
+  } else {
+    setPrimaries(std::vector<TParticle>{});
+    LOG(info) << "This chunk will be skipped";
+  }
+  setSubEventInfo(&mWorkerSubEventInfo);
+  LOG(info) << "Processing " << mPrimaries.size() << " primary particles for event " << mWorkerSubEventInfo.eventID << "/"
+            << mWorkerSubEventInfo.maxEvents << " part " << mWorkerSubEventInfo.part << "/" << mWorkerSubEventInfo.nparts;
+  if (!getenv("O2_DISABLE_REPRODUCIBLE_SIM")) {
+    o2::base::simRandom()->SetSeed(mWorkerSubEventInfo.seed);
+    o2::base::VMCSeederService::instance().setSeed();
+  }
+}
+
 } // namespace steer
 } // namespace o2

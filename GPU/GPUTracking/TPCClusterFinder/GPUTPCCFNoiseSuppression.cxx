@@ -21,6 +21,8 @@
 using namespace o2::gpu;
 using namespace o2::gpu::tpccf;
 
+static_assert(GPUCA_GET_THREAD_COUNT(GPUCA_LB_GPUTPCCFNoiseSuppression_noiseSuppression) == GPUCA_GET_THREAD_COUNT(GPUCA_LB_GPUTPCCFNoiseSuppression_updatePeaks));
+
 template <>
 GPUdii() void GPUTPCCFNoiseSuppression::Thread<GPUTPCCFNoiseSuppression::noiseSuppression>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUSharedMemory& smem, processorType& clusterer)
 {
@@ -105,7 +107,7 @@ GPUdi() void GPUTPCCFNoiseSuppression::checkForMinima(
 {
   float r = other.unpack();
 
-  uint64_t isMinima = (q - r > epsilon) && (float)CAMath::Abs(q - r) / (float)CAMath::Max(q, r) > epsilonRelative; // TODO: Can we assume q > r and get rid of Max/Abs?
+  uint64_t isMinima = (q - r > epsilon) && (q - r) / q > epsilonRelative;
   *minimas |= (isMinima << pos);
 
   uint64_t lq = (r > q);

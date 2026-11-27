@@ -17,7 +17,6 @@
 #include "GPUO2DataTypes.h"
 #include "GPUMemorySizeScalers.h"
 #include "GPUDefParametersRuntime.h"
-#include "GPUConstantMem.h"
 
 using namespace o2::gpu;
 
@@ -111,7 +110,7 @@ void GPUTPCCompression::RegisterMemoryAllocation()
   if (gatherMode == 3) {
     mMemoryResOutputGPU = mRec->RegisterMemoryAllocation(this, &GPUTPCCompression::SetPointersOutputGPU, GPUMemoryResource::MEMORY_SCRATCH | GPUMemoryResource::MEMORY_GPU | GPUMemoryResource::MEMORY_CUSTOM | GPUMemoryResource::MEMORY_STACK, "TPCCompressionOutputGPU");
   }
-  uint32_t stackScratch = (gatherMode != 3) ? GPUMemoryResource::MEMORY_STACK : 0; // TODO: Can we use stacked memory also with gather mode 3?
+  uint32_t stackScratch = (gatherMode != 3) ? GPUMemoryResource::MEMORY_STACK : 0; // Not stacked in gather mode 3: scratch is volatile and freed before the GPU output buffer allocated on the stack after it, which must survive for the async copy / double pipeline
   if (gatherMode < 2) {
     mRec->RegisterMemoryAllocation(this, &GPUTPCCompression::SetPointersOutput, GPUMemoryResource::MEMORY_OUTPUT | stackScratch, "TPCCompressionOutput");
   }
@@ -124,8 +123,8 @@ void GPUTPCCompression::SetMaxData(const GPUTrackingInOutPointers& io)
   mMaxClusters = io.clustersNative->nClustersTotal;
   mMaxClusterFactorBase1024 = mMaxClusters > 100000000 ? mRec->MemoryScalers()->NTPCUnattachedHitsBase1024(mRec->GetParam().rec.tpc.rejectionStrategy) : 1024;
   mMaxClustersInCache = mMaxClusters * mMaxClusterFactorBase1024 / 1024;
-  mMaxTrackClusters = mRec->GetConstantMem().tpcMerger.NMergedTrackClusters(); // TODO: Why is this not using ioPtrs? Could remove GPUConstantMem.h include
-  mMaxTracks = mRec->GetConstantMem().tpcMerger.NMergedTracks();
+  mMaxTrackClusters = io.nMergedTrackHits;
+  mMaxTracks = io.nMergedTracks;
   if (mMaxClusters % 16) {
     mMaxClusters += 16 - (mMaxClusters % 16);
   }

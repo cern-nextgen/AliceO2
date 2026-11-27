@@ -58,6 +58,7 @@ namespace o2::gpu
 // class GPUTRDTrackerGPU;
 class GPUTPCGPUTracker;
 class GPUDisplayInterface;
+struct GPUSettingsDisplay;
 class GPUQA;
 class GPUTPCClusterStatistics;
 class GPUTRDGeometry;
@@ -93,7 +94,7 @@ class GPUChainTracking : public GPUChain
   void ClearErrorCodes(bool cpuOnly = false);
   int32_t DoQueuedUpdates(int32_t stream, bool updateSlave = true); // Forces doing queue calib updates, don't call when you are not sure you are allowed to do so!
   bool QARanForTF() const { return mFractionalQAEnabled; }
-  static void ApplySyncSettings(GPUSettingsProcessing& proc, GPUSettingsRec& rec, gpudatatypes::RecoStepField& steps, bool syncMode, int32_t dEdxMode = -2);
+  static void ApplySyncSettings(GPUSettingsProcessing& proc, GPUSettingsRec& rec, gpudatatypes::RecoStepField& steps, bool syncMode, bool asyncMode, int32_t dEdxMode = -2);
 
   // Structures for input and output data
   GPUTrackingInOutPointers& mIOPtrs;
@@ -105,8 +106,8 @@ class GPUChainTracking : public GPUChain
     InOutMemory& operator=(InOutMemory&&);
 
     std::unique_ptr<uint64_t[]> tpcZSpages;
-    std::unique_ptr<char[]> tpcZSpagesChar;        // Same as above, but as char (needed for reading dumps, but deprecated, since alignment can be wrong) // TODO: Fix alignment
-    std::unique_ptr<char[]> tpcCompressedClusters; // TODO: Fix alignment
+    std::unique_ptr<char[], alignedDeleter<char, alignof(uint64_t)>> tpcZSpagesChar; // Same as above, but as char (needed for reading dumps)
+    std::unique_ptr<char[], alignedDeleter<char, alignof(size_t)>> tpcCompressedClusters;
     std::unique_ptr<GPUTrackingInOutZS> tpcZSmeta;
     std::unique_ptr<GPUTrackingInOutZS::GPUTrackingInOutZSMeta> tpcZSmeta2;
     std::unique_ptr<o2::tpc::Digit[]> tpcDigits[NSECTORS];
@@ -158,6 +159,7 @@ class GPUChainTracking : public GPUChain
   const GPUQA* GetQA() const { return mQAFromForeignChain ? mQAFromForeignChain->mQA.get() : mQA.get(); }
   GPUQA* GetQA() { return mQAFromForeignChain ? mQAFromForeignChain->mQA.get() : mQA.get(); }
   int32_t ForceInitQA();
+  void GenerateCompressionMCLabels(const GPUChainTracking& chainSync);
   void SetQAFromForeignChain(GPUChainTracking* chain) { mQAFromForeignChain = chain; }
   const GPUSettingsDisplay* GetEventDisplayConfig() const { return mConfigDisplay; }
   const GPUSettingsQA* GetQAConfig() const { return mConfigQA; }
@@ -241,6 +243,7 @@ class GPUChainTracking : public GPUChain
   void PrepareKernelDebugOutput();
   void PrintKernelDebugOutput();
   void PrintOutputStat();
+  void DumpFinalOutput();
   static void DumpClusters(std::ostream& out, const o2::tpc::ClusterNativeAccess* clusters);
   static void DebugSortCompressedClusters(o2::tpc::CompressedClustersFlat* cls);
   void DoDebugRawDump();
@@ -320,6 +323,9 @@ class GPUChainTracking : public GPUChain
   template <int32_t I>
   int32_t RunTRDTrackingInternal();
   uint32_t StreamForSector(uint32_t sector) const;
+
+  // Debug
+  void DoDebugMergerNClDump(const GPUTPCGMMerger& merger);
 
   std::mutex mMutexUpdateCalib;
   std::unique_ptr<GPUChainTrackingFinalContext> mPipelineFinalizationCtx;

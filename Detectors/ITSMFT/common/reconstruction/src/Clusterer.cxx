@@ -176,7 +176,8 @@ void Clusterer::ClustererThread::process(uint16_t chip, uint16_t nChips, CompClu
     auto chipID = curChipData->getChipID();
     if (parent->mMaxBCSeparationToMask > 0) { // mask pixels fired from the previous ROF
       const auto& chipInPrevROF = parent->mChipsOld[chipID];
-      if (std::abs(rofPtr.getBCData().differenceInBC(chipInPrevROF.getInteractionRecord())) < parent->mMaxBCSeparationToMask) {
+      auto bcDiff = rofPtr.getBCData().differenceInBC(chipInPrevROF.getInteractionRecord()); // the sample must precede, it may come from an unrelated earlier TF
+      if (bcDiff > 0 && bcDiff < parent->mMaxBCSeparationToMask) {
         parent->mMaxRowColDiffToMask ? curChipData->maskFiredInSample(parent->mChipsOld[chipID], parent->mMaxRowColDiffToMask) : curChipData->maskFiredInSample(parent->mChipsOld[chipID]);
       }
     }
@@ -235,11 +236,7 @@ void Clusterer::ClustererThread::finishChip(ChipPixelData* curChipData, CompClus
       pixArrBuff.push_back(pix); // needed for cluster topology
       bbox.adjust(pix.getRowDirect(), pix.getCol());
       if (labelsClusPtr) {
-        if (parent->mSquashingDepth) { // the MCtruth for this pixel is stored in chip data: due to squashing we lose contiguity
-          fetchMCLabels(curChipData->getOrderedPixId(pixEntry.second), labelsDigPtr, nlab);
-        } else { // the MCtruth for this pixel is at curChipData->startID+pixEntry.second
-          fetchMCLabels(pixEntry.second + curChipData->getStartID(), labelsDigPtr, nlab);
-        }
+        fetchMCLabels(curChipData->getDigitID(pixEntry.second), labelsDigPtr, nlab);
       }
       next = pixEntry.first;
     }
@@ -256,11 +253,7 @@ void Clusterer::ClustererThread::finishChip(ChipPixelData* curChipData, CompClus
         pixArrBuff.push_back(pix);                 // needed for cluster topology
         bbox.adjust(pix.getRowDirect(), pix.getCol());
         if (labelsClusPtr) {
-          if (parent->mSquashingDepth) { // the MCtruth for this pixel is stored in chip data: due to squashing we lose contiguity
-            fetchMCLabels(curChipData->getOrderedPixId(pixEntry.second), labelsDigPtr, nlab);
-          } else { // the MCtruth for this pixel is at curChipData->startID+pixEntry.second
-            fetchMCLabels(pixEntry.second + curChipData->getStartID(), labelsDigPtr, nlab);
-          }
+          fetchMCLabels(curChipData->getDigitID(pixEntry.second), labelsDigPtr, nlab);
         }
         next = pixEntry.first;
       }
@@ -315,7 +308,7 @@ void Clusterer::ClustererThread::finishChipSingleHitFast(uint32_t hit, ChipPixel
 
   if (labelsClusPtr) { // MC labels were requested
     int nlab = 0;
-    fetchMCLabels(curChipData->getStartID() + hit, labelsDigPtr, nlab);
+    fetchMCLabels(curChipData->getDigitID(hit), labelsDigPtr, nlab);
     auto cnt = compClusPtr->size();
     for (int i = 0; i < nlab; i++) {
       labelsClusPtr->addElement(cnt, labelsBuff[i]);
@@ -437,6 +430,9 @@ void Clusterer::ClustererThread::updateChip(const ChipPixelData* curChipData, ui
 void Clusterer::ClustererThread::fetchMCLabels(int digID, const ConstMCTruth* labelsDig, int& nfilled)
 {
   // transfer MC labels to cluster
+  if (!labelsDig) {
+    return;
+  }
   auto sortBuffer = [this]() { std::sort(this->labelsBuff.begin(), this->labelsBuff.end(), [](Label const& a, Label const& b) { return a.getTrackID() < b.getTrackID(); }); };
   for (const auto& l : labelsDig->getLabels(digID)) {
     bool skip = false;

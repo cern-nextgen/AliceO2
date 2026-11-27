@@ -101,6 +101,7 @@
 #include <fcntl.h>
 #include <chrono>
 #include <unordered_set>
+#include <span>
 
 using namespace o2::framework;
 using namespace o2::header;
@@ -196,7 +197,7 @@ void GPURecoWorkflowSpec::init(InitContext& ic)
                                       gpudatatypes::RecoStep::TPCMerging);
     mConfig->configWorkflow.outputs.set(gpudatatypes::InOutType::TPCMergedTracks);
   }
-  GPUO2Interface::ApplySyncSettings(mConfig->configProcessing, mConfig->configReconstruction, mConfig->configWorkflow.steps, mConfParam->synchronousProcessing, runTracking ? mConfParam->rundEdx : -2);
+  GPUO2Interface::ApplySyncSettings(mConfig->configProcessing, mConfig->configReconstruction, mConfig->configWorkflow.steps, mConfParam->synchronousProcessing > 0, mConfParam->synchronousProcessing < 0, runTracking ? mConfParam->rundEdx : -2);
 
   if (mSpecConfig.outputCompClustersRoot || mSpecConfig.outputCompClustersFlat) {
     mConfig->configWorkflow.steps.setBits(gpudatatypes::RecoStep::TPCCompression, true);
@@ -233,7 +234,7 @@ void GPURecoWorkflowSpec::init(InitContext& ic)
   if (!mSpecConfig.outputTracks) {
     mConfig->configProcessing.createO2Output = 0; // Disable O2 TPC track format output if no track output requested
   }
-  mConfig->configProcessing.param.tpcTriggerHandling = mSpecConfig.tpcTriggerHandling;
+  mConfig->configWorkflow.steps.setBits(gpudatatypes::RecoStep::TPCTriggerHandling, mSpecConfig.tpcTriggerHandling);
 
   if (mConfParam->transformationFile.size() || mConfParam->transformationSCFile.size()) {
     LOG(fatal) << "Deprecated configurable param options GPU_global.transformationFile or transformationSCFile used\n"
@@ -426,7 +427,7 @@ void GPURecoWorkflowSpec::processInputs(ProcessingContext& pc, D& tpcZSmeta, E& 
       if (recv) {
         throw std::runtime_error("Received multiple TPCZS data");
       }
-      inputZS = pc.inputs().get<gsl::span<o2::tpc::ZeroSuppressedContainer8kb>>(ref);
+      inputZS = pc.inputs().get<std::span<o2::tpc::ZeroSuppressedContainer8kb>>(ref);
       recv = true;
     }
     if (!recv || !recvsizes) {
@@ -518,10 +519,7 @@ int32_t GPURecoWorkflowSpec::runMain(o2::framework::ProcessingContext* pc, GPUTr
       retVal = runITSTracking(*pc);
     }
   }
-
-  if (!mSpecConfig.enableDoublePipeline) { // TODO: Why is this needed for double-pipeline?
-    mGPUReco->Clear(false, threadIndex);   // clean non-output memory used by GPU Reconstruction
-  }
+  mGPUReco->Clear(false, threadIndex); // clean non-output memory used by GPU Reconstruction
   return retVal;
 }
 
@@ -543,7 +541,7 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
   mTimer->Start(false);
   mNTFs++;
 
-  std::vector<gsl::span<const char>> inputs;
+  std::vector<std::span<const char>> inputs;
 
   const o2::tpc::CompressedClustersFlat* pCompClustersFlat = nullptr;
   size_t compClustersFlatDummyMemory[(sizeof(o2::tpc::CompressedClustersFlat) + sizeof(size_t) - 1) / sizeof(size_t)];
@@ -552,7 +550,7 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
   o2::gpu::GPUTrackingInOutZS tpcZS;
   GPURecoWorkflowSpec_TPCZSBuffers tpcZSmeta;
   std::array<uint32_t, NEndpoints * NSectors> tpcZSonTheFlySizes;
-  gsl::span<const o2::tpc::ZeroSuppressedContainer8kb> inputZS;
+  std::span<const o2::tpc::ZeroSuppressedContainer8kb> inputZS;
   std::unique_ptr<char[]> tmpEmptyCompClusters;
 
   bool getWorkflowTPCInput_clusters = false, getWorkflowTPCInput_mc = false, getWorkflowTPCInput_digits = false;
@@ -767,7 +765,7 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
   setOutputAllocator("TRACKS", mSpecConfig.outputTracks, outputRegions.tpcTracksO2, std::make_tuple(gDataOriginTPC, mSpecConfig.useFilteredOutputSpecs ? (DataDescription) "TRACKSF" : (DataDescription) "TRACKS", 0));
   setOutputAllocator("CLUSREFS", mSpecConfig.outputTracks, outputRegions.tpcTracksO2ClusRefs, std::make_tuple(gDataOriginTPC, mSpecConfig.useFilteredOutputSpecs ? (DataDescription) "CLUSREFSF" : (DataDescription) "CLUSREFS", 0));
   setOutputAllocator("TRACKSMCLBL", mSpecConfig.outputTracks && mSpecConfig.processMC, outputRegions.tpcTracksO2Labels, std::make_tuple(gDataOriginTPC, mSpecConfig.useFilteredOutputSpecs ? (DataDescription) "TRACKSMCLBLF" : (DataDescription) "TRACKSMCLBL", 0));
-  setOutputAllocator("TRIGGERWORDS", mSpecConfig.caClusterer && mConfig->configProcessing.param.tpcTriggerHandling, outputRegions.tpcTriggerWords, std::make_tuple(gDataOriginTPC, (DataDescription) "TRIGGERWORDS", 0));
+  setOutputAllocator("TRIGGERWORDS", mSpecConfig.caClusterer && mConfig->configWorkflow.steps.isSet(gpudatatypes::RecoStep::TPCTriggerHandling), outputRegions.tpcTriggerWords, std::make_tuple(gDataOriginTPC, (DataDescription) "TRIGGERWORDS", 0));
   o2::tpc::ClusterNativeHelper::ConstMCLabelContainerViewWithBuffer clustersMCBuffer;
   if (mSpecConfig.processMC && (mSpecConfig.caClusterer || mSpecConfig.useFilteredOutputSpecs)) {
     outputRegions.clusterLabels.allocator = [&clustersMCBuffer](size_t size) -> void* { return &clustersMCBuffer; };
@@ -856,7 +854,7 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
       FILE* fp = fopen(filename.c_str(), "w+b");
       std::vector<InputSpec> filter = {{"check", ConcreteDataTypeMatcher{gDataOriginTPC, "RAWDATA"}, Lifetime::Timeframe}};
       for (auto const& ref : InputRecordWalker(pc.inputs(), filter)) {
-        auto data = pc.inputs().get<gsl::span<char>>(ref);
+        auto data = pc.inputs().get<std::span<char>>(ref);
         if (mConfParam->dumpBadTFMode == 1) {
           uint64_t size = data.size();
           fwrite(&size, 1, sizeof(size), fp);
@@ -920,9 +918,9 @@ void GPURecoWorkflowSpec::run(ProcessingContext& pc)
       tmpEmptyClNative->clustersMCTruth = &clustersMCBuffer.second;
     }
   } else {
-    gsl::span<const o2::tpc::TrackTPC> spanOutputTracks = {ptrs.outputTracksTPCO2, ptrs.nOutputTracksTPCO2};
-    gsl::span<const uint32_t> spanOutputClusRefs = {ptrs.outputClusRefsTPCO2, ptrs.nOutputClusRefsTPCO2};
-    gsl::span<const o2::MCCompLabel> spanOutputTracksMCTruth = {ptrs.outputTracksTPCO2MC, ptrs.outputTracksTPCO2MC ? ptrs.nOutputTracksTPCO2 : 0};
+    std::span<const o2::tpc::TrackTPC> spanOutputTracks = {ptrs.outputTracksTPCO2, ptrs.nOutputTracksTPCO2};
+    std::span<const uint32_t> spanOutputClusRefs = {ptrs.outputClusRefsTPCO2, ptrs.nOutputClusRefsTPCO2};
+    std::span<const o2::MCCompLabel> spanOutputTracksMCTruth = {ptrs.outputTracksTPCO2MC, ptrs.outputTracksTPCO2MC ? ptrs.nOutputTracksTPCO2 : 0};
     if (!mConfParam->allocateOutputOnTheFly) {
       for (uint32_t i = 0; i < outputRegions.count(); i++) {
         if (outputRegions.asArray()[i].ptrBase) {

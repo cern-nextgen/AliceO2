@@ -16,7 +16,11 @@
 #define GPUTPCGEOMETRY_H
 
 #include "GPUCommonDef.h"
+#include "GPUCommonMath.h"
 #include "DataFormatsTPC/Constants.h"
+#ifndef GPUCA_GPUCODE_DEVICE
+#include <cmath>
+#endif
 
 namespace o2::gpu
 {
@@ -121,8 +125,7 @@ class GPUTPCGeometry
   GPUd() static constexpr int32_t MaxNPadsPerRow() { return 138; }
   GPUd() static constexpr float PadWidth(int32_t row) { return (gputpcgeometry_internal::mPadWidthRow[row]); }
 #else
-  GPUd() static constexpr int32_t GetRegion(int32_t row) { return (row < 63 ? 0 : row < 63 + 64 ? 1
-                                                                                                : 2); }
+  GPUd() static constexpr int32_t GetRegion(int32_t row) { return (row < 63 ? 0 : (row < 63 + 64 ? 1 : 2)); }
   GPUd() static constexpr int32_t GetRegionRows(int32_t region) { return 0; }  // dummy
   GPUd() static constexpr int32_t GetRegionStart(int32_t region) { return 0; } // dummy
   GPUd() static constexpr int32_t GetROC(int32_t row) { return GetRegion(row); }
@@ -134,6 +137,26 @@ class GPUTPCGeometry
 #endif
 
   GPUd() static constexpr float Row2X(uint32_t row) { return (gputpcgeometry_internal::mX[row]); }
+  GPUd() static constexpr float X2Row(float x) // Approximate inverse of Row2X, linear within the sections of equal pad height (switching in the middle of the gap between them), exact at the rows, clamped to [0, NROWS - 1]
+  {
+    if (x <= Row2X(0)) {
+      return 0.f;
+    }
+    if (x >= Row2X(NROWS - 1)) {
+      return NROWS - 1.f;
+    }
+    uint32_t row = 0;
+    if (x < 0.5f * (Row2X(EndOROC1() - 1) + Row2X(EndOROC1()))) {
+      row = x < 0.5f * (Row2X(EndIROC() - 1) + Row2X(EndIROC())) ? 0 : EndIROC();
+    } else {
+#ifndef GPUCA_RUN2
+      row = x < 0.5f * (Row2X(EndOROC2() - 1) + Row2X(EndOROC2())) ? EndOROC1() : EndOROC2();
+#else
+      row = EndOROC1();
+#endif
+    }
+    return row + (x - Row2X(row)) / PadHeight(row);
+  }
   GPUd() static constexpr float NRegions() { return gputpcgeometry_internal::NREGIONS; }
   GPUd() static constexpr float TPCLength() { return gputpcgeometry_internal::TPC_LENGTH; }
   GPUd() static constexpr float PadHeight(uint32_t row) { return (gputpcgeometry_internal::mPadHeight[GetRegion(row)]); }
@@ -175,6 +198,8 @@ class GPUTPCGeometry
     const float v = (sector >= NSECTORS / 2) ? -z : z;
     return (250.f - v) * FACTOR_Z2T; // Used in compression, must remain constant at 250cm
   }
+
+  GPUd() static constexpr float kSectAngle() { return 2 * CAMath::Pi() / 18.f; }
 };
 
 } // namespace o2::gpu

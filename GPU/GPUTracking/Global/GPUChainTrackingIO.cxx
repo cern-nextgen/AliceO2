@@ -45,14 +45,16 @@
 #include "CalibdEdxContainer.h"
 
 #include "TPCFastTransformPOD.h"
-
-using namespace o2::gpu;
-
 #include "GPUO2DataTypes.h"
 
+#include <span>
+
+using namespace o2::gpu;
 using namespace o2::tpc;
 using namespace o2::trd;
 using namespace o2::dataformats;
+
+static_assert(decltype(GPUChainTracking::InOutMemory::tpcCompressedClusters)::deleter_type::alignment >= alignof(o2::tpc::CompressedClustersFlat));
 
 static constexpr uint32_t DUMP_HEADER_SIZE = 4;
 static constexpr char DUMP_HEADER[DUMP_HEADER_SIZE + 1] = "CAv1";
@@ -168,7 +170,7 @@ int32_t GPUChainTracking::ReadData(const char* filename)
   }
 
   char buf[DUMP_HEADER_SIZE + 1] = "";
-  size_t r = fread(buf, 1, DUMP_HEADER_SIZE, fp);
+  [[maybe_unused]] size_t r = fread(buf, 1, DUMP_HEADER_SIZE, fp);
   if (strncmp(DUMP_HEADER, buf, DUMP_HEADER_SIZE)) {
     GPUError("Invalid file header");
     fclose(fp);
@@ -193,7 +195,7 @@ int32_t GPUChainTracking::ReadData(const char* filename)
     mIOPtrs.clustersNative = mIOMem.clusterNativeAccess.get();
     std::pair<const char*, size_t> tmp = {nullptr, 0};
     if (ReadData(fp, &tmp.first, &tmp.second, &mIOMem.clusterNativeMC, InOutPointerType::CLUSTER_NATIVE_MC)) {
-      mIOMem.clusterNativeMCView = std::make_unique<ConstMCLabelContainerView>(gsl::span<const char>(tmp.first, tmp.first + tmp.second));
+      mIOMem.clusterNativeMCView = std::make_unique<ConstMCLabelContainerView>(std::span<const char>(tmp.first, tmp.first + tmp.second));
       mIOMem.clusterNativeAccess->clustersMCTruth = mIOMem.clusterNativeMCView.get();
     }
   }
@@ -207,7 +209,7 @@ int32_t GPUChainTracking::ReadData(const char* filename)
       mIOMem.tpcDigitMCView.reset(new ConstMCLabelContainerView[NSECTORS]);
       for (uint32_t i = 0; i < NSECTORS; i++) {
         if (sizes[i]) {
-          mIOMem.tpcDigitMCView.get()[i] = gsl::span<const char>(ptrs[i], ptrs[i] + sizes[i]);
+          mIOMem.tpcDigitMCView.get()[i] = std::span<const char>(ptrs[i], ptrs[i] + sizes[i]);
           mIOMem.tpcDigitMCMap->v[i] = mIOMem.tpcDigitMCView.get() + i;
         } else {
           mIOMem.tpcDigitMCMap->v[i] = nullptr;
@@ -265,7 +267,6 @@ int32_t GPUChainTracking::ReadData(const char* filename)
     GPUError("Error reading data file, reading incomplete");
     return 1;
   }
-  (void)r;
   for (uint32_t i = 0; i < NSECTORS; i++) {
     for (uint32_t j = 0; j < mIOPtrs.nClusterData[i]; j++) {
       ptrClusterData[i][j].id = nClustersTotal++;

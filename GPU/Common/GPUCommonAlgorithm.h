@@ -49,6 +49,8 @@ class GPUCommonAlgorithm
 #endif
   template <class T>
   GPUd() static void swap(T& a, T& b);
+  template <class I, class P>
+  GPUhd() static I partitionPoint(I first, I count, const P& pred);
 
  private:
   template <typename I>
@@ -330,6 +332,24 @@ GPUdi() void GPUCommonAlgorithm::swap(T& a, T& b)
 }
 #endif
 
+// std::partition_point over the indices [first, first + count): the first index for which pred is false, pred being true on a prefix.
+// A lower bound of value in a sorted key(i) is pred(i) = key(i) < value, an upper bound pred(i) = !(value < key(i)).
+template <class I, class P>
+GPUhdi() I GPUCommonAlgorithm::partitionPoint(I first, I count, const P& pred)
+{
+  while (count > 0) {
+    const I step = count / 2;
+    const I middle = first + step;
+    if (pred(middle)) {
+      first = middle + 1;
+      count -= step + 1;
+    } else {
+      count = step;
+    }
+  }
+  return first;
+}
+
 } // namespace o2::gpu
 
 // ----------------------------- WORK GROUP FUNCTIONS -----------------------------
@@ -429,6 +449,47 @@ GPUdi() T warp_broadcast_FUNC(T v, int32_t i)
 #endif
 }
 
+template <class T>
+GPUdi() T warp_shuffle_xor(T v, int32_t laneMask)
+{
+#ifdef __CUDACC__
+  return __shfl_xor_sync(0xFFFFFFFF, v, laneMask);
+#else // HIP
+  return __shfl_xor(v, laneMask);
+#endif
+}
+
+// Butterfly all-reduce over groups of Width lanes: every lane gets the result.
+// Width is a power of two and must not exceed the hardware warp size.
+template <int32_t Width, class T>
+GPUdi() T warp_reduce_add(T v)
+{
+  for (int32_t m = Width / 2; m > 0; m >>= 1) {
+    v += warp_shuffle_xor(v, m);
+  }
+  return v;
+}
+
+template <int32_t Width, class T>
+GPUdi() T warp_reduce_min(T v)
+{
+  for (int32_t m = Width / 2; m > 0; m >>= 1) {
+    const T o = warp_shuffle_xor(v, m);
+    v = o < v ? o : v;
+  }
+  return v;
+}
+
+template <int32_t Width, class T>
+GPUdi() T warp_reduce_max(T v)
+{
+  for (int32_t m = Width / 2; m > 0; m >>= 1) {
+    const T o = warp_shuffle_xor(v, m);
+    v = o > v ? o : v;
+  }
+  return v;
+}
+
 [[nodiscard]] GPUdi() bool work_group_any(bool pred)
 {
   return __syncthreads_or(pred);
@@ -438,6 +499,113 @@ GPUdi() T warp_broadcast_FUNC(T v, int32_t i)
 {
   return __syncthreads_count(pred);
 }
+
+#elif defined(__METAL__)
+// MSL has SIMD-group collectives only, so the work-group ones scan within each
+// SIMD group and then across the group totals, which go through smem as with
+// cub. The thread index is a kernel parameter in MSL, so like smem it is taken
+// from the caller's scope. A 1D threadgroup is split into SIMD groups of
+// consecutive threads, of GPUCA_WARP_SIZE each. The SIMD scans take 32-bit
+// lanes; the narrower types are counts and are widened. Sums are returned
+// promoted, as v + 0 would be, since the callers pass !!pred: a bool would
+// truncate them to 0 / 1. They only exchange data through smem, so their
+// barriers fence threadgroup memory only: a device-memory fence, as
+// GPUbarrier() has, costs the stream compaction ~10%.
+
+template <class T>
+GPUdi() auto warp_scan_inclusive_add(T v) -> decltype(+v)
+{
+  return simd_prefix_inclusive_sum((int32_t)v);
+}
+
+template <class T>
+GPUdi() T warp_broadcast(T v, int32_t i)
+{
+  return (T)simd_shuffle((int32_t)v, (ushort)i);
+}
+
+template <class T>
+GPUdi() T warp_shuffle_xor(T v, int32_t laneMask)
+{
+  return simd_shuffle_xor(v, (ushort)laneMask);
+}
+
+template <int32_t Width, class T>
+GPUdi() T warp_reduce_add(T v)
+{
+  for (int32_t m = Width / 2; m > 0; m >>= 1) {
+    v += warp_shuffle_xor(v, m);
+  }
+  return v;
+}
+
+template <int32_t Width, class T>
+GPUdi() T warp_reduce_min(T v)
+{
+  for (int32_t m = Width / 2; m > 0; m >>= 1) {
+    const T o = warp_shuffle_xor(v, m);
+    v = o < v ? o : v;
+  }
+  return v;
+}
+
+template <int32_t Width, class T>
+GPUdi() T warp_reduce_max(T v)
+{
+  for (int32_t m = Width / 2; m > 0; m >>= 1) {
+    const T o = warp_shuffle_xor(v, m);
+    v = o > v ? o : v;
+  }
+  return v;
+}
+
+#define work_group_scan_inclusive_add(v) work_group_scan_inclusive_add_FUNC(v, smem, iThread, nThreads)
+template <class T, class S>
+GPUdi() auto work_group_scan_inclusive_add_FUNC(T v, S& smem, int32_t iThread, int32_t nThreads) -> decltype(+v)
+{
+  const int32_t iWarp = iThread / GPUCA_WARP_SIZE;
+  const int32_t nWarps = (nThreads + GPUCA_WARP_SIZE - 1) / GPUCA_WARP_SIZE;
+  int32_t x = simd_prefix_inclusive_sum((int32_t)v);
+  if (iThread % GPUCA_WARP_SIZE == GPUCA_WARP_SIZE - 1 || iThread == nThreads - 1) {
+    smem.warpPredicateSum[iWarp] = x;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (iWarp == 0) {
+    const int32_t s = simd_prefix_inclusive_sum(iThread < nWarps ? smem.warpPredicateSum[iThread] : 0);
+    if (iThread < nWarps) {
+      smem.warpPredicateSum[iThread] = s;
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (iWarp > 0) {
+    x += smem.warpPredicateSum[iWarp - 1];
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  return x;
+}
+
+#define work_group_broadcast(v, i) work_group_broadcast_FUNC(v, i, smem, iThread)
+template <class T, class S>
+GPUdi() T work_group_broadcast_FUNC(T v, int32_t i, S& smem, int32_t iThread)
+{
+  if (iThread == i) {
+    smem.tmpBroadcast = v;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  T retVal = smem.tmpBroadcast;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  return retVal;
+}
+
+#define work_group_reduce_add(v) work_group_reduce_add_FUNC(v, smem, iThread, nThreads)
+template <class T, class S>
+GPUdi() auto work_group_reduce_add_FUNC(T v, S& smem, int32_t iThread, int32_t nThreads) -> decltype(+v)
+{
+  return work_group_broadcast_FUNC(work_group_scan_inclusive_add_FUNC(v, smem, iThread, nThreads), nThreads - 1, smem, iThread);
+}
+
+#define work_group_count(pred) ((uint32_t)work_group_reduce_add_FUNC((int32_t)(pred), smem, iThread, nThreads))
+#define work_group_any(pred) (work_group_count(pred) != 0)
 
 #else
 // Trivial implementation for the CPU
@@ -468,6 +636,24 @@ GPUdi() T warp_scan_inclusive_add(T v)
 
 template <class T>
 GPUdi() T warp_broadcast(T v, int32_t i)
+{
+  return v;
+}
+
+template <int32_t Width, class T>
+GPUdi() T warp_reduce_add(T v)
+{
+  return v;
+}
+
+template <int32_t Width, class T>
+GPUdi() T warp_reduce_min(T v)
+{
+  return v;
+}
+
+template <int32_t Width, class T>
+GPUdi() T warp_reduce_max(T v)
 {
   return v;
 }

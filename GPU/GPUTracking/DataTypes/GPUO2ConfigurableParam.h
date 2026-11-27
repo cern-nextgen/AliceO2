@@ -17,7 +17,7 @@
 // --configKeyValues "GPU_global.[x]=[y]" : for global GPU run configurations, like solenoidBz, gpuType, configuration object files.
 // --configKeyValues "GPU_rec.[x]=[y]" : for GPU reconstruction related settings used on the GPU, like pt threshold for track rejection.
 // --configKeyValues "GPU_proc.[x]=[y]" : for processing options steering GPU reconstruction like GPU device ID, debug output level, number of CPU threads.
-// Check GPUSettingsList.h for all options
+// Check GPUSettingsList.template for all options
 
 #ifndef GPUO2CONFIGURABLEPARAM_H
 #define GPUO2CONFIGURABLEPARAM_H
@@ -25,6 +25,7 @@
 #include "GPUO2ExternalUser.h"
 #include "CommonUtils/ConfigurableParam.h"
 #include "CommonUtils/ConfigurableParamHelper.h"
+#define GPUSETTINGS_DISPLAY
 #include "GPUSettings.h"
 #include "GPUDefMacros.h"
 #include <vector>
@@ -59,6 +60,7 @@
 #define AddShortcut(...)
 #define AddOptionRTC(...) AddOption(__VA_ARGS__)
 #define AddOptionArrayRTC(...) AddOptionArray(__VA_ARGS__)
+#include "GPUSettingsListDisplay.h"
 #include "GPUSettingsList.h"
 #undef BeginNamespace
 #undef EndNamespace

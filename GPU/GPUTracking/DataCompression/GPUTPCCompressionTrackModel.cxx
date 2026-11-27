@@ -542,7 +542,7 @@ GPUd() int32_t GPUTPCCompressionTrackModel::rotateToAlpha(float newAlpha)
 GPUd() int32_t GPUTPCCompressionTrackModel::propagateToXBzLightNoUpdate(PhysicalTrackModel& t, float x, float Bz, float& dLp)
 {
   //
-  // transport the track to X=x in magnetic field B = ( 0, 0, Bz[kG*0.000299792458] )
+  // transport the track to X=x in magnetic field B = ( 0, 0, Bz[kG*kCLight] )
   // dLp is a return value == path length / track momentum [cm/(GeV/c)]
   // the method returns error code (0 == no error)
   //
@@ -890,7 +890,7 @@ GPUd() void GPUTPCCompressionTrackModel::getClusterErrors2(int32_t iRow, float z
 {
   int32_t rowType = iRow < 97 ? (iRow < 63 ? 0 : 1) : (iRow < 127 ? 2 : 3);
   if (rowType > 2) {
-    rowType = 2; // TODO: Add type 3
+    rowType = 2;
   }
   constexpr float tpcLength = 250.f - 0.275f;
   z = CAMath::Abs(tpcLength - CAMath::Abs(z));

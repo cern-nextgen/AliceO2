@@ -81,7 +81,7 @@
   #define GPUdDefault()
   #define GPUhdDefault()
   #define GPUdi() inline
-  #define GPUdii() __attribute__((always_inline)) inline
+  #define GPUdii() GPUdi() GPUAlwaysInline()
   #define GPUdni()
   #define GPUdnii()
   #define GPUh() INVALID_TRIGGER_ERROR_NO_HOST_CODE
@@ -149,7 +149,7 @@
   #define GPUd()
   #define GPUhdDefault()
   #define GPUdi() inline
-  #define GPUdii() inline
+  #define GPUdii() GPUdi() GPUAlwaysInline()
   #define GPUdni()
   #define GPUdnii()
   #define GPUh() inline
@@ -179,7 +179,7 @@
   #define GPUdDefault() __device__
   #define GPUhdDefault() __host__ __device__
   #define GPUdi() __device__ inline
-  #define GPUdii() __device__ __forceinline__
+  #define GPUdii() GPUdi() GPUAlwaysInline()
   #define GPUdni() __device__ __attribute__((noinline))
   #define GPUdnii() __device__ __attribute__((noinline))
   #define GPUh() __host__ inline
@@ -189,15 +189,7 @@
   #define GPUhdni() __host__ __device__
   #define GPUg() __global__
   #define GPUshared() __shared__
-  #if defined(GPUCA_GPUCODE_DEVICE) && 0 // TODO: Fix for HIP
-    #define GPUCA_USE_TEMPLATE_ADDRESS_SPACES
-    #define GPUglobal() __attribute__((address_space(1)))
-    #define GPUglobalref() GPUglobal()
-    #define GPUconstantref() __attribute__((address_space(4)))
-    #define GPUsharedref() __attribute__((address_space(3)))
-  #else
-    #define GPUglobal()
-  #endif
+  #define GPUglobal()
   #define GPUconstant() __constant__
   #define GPUconstexpr() constexpr __constant__
   #define GPUprivate()
@@ -214,7 +206,7 @@
   #define GPUdDefault()
   #define GPUhdDefault()
   #define GPUdi() __device__ inline
-  #define GPUdii() __device__ inline
+  #define GPUdii() GPUdi() GPUAlwaysInline()
   #define GPUdni() __device__ __attribute__((noinline))
   #define GPUdnii() __device__ __attribute__((noinline))
   #define GPUh() __host__ inline
@@ -233,6 +225,8 @@
   #define GPUbarrierWarp() __syncwarp()
   #define GPUAtomic(type) type
 #endif
+
+#define GPUAlwaysInline() __attribute__((always_inline)) // Forced inlining on host and device
 
 #ifndef GPUdic // Takes different parameter for inlining: 0 = never, 1 = always, 2 = compiler-decision
 #define GPUdic(...) GPUd()

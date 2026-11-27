@@ -35,6 +35,8 @@ namespace eventgen
 {
 
 class GenTPCLoopers; // Forward declaration
+class EventDecayer;
+struct EventDecayerReport;
 
 /*****************************************************************/
 /*****************************************************************/
@@ -101,11 +103,6 @@ class Generator : public FairGenerator
 
   // Check if simulation is running in Hyperloop mode
   static bool isHyperloop();
-
-  // Number of parallel sub-generator clones a Hyperloop-aware generator expands into
-  // (currently used by the external-generator-to-hybrid expansion in GeneratorFactory).
-  // 8 matches the standard core counts of Grid/Hyperloop nodes
-  static constexpr int NHyperloopParallelGenerators = 8;
 
   /** other **/
   void clearParticles() { mParticles.clear(); };
@@ -181,6 +178,11 @@ class Generator : public FairGenerator
 
   // Loopers generator instance
   o2::eventgen::GenTPCLoopers* mTPCLoopersGen = nullptr;
+
+  // decay step after the trigger, created on first use when EventDecayer.enable is set
+  o2::eventgen::EventDecayer* mEventDecayer = nullptr;             //!
+  o2::eventgen::EventDecayerReport* mEventDecayerReport = nullptr; //!
+  Bool_t decayParticles(o2::dataformats::MCEventHeader* header);
 #ifdef GENERATORS_WITH_TPCLOOPERS
   bool initTPCLoopersGen();
 #endif

@@ -18,6 +18,7 @@
 #include "GPUCommonDef.h"
 #include "GPUCommonMath.h"
 #include "GPUDef.h"
+#define GPUSETTINGS_PARAM
 #include "GPUSettings.h"
 #include "GPUTPCGMPolynomialField.h"
 #include "DataFormatsTPC/Constants.h"
@@ -55,9 +56,12 @@ struct GPUParam_t {
   int32_t tpcCutTimeBin;
 
   GPUTPCGMPolynomialField polynomialField; // Polynomial approx. of magnetic field for TPC GM
-  const uint32_t* occupancyMap;            // Ptr to TPC occupancy map
-  uint32_t occupancyTotal;                 // Total occupancy in the TPC (nCl / nHbf)
-  uint32_t occupancyMapSize;               // Size of occupancy map
+
+  struct occupancyStruct {
+    const uint32_t* map; // Ptr to TPC occupancy map
+    uint32_t total;      // Total occupancy in the TPC (nCl / nHbf)
+    uint32_t mapSize;    // Size of occupancy map
+  } occupancy;
 
  protected:
 #ifndef GPUCA_RUN2
@@ -79,8 +83,8 @@ struct GPUParam : public internal::GPUParam_t<GPUSettingsRec, GPUSettingsParam> 
   void UpdateRun3ClusterErrors(const float* yErrorParam, const float* zErrorParam);
 #endif
 
-  GPUd() constexpr uint32_t tpcMinHitsB5(float qPtB5) const { return CAMath::Abs(qPtB5) > 10 ? 10 : (CAMath::Abs(qPtB5) > 5 ? 15 : 29); } // Minimum hits should depend on Pt, low Pt tracks can have few hits. 29 Hits default, 15 for < 200 mev, 10 for < 100 mev
-  GPUd() constexpr float Alpha(int32_t iSector) const                                                                                     // TODO: Check if this is faster, or the lookup from GPUTPCGeometry
+  GPUd() constexpr uint32_t tpcMinHitsB5Abs(float qPtB5) const { return qPtB5 > 10.f ? 10 : (qPtB5 > 5.f ? (uint32_t)(20 - qPtB5) : (qPtB5 > 3.6f ? (uint32_t)(65 - 10.f * qPtB5) : 29)); }
+  GPUd() constexpr float Alpha(int32_t iSector) const // TODO: Check if this is faster, or the lookup from GPUTPCGeometry
   {
     if (iSector >= (int32_t)o2::tpc::constants::MAXSECTOR / 2) {
       iSector -= o2::tpc::constants::MAXSECTOR / 2;

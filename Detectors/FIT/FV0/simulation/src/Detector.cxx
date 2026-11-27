@@ -45,9 +45,6 @@ Detector::~Detector()
   if (mHits) {
     o2::utils::freeSimVector(mHits); // delete mHits;
   }
-  if (mGeometry) {
-    delete mGeometry;
-  }
 }
 
 Detector::Detector(Bool_t isActive)
@@ -80,6 +77,13 @@ Bool_t Detector::ProcessHits(FairVolume* v)
 {
   // This method is called from the MC stepping
 
+  if (fMC->IsTrackEntering() && !fMC->IsNewTrack() && fMC->TrackCharge() != 0) { // one reference per charged particle, first entry from outside
+    auto o2stack = static_cast<o2::data::Stack*>(fMC->GetStack());
+    if (o2stack->GetCurrentTrackNumber() != mTrackRefLastTrackID) {
+      mTrackRefLastTrackID = o2stack->GetCurrentTrackNumber();
+      o2stack->addTrackReference(o2::TrackReference(*fMC, GetDetId()));
+    }
+  }
   // Track only charged particles and photons
   bool isPhotonTrack = false;
   Int_t particlePdg = fMC->TrackPid();
@@ -150,6 +154,7 @@ void Detector::Reset()
   if (!o2::utils::ShmManager::Instance().isOperational()) {
     mHits->clear();
   }
+  mTrackRefLastTrackID = -1;
 }
 
 void Detector::EndOfEvent()

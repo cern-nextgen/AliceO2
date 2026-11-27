@@ -43,11 +43,19 @@ class GEMAmplification
     return gemAmplification;
   }
 
+  /// Constructor
+  /// \param rng random generator to fill the random rings from, gRandom if null
+  explicit GEMAmplification(TRandom* rng = nullptr);
+
   /// Destructor
   ~GEMAmplification() = default;
 
+  /// Move the random rings to new positions drawn from rng
+  void setRandomRingPositions(TRandom& rng);
+
   /// Update the OCDB parameters cached in the class. To be called once per event
-  void updateParameters();
+  /// \param useGainMapMC apply the gain map for MC (TPC/Calib/PadGainFullMC) instead of the one of the reconstruction (TPC/Calib/PadGainFull)
+  void updateParameters(bool useGainMapMC = false);
 
   /// Compute the number of electrons after amplification in a full stack of four GEM foils
   /// \param nElectrons Number of electrons arriving at the first amplification stage (GEM1)
@@ -90,8 +98,6 @@ class GEMAmplification
   int getGEMMultiplication(int nElectrons, int GEM);
 
  private:
-  GEMAmplification();
-
   /// Circular random buffer containing random Gaus values for gain fluctuation if the number of electrons is larger
   /// (central limit theorem)
   math_utils::RandomRing<> mRandomGaus;

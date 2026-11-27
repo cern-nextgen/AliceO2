@@ -122,9 +122,22 @@ class DigiParams
 
   virtual void print() const;
 
+  void setClockPeriod(float ns, int layer) // also sets the clock cycles per ROF: call after setROFrameLengthInBC
+  {
+    mClockPeriod[layer] = ns;
+    mNClockCyclesPerROF[layer] = o2::trk::AlmiraParam::computeNClockCycles(mROFrameLayerLengthInBC[layer], ns);
+  }
+  float getClockPeriod(int layer) const { return mClockPeriod[layer]; }
+  int getNClockCyclesPerROF(int layer) const { return mNClockCyclesPerROF[layer]; }
+
+  uint16_t encodeTimestamp(float toa, long rofIndex, int layer) const
+  {
+    return o2::trk::AlmiraParam::Instance().encodeTimestamp(toa, rofIndex, mROFrameLayerLengthInBC[layer], mClockPeriod[layer], mNClockCyclesPerROF[layer]);
+  }
+
  private:
   static constexpr double infTime = 1e99;
-  float mNoisePerPixel = 1.e-7;          ///< Noise per chip
+  float mNoisePerPixel = 0.2;            ///< noise rate per pixel, in hits/s
   double mTimeOffset = -2 * infTime;     ///< time offset (in seconds!) to calculate ROFrame from hit time
   int mChargeThreshold = 75;             ///< charge threshold in Nelectrons
   int mMinChargeToAccount = 7;           ///< minimum charge contribution to account
@@ -149,6 +162,9 @@ class DigiParams
 
   // auxiliary precalculated parameters
   std::array<float, MaxLayers> mROFrameLayerLengthInv; ///< inverse length of RO frame in ns per layer
+
+  std::array<float, MaxLayers> mClockPeriod{};      ///< ALMIRA clock period in ns per layer
+  std::array<int, MaxLayers> mNClockCyclesPerROF{}; ///< clock cycles in a ROF per layer (if the ROF is not a multiple of the clock period, the last cycle is shorter)
 
   //   ClassDef(DigiParams, 2);
 };

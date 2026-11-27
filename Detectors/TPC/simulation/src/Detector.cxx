@@ -17,6 +17,8 @@
 
 #include "DetectorsBase/Stack.h"
 #include "SimulationDataFormat/TrackReference.h"
+#include "SimulationDataFormat/MonopoleParticles.h"
+#include "SimConfig/G4Params.h"
 
 #include "FairVolume.h" // for FairVolume
 
@@ -24,12 +26,7 @@
 
 #include <cstddef> // for NULL
 
-#include "FairGeoVolume.h"
-#include "FairGeoNode.h"
-#include "FairGeoLoader.h"
-#include "FairGeoInterface.h"
 #include "FairRun.h"
-#include "FairRuntimeDb.h"
 #include <fairlogger/Logger.h>
 #include "FairRootManager.h"
 
@@ -56,6 +53,7 @@
 
 #include <iostream>
 #include <cmath>
+#include "DetectorsBase/SimRandom.h"
 
 using std::cout;
 using std::endl;
@@ -114,17 +112,29 @@ Bool_t Detector::ProcessHits(FairVolume* vol)
   mStepCounter++;
   auto& gasParam = ParameterGas::Instance();
   auto& detParam = ParameterDetector::Instance();
-  const Int_t kMaxDistRef = 15;       // maximal difference between 2 stored references - the parameter should be 15 cm as default
-  static Double_t lastReferenceR = 0; // keeps last reference point in radius (cm)
+  const Int_t kMaxDistRef = 15; // maximal difference between 2 stored references - the parameter should be 15 cm as default
 
   /* This method is called from the MC stepping for the sensitive volume only */
   //   LOG(info) << "tpc::ProcessHits";
   const double trackCharge = fMC->TrackCharge();
+  // Magnetic monopoles have zero electric charge but ionise the gas through
+  // their magnetic charge energy loss (G4mplIonisation), so they must not be
+  // rejected by the electric-charge gate. The PDG lookup is only worth doing for neutral particle
+  // To-do: add dyons case
+  bool isMonopole = false;
   if (static_cast<int>(trackCharge) == 0) {
-
-    // set a very large step size for neutral particles
-    fMC->SetMaxStep(1.e10);
-    return kFALSE; // take only charged particles
+    static const bool sMonopoleIonisation = o2::conf::G4Params::Instance().monopole;
+    isMonopole = sMonopoleIonisation && o2::sim::isMonopole(fMC->TrackPid());
+    if (!isMonopole) {
+      // set a very large step size for neutral particles
+      fMC->SetMaxStep(1.e10);
+      return kFALSE; // take only charged particles
+    }
+    if (fMC->Edep() <= 0.) {
+      // An ionising monopole depositing nothing on this step: there
+      // is no hit to create, and the step limit is deliberately left alone
+      return kFALSE;
+    }
   }
 
   // ===| SET THE LENGTH OF THE NEXT ENERGY LOSS STEP |=========================
@@ -135,7 +145,7 @@ Bool_t Detector::ProcessHits(FairVolume* vol)
   // random shift to avoid binning effects), which was tuned for GEANT4, see
   // https://indico.cern.ch/event/316891/contributions/732168/
 
-  const double rnd = fMC->GetRandom()->Rndm();
+  const double rnd = o2::base::simRandom()->Rndm();
   fMC->SetMaxStep(0.2 + (2. * rnd - 1.) * 0.05); // 2 mm +- rndm*0.5mm step
 
   // ===| check active sector |=================================================
@@ -151,7 +161,7 @@ Bool_t Detector::ProcessHits(FairVolume* vol)
   // if (sectorID != 0) return kFALSE;
 
   // ---| momentum and beta gamma |---
-  static TLorentzVector momentum; // static to make avoid creation/deletion of this expensive object
+  TLorentzVector momentum;
   fMC->TrackMomentum(momentum);
 
   const float time = fMC->TrackTime() * 1.0e9;
@@ -160,12 +170,12 @@ Bool_t Detector::ProcessHits(FairVolume* vol)
   if (fMC->IsTrackEntering() || fMC->IsTrackExiting()) {
     stack->addTrackReference(o2::TrackReference(position.X(), position.Y(), position.Z(), momentum.X(), momentum.Y(),
                                                 momentum.Z(), fMC->TrackLength(), time, trackID, GetDetId()));
-    lastReferenceR = fMC->TrackLength();
+    mLastReferenceR = fMC->TrackLength();
   }
-  if (TMath::Abs(lastReferenceR - fMC->TrackLength()) > kMaxDistRef) { /// we can speedup
+  if (TMath::Abs(mLastReferenceR - fMC->TrackLength()) > kMaxDistRef) { /// we can speedup
     stack->addTrackReference(o2::TrackReference(position.X(), position.Y(), position.Z(), momentum.X(), momentum.Y(),
                                                 momentum.Z(), fMC->TrackLength(), time, trackID, GetDetId()));
-    lastReferenceR = fMC->TrackLength();
+    mLastReferenceR = fMC->TrackLength();
   }
 
   // ---| remove clusters between the IFC and the FC strips |---
@@ -198,7 +208,12 @@ Bool_t Detector::ProcessHits(FairVolume* vol)
   // TODO: Add discussion about drawback
 
   Int_t numberOfElectrons = 0;
-  // I.H. - the type expected in addHit is short
+  // I.H. - the type expected in addHit is float
+
+  // ---| Stepsize in cm and beta*gamma after the step |---
+  const double stepSize = fMC->TrackStep();
+  const double betaGamma = momentum.P() / fMC->TrackMass();
+  constexpr double minBetaGamma = 7.e-3; // validity limit of the collision model below
 
   // use Geant4 energy deposit directly for ionisation (Kr-83m calibration simulations)
   if (detParam.UseGeant4Edep) {
@@ -209,22 +224,30 @@ Bool_t Detector::ProcessHits(FairVolume* vol)
     if (meanIon > 0.) {
       numberOfElectrons = static_cast<int>(gasParam.FanoFactorG4 * Gamma(meanIon / gasParam.FanoFactorG4));
     }
+  } else if (isMonopole) {
+    // ---| MONOPOLE IONISATION |--------
+    // A magnetic monopole ionises the gas via G4mplIonisation (Ahlen stopping
+    // power), which is not described by the electric-charge model (no e-charge)
+    // Ionisation electrons calculated directly from the energy deposited in this step: Nel = Edep / Wion.
+    // To check by TPC experts if this is actually the best way...
+    numberOfElectrons = static_cast<int>(fMC->Edep() / static_cast<double>(gasParam.Wion));
+    // The number of electrons is stored as a float in the HitGroup: maximum cap at
+    // 2^24 (16777216) ==> largest integer a IEEE-754 float can represent exactly
+    numberOfElectrons = TMath::Min(numberOfElectrons, 16777216);
+  } else if (betaGamma < minBetaGamma && stepSize > 0.) {
+    // a finite step ending below the validity limit, e.g. a track that ranged out:
+    // ionisation electrons from the energy deposited in this step, Nel = Edep / Wion
+    numberOfElectrons = static_cast<int>(fMC->Edep() / static_cast<double>(gasParam.Wion));
   } else {
-    // ---| Stepsize in cm |---
-    const double stepSize = fMC->TrackStep();
-
-    double betaGamma = momentum.P() / fMC->TrackMass();
-    betaGamma = TMath::Max(betaGamma, 7.e-3); // protection against too small bg
-
-    // ---| number of primary ionisations per cm |---
+    // ---| number of primary ionisations per cm (zero-length steps give no collisions) |---
     const double primaryElectronsPerCM =
-      gasParam.Nprim * BetheBlochAleph(static_cast<float>(betaGamma), gasParam.BetheBlochParam[0],
+      gasParam.Nprim * BetheBlochAleph(static_cast<float>(TMath::Max(betaGamma, minBetaGamma)), gasParam.BetheBlochParam[0],
                                        gasParam.BetheBlochParam[1], gasParam.BetheBlochParam[2],
                                        gasParam.BetheBlochParam[3], gasParam.BetheBlochParam[4]);
 
     // ---| mean number of collisions and random for this event |---
     const double meanNcoll = stepSize * trackCharge * trackCharge * primaryElectronsPerCM;
-    const int nColl = static_cast<int>(fMC->GetRandom()->Poisson(meanNcoll));
+    const int nColl = static_cast<int>(o2::base::simRandom()->Poisson(meanNcoll));
 
     // Variables needed to generate random powerlaw distributed energy loss
     const double alpha_p1 = 1. - gasParam.Exp; // NA49/G3 value
@@ -240,7 +263,7 @@ Bool_t Detector::ProcessHits(FairVolume* vol)
       // P(eDep) ~ k * edep^-gasParam.getExp()
       // eMin(~I) < eDep < eMax(300 electrons)
       // k fixed so that Int_Emin^EMax P(Edep) = 1.
-      const double rndm = fMC->GetRandom()->Rndm();
+      const double rndm = o2::base::simRandom()->Rndm();
       const double eDep = TMath::Power((kMax - kMin) * rndm + kMin, oneOverAlpha_p1);
       int nel_step = static_cast<int>(((eDep - eMin) / wIon) + 1);
       nel_step = TMath::Min(nel_step, gasParam.MaxElePerStep); // 300 electrons corresponds to 10 keV
@@ -3236,8 +3259,8 @@ Double_t Detector::Gamma(Double_t k)
   Double_t x;
   Double_t y = -1.;
   while (1) {
-    Double_t nu1 = gRandom->Rndm();
-    Double_t nu2 = gRandom->Rndm();
+    Double_t nu1 = o2::base::simRandom()->Rndm();
+    Double_t nu2 = o2::base::simRandom()->Rndm();
     Double_t w1 = c1 + TMath::Log(nu1);
     Double_t w2 = c2 + TMath::Log(nu2);
     y = n * (b1 * w2 - b2 * w1);

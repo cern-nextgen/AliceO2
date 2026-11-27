@@ -15,7 +15,7 @@ o2_add_library(DataFormatsParameters
                        src/GRPECSObject.cxx
                        src/GRPMagField.cxx
                        src/AggregatedRunInfo.cxx
-                PUBLIC_LINK_LIBRARIES FairRoot::Base O2::CommonConstants
+                PUBLIC_LINK_LIBRARIES O2::FairRootBase O2::CommonConstants
                                      O2::CommonTypes O2::CCDB
                                      O2::DetectorsCommonDataFormats)
 
@@ -27,6 +27,12 @@ o2_target_root_dictionary(DataFormatsParameters
                                   include/DataFormatsParameters/GRPMagField.h
                                   include/DataFormatsParameters/AggregatedRunInfo.h
                           LINKDEF src/ParametersDataLinkDef.h)
+
+o2_add_test(AggregatedRunInfo
+            SOURCES test/testAggregatedRunInfo.cxx
+            COMPONENT_NAME DataFormatsParameters
+            PUBLIC_LINK_LIBRARIES O2::DataFormatsParameters
+            LABELS dataformats)
 
 o2_add_executable(simgrp-tool
                   COMPONENT_NAME grp

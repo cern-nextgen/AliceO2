@@ -84,6 +84,7 @@ GPUReconstructionCUDA::~GPUReconstructionCUDA()
 }
 
 static_assert(sizeof(cudaError_t) <= sizeof(int64_t) && cudaSuccess == 0);
+static_assert(std::is_convertible_v<cudaEvent_t, void*>, "CUDA event type incompatible to deviceEvent");
 int32_t GPUReconstructionCUDA::GPUChkErrInternal(const int64_t retval, const char* file, int32_t line) const
 {
   return internal::GPUReconstructionCUDAChkErr(retval, file, line);
@@ -331,11 +332,7 @@ int32_t GPUReconstructionCUDA::InitDevice_Runtime()
       }
     }
 
-#ifndef __HIPCC__ // CUDA
-    dummyInitKernel<<<mMultiprocessorCount, 256>>>(mDeviceMemoryBase); // TODO: Can't we just use the CUDA version and hipify will take care of the rest?
-#else // HIP
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(dummyInitKernel), dim3(mMultiprocessorCount), dim3(256), 0, 0, mDeviceMemoryBase);
-#endif
+    dummyInitKernel<<<mMultiprocessorCount, 256>>>(mDeviceMemoryBase);
 
     if (GetProcessingSettings().rtc.enable) {
       genAndLoadRTC();

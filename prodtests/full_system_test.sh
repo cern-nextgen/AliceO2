@@ -48,6 +48,7 @@ NJOBS=${NJOBS:-"${NCPUS}"}
 SHMSIZE=${SHMSIZE:-8000000000} # Size of shared memory for messages (use 128 GB for 550 event full TF)
 #TPCTRACKERSCRATCHMEMORY=${TPCTRACKERSCRATCHMEMORY:-8000000000} # Not needed by default
 ENABLE_GPU_TEST=${ENABLE_GPU_TEST:-0} # Run the full system test also on the GPU
+FST_GPUTYPE=${FST_GPUTYPE:-CUDA} # GPU backend used in case ENABLE_GPU_TEST=1 (CUDA / HIP / METAL)
 GPUMEMSIZE=${GPUMEMSIZE:-6000000000} # Size of GPU memory to use in case ENABBLE_GPU_TEST=1
 NTIMEFRAMES=${NTIMEFRAMES:-1} # Number of time frames to process
 TFDELAY=${TFDELAY:-100} # Delay in seconds between publishing time frames
@@ -222,7 +223,7 @@ if [[ $BEAMTYPE == "PbPb" ]] && [ $NEvents -ge 5 ] ; then
   CHECK_DETECTORS_RAW+=" EMC PHS HMP"
 fi
 for i in $CHECK_DETECTORS_RAW; do
-  if [[ `ls -l raw/$i/*.raw | awk '{print $5}' | grep -v "^0\$" | wc -l` == "0" ]]; then
+  if [[ `ls -l raw/$i/*.raw | awk '{print $5}' | grep -c -v "^0\$"` == "0" ]]; then
     echo "ERROR: Full system test did generate no raw data for $i"
     exit 1
   fi
@@ -281,7 +282,7 @@ for STAGE in $STAGES; do
   export WORKFLOW_PARAMETERS=
   if [[ "$STAGE" = "WITHGPU" ]]; then
     export CREATECTFDICT=0
-    export GPUTYPE=CUDA
+    export GPUTYPE=$FST_GPUTYPE
     export HOSTMEMSIZE=1000000000
     export SYNCMODE=1
     export CTFINPUT=0
@@ -337,7 +338,7 @@ for STAGE in $STAGES; do
    # Check AOD production for ASYNC stage
   if [[ "$STAGE" = "ASYNC" ]]; then
     if [[ -f "AO2D.root" ]]; then
-      aod_size=`stat -c%s AO2D.root`
+      aod_size=$(wc -c < AO2D.root)
       if [[ $aod_size -gt 0 ]]; then
         echo "AO2D file produced: AO2D.root (size: ${aod_size} bytes)"
         echo "aod_size_${STAGE},${TAG} value=${aod_size}" >> ${METRICFILE}
