@@ -12,7 +12,7 @@ jobs:
   benchmark:
     runs-on: ${{ matrix.runner }}
     container:
-      image: registry.cern.ch/alisw/slc9-gpu-builder@sha256:55ffe1c2c5fa8449403fc011e425ee983fe34ebc79799e7ab9f44eeab8aee7fc
+      image: ${{ matrix.image }}
       options: --cap-add=SYS_PTRACE --cap-add=PERFMON
     strategy:
       fail-fast: false
@@ -21,6 +21,7 @@ jobs:
         include:
           - name: nvidia-h100
             runner: cern-nextgen-h100
+            image: registry.cern.ch/ngt-wp1.7/wp1.7-cuda-devel-rockylinux9@sha256:bae34fb0971a4f82ed0ebe36687e2bb42d82c25f0fa1dd612e4a783c396fa2be
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=90
             cmake_jobs: 8
             profiler_runs: 12
@@ -29,6 +30,7 @@ jobs:
             metrics: Occupancy WarpStateStats ComputeWorkloadAnalysis LaunchStats SpeedOfLight
           - name: nvidia-rtx6000
             runner: cern-nextgen-rtx6000
+            image: registry.cern.ch/ngt-wp1.7/wp1.7-cuda-devel-rockylinux9@sha256:bae34fb0971a4f82ed0ebe36687e2bb42d82c25f0fa1dd612e4a783c396fa2be
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=120
             cmake_jobs: 8
             profiler_runs: 12
@@ -37,6 +39,7 @@ jobs:
             metrics: Occupancy WarpStateStats ComputeWorkloadAnalysis LaunchStats SpeedOfLight
           - name: nvidia-l40s
             runner: cern-nextgen-l40s
+            image: registry.cern.ch/ngt-wp1.7/wp1.7-cuda-devel-rockylinux9@sha256:bae34fb0971a4f82ed0ebe36687e2bb42d82c25f0fa1dd612e4a783c396fa2be
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=89
             cmake_jobs: 8
             profiler_runs: 12
@@ -45,6 +48,7 @@ jobs:
             metrics: Occupancy WarpStateStats ComputeWorkloadAnalysis LaunchStats SpeedOfLight
           - name: amd-mi300x
             runner: cern-nextgen-mi300x
+            image: registry.cern.ch/ngt-wp1.7/wp1.7-rocm-dev-almalinux-9@sha256:4fd7cde849a4279311eec6298892a8a089df4df370c20c0923fe6f9fa692a9f8
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx942
             cmake_jobs: 8
             profiler_runs: 12
@@ -53,6 +57,7 @@ jobs:
             metrics: MeanOccupancyPerCU MemUnitStalled OccupancyPercent VALUBusy VALUUtilization SALUBusy SIMD_UTILIZATION
           - name: amd-w7900
             runner: cern-nextgen-w7900
+            image: registry.cern.ch/ngt-wp1.7/wp1.7-rocm-dev-almalinux-9@sha256:9d3f1fdd5becd45bc6124bd82f69549e44496daeb1f0a44e1532371d47400e31
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx1100
             cmake_jobs: 8
             profiler_runs: 12
@@ -61,6 +66,7 @@ jobs:
             metrics: Wavefronts
           - name: cpu
             runner: cern-nextgen-highfreq-4c
+            image: registry.cern.ch/ngt-wp1.7/wp1.7-cuda-devel-rockylinux9@sha256:bae34fb0971a4f82ed0ebe36687e2bb42d82c25f0fa1dd612e4a783c396fa2be
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=0
             cmake_jobs: 4
             standalone_runs: 42
@@ -154,8 +160,6 @@ jobs:
       - name: Profiler - Nsight Systems
         if: ${{ matrix.name == 'nvidia-h100' || matrix.name == 'nvidia-rtx6000' || matrix.name == 'nvidia-l40s' }}
         run: |
-          dnf config-manager --add-repo "https://developer.download.nvidia.com/devtools/repos/rhel$(source /etc/os-release; echo ${VERSION_ID%%.*})/$(rpm --eval '%{_arch}' | sed s/aarch/arm/)/"
-          dnf install --nogpgcheck -y nsight-systems-cli-2026.5.1
           source /etc/profile.d/modules.sh
           module load ${MODULES}
           cd ${STANDALONE_DIR}
@@ -164,7 +168,6 @@ jobs:
       - name: Profiler - Nsight Compute
         if: ${{ matrix.name == 'nvidia-h100' || matrix.name == 'nvidia-rtx6000' }}
         run: |
-          dnf install -y cuda-nsight-compute-13-1
           source /etc/profile.d/modules.sh
           module load ${MODULES}
           cd ${STANDALONE_DIR}
