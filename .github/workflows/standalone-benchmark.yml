@@ -21,7 +21,7 @@ jobs:
         include:
           - name: nvidia-h100
             runner: cern-nextgen-h100
-            image: registry.cern.ch/ngt-wp1.7/wp1.7-cuda-devel-rockylinux9@sha256:bae34fb0971a4f82ed0ebe36687e2bb42d82c25f0fa1dd612e4a783c396fa2be
+            image: registry.cern.ch/ngt-wp1.7/wp1.7-cuda-devel-rockylinux9@sha256:6db8d1aaf645c1651e0bf165363392f4717e4fe2f482dde396045a68cc5788c6
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=90
             cmake_jobs: 8
             profiler_runs: 12
@@ -30,7 +30,7 @@ jobs:
             metrics: Occupancy WarpStateStats ComputeWorkloadAnalysis LaunchStats SpeedOfLight
           - name: nvidia-rtx6000
             runner: cern-nextgen-rtx6000
-            image: registry.cern.ch/ngt-wp1.7/wp1.7-cuda-devel-rockylinux9@sha256:bae34fb0971a4f82ed0ebe36687e2bb42d82c25f0fa1dd612e4a783c396fa2be
+            image: registry.cern.ch/ngt-wp1.7/wp1.7-cuda-devel-rockylinux9@sha256:6db8d1aaf645c1651e0bf165363392f4717e4fe2f482dde396045a68cc5788c6
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=120
             cmake_jobs: 8
             profiler_runs: 12
@@ -39,7 +39,7 @@ jobs:
             metrics: Occupancy WarpStateStats ComputeWorkloadAnalysis LaunchStats SpeedOfLight
           - name: nvidia-l40s
             runner: cern-nextgen-l40s
-            image: registry.cern.ch/ngt-wp1.7/wp1.7-cuda-devel-rockylinux9@sha256:bae34fb0971a4f82ed0ebe36687e2bb42d82c25f0fa1dd612e4a783c396fa2be
+            image: registry.cern.ch/ngt-wp1.7/wp1.7-cuda-devel-rockylinux9@sha256:6db8d1aaf645c1651e0bf165363392f4717e4fe2f482dde396045a68cc5788c6
             cmake_args: -DENABLE_CUDA=1 -DENABLE_HIP=0 -DCUDA_COMPUTETARGET=89
             cmake_jobs: 8
             profiler_runs: 12
@@ -48,7 +48,7 @@ jobs:
             metrics: Occupancy WarpStateStats ComputeWorkloadAnalysis LaunchStats SpeedOfLight
           - name: amd-mi300x
             runner: cern-nextgen-mi300x
-            image: registry.cern.ch/ngt-wp1.7/wp1.7-rocm-dev-almalinux-9@sha256:4fd7cde849a4279311eec6298892a8a089df4df370c20c0923fe6f9fa692a9f8
+            image: registry.cern.ch/ngt-wp1.7/wp1.7-rocm-dev-almalinux-9@sha256:741048b018030e2f5e5520b777709b764a62486b93455175cd0e64dce5edae59
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx942
             cmake_jobs: 8
             profiler_runs: 12
@@ -57,7 +57,7 @@ jobs:
             metrics: MeanOccupancyPerCU MemUnitStalled OccupancyPercent VALUBusy VALUUtilization SALUBusy SIMD_UTILIZATION
           - name: amd-w7900
             runner: cern-nextgen-w7900
-            image: registry.cern.ch/ngt-wp1.7/wp1.7-rocm-dev-almalinux-9@sha256:9d3f1fdd5becd45bc6124bd82f69549e44496daeb1f0a44e1532371d47400e31
+            image: registry.cern.ch/ngt-wp1.7/wp1.7-rocm-dev-almalinux-9@sha256:da4757adaa2a80303c85ecb8580aa67dc9ef3b762b06fb29857af01e0c4d8886
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=1 -DHIP_AMDGPUTARGET=gfx1100
             cmake_jobs: 8
             profiler_runs: 12
@@ -66,7 +66,7 @@ jobs:
             metrics: Wavefronts
           - name: cpu
             runner: cern-nextgen-highfreq-4c
-            image: registry.cern.ch/ngt-wp1.7/wp1.7-cuda-devel-rockylinux9@sha256:bae34fb0971a4f82ed0ebe36687e2bb42d82c25f0fa1dd612e4a783c396fa2be
+            image: registry.cern.ch/ngt-wp1.7/wp1.7-cuda-devel-rockylinux9@sha256:6db8d1aaf645c1651e0bf165363392f4717e4fe2f482dde396045a68cc5788c6
             cmake_args: -DENABLE_CUDA=0 -DENABLE_HIP=0
             cmake_jobs: 4
             standalone_runs: 42
