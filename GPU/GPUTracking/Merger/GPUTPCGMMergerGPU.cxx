@@ -140,7 +140,7 @@ GPUdii() void GPUTPCGMMergerMergeSectorsPrepare::Thread<0>(int32_t nBlocks, int3
 }
 
 template <int32_t I, typename... Args>
-GPUdii() void GPUTPCGMMergerMergeBorders::Thread(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& GPUrestrict() merger, Args... args)
+GPUd() void GPUTPCGMMergerMergeBorders::Thread(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& GPUrestrict() merger, Args... args)
 {
   merger.MergeBorderTracks<I>(nBlocks, nThreads, iBlock, iThread, args...);
 }
