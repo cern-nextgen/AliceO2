@@ -75,7 +75,7 @@ jobs:
       WORK_DIR: /cvmfs/alice.cern.ch
       ALIBUILD_ARCH_PREFIX: el9-x86_64/Packages
       MODULEPATH: /cvmfs/alice.cern.ch/etc/toolchain/modulefiles/el9-x86_64:/cvmfs/alice.cern.ch/el9-x86_64/Modules/modulefiles
-      MODULES: Vc/1.4.5-23 fmt/11.1.2-25 ms_gsl/4.2.1-16 TBB/v2022.3.0-15 ROOT/v6-36-10-alice4-5
+      MODULES: CMake/v4.2.3-3 Vc/1.4.5-23 fmt/11.1.2-25 ms_gsl/4.2.1-16 TBB/v2022.3.0-15 ROOT/v6-36-10-alice4-5
       ARTIFACT_DIR: /scratch/artifacts
       ALICE_SOURCE_DIR: /scratch/alice
       STANDALONE_DIR: /scratch/standalone
