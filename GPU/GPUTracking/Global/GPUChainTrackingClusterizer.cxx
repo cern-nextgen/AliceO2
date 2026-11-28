@@ -69,6 +69,8 @@ using namespace o2::tpc;
 using namespace o2::tpc::constants;
 using namespace o2::dataformats;
 
+static_assert(sizeof(o2::tpc::TriggerInfoDLBZS) % sizeof(uint32_t) == 0); // GPUTriggerOutputs::hasher hashes it as uint32_t words
+
 #ifndef GPUCA_RUN2
 std::pair<uint32_t, uint32_t> GPUChainTracking::TPCClusterizerDecodeZSCountUpdate(uint32_t iSector, const CfFragment& frag)
 {
@@ -380,7 +382,7 @@ std::pair<uint32_t, uint32_t> GPUChainTracking::TPCClusterizerDecodeZSCount(uint
         const TPCZSHDR* const hdr = (const TPCZSHDR*)(rdh_utils::getLink(o2::raw::RDHUtils::getFEEID(*rdh)) == rdh_utils::DLBZSLinkID ? (page + o2::raw::RDHUtils::getMemorySize(*rdh) - sizeof(TPCZSHDRV2)) : (page + sizeof(o2::header::RAWDataHeader)));
         if (mCFContext->zsVersion == -1) {
           mCFContext->zsVersion = hdr->version;
-          if (GetProcessingSettings().param.tpcTriggerHandling && mCFContext->zsVersion < ZSVersion::ZSVersionDenseLinkBased) { // TODO: Move tpcTriggerHandling to recoSteps bitmask
+          if ((GetRecoSteps() & RecoStep::TPCTriggerHandling) && mCFContext->zsVersion < ZSVersion::ZSVersionDenseLinkBased) {
             static bool errorShown = false;
             if (errorShown == false) {
               GPUAlarm("Trigger handling only possible with TPC Dense Link Based data, received version %d, disabling", mCFContext->zsVersion);
@@ -408,7 +410,7 @@ std::pair<uint32_t, uint32_t> GPUChainTracking::TPCClusterizerDecodeZSCount(uint
             GPUFatal("Cannot process with invalid TPC ZS data, exiting");
           }
         }
-        if (GetProcessingSettings().param.tpcTriggerHandling) {
+        if (GetRecoSteps() & RecoStep::TPCTriggerHandling) {
           const TPCZSHDRV2* const hdr2 = (const TPCZSHDRV2*)hdr;
           if (hdr2->flags & TPCZSHDRV2::ZSFlags::TriggerWordPresent) {
             const char* triggerWord = (const char*)hdr - TPCZSHDRV2::TRIGGER_WORD_SIZE;
@@ -655,7 +657,7 @@ int32_t GPUChainTracking::RunTPCClusterizer_prepare(bool restorePointers, const 
     processorsShadow()->ioPtrs.clustersNative = mCFContext->ptrClusterNativeSave;
     return 0;
   }
-  const auto& threadContext = GetThreadContext();
+  const auto& holdContext = GetThreadContext();
   mRec->MemoryScalers()->nTPCdigits = 0;
   if (mCFContext == nullptr) {
     mCFContext.reset(new GPUTPCCFChainContext);
@@ -665,7 +667,7 @@ int32_t GPUChainTracking::RunTPCClusterizer_prepare(bool restorePointers, const 
   mCFContext->tpcMaxTimeBin = maxAllowedTimebin;
   const CfFragment fragmentMax{(tpccf::TPCTime)mCFContext->tpcMaxTimeBin + 1, maxFragmentLen};
   mCFContext->prepare(mIOPtrs.tpcZS, fragmentMax);
-  if (GetProcessingSettings().param.tpcTriggerHandling) {
+  if (GetRecoSteps() & RecoStep::TPCTriggerHandling) {
     mTriggerBuffer->triggers.clear();
   }
   if (mIOPtrs.tpcZS) {
@@ -763,7 +765,7 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
   int32_t tpcTimeBinCut = (mUpdateNewCalibObjects && mNewCalibValues->newTPCTimeBinCut) ? mNewCalibValues->tpcTimeBinCut : param().tpcCutTimeBin;
 
   mRec->PushNonPersistentMemory(qStr2Tag("TPCCLUST"));
-  const auto& threadContext = GetThreadContext();
+  const auto& holdContext = GetThreadContext();
   const bool doGPU = GetRecoStepsGPU() & RecoStep::TPCClusterFinding;
 
   GPUTPCExtraADC extraADCs;
@@ -941,9 +943,9 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
   std::unique_ptr<ClusterNative[]> tmpNativeClusterBuffer;
 
   const bool buildNativeGPU = doGPU && NeedTPCClustersOnGPU();
-  const bool buildNativeHost = (mRec->GetRecoStepsOutputs() & gpudatatypes::InOutType::TPCClusters) || GetProcessingSettings().deterministicGPUReconstruction; // TODO: Should do this also when clusters are needed for later steps on the host but not requested as output
+  const bool buildNativeHost = (mRec->GetRecoStepsOutputs() & gpudatatypes::InOutType::TPCClusters) || GetProcessingSettings().deterministicGPUReconstruction || GetProcessingSettings().tpcSortClusters; // TODO: Should do this also when clusters are needed for later steps on the host but not requested as output
   const bool propagateMCLabels = buildNativeHost && GetProcessingSettings().runMC && processors()->ioPtrs.tpcPackedDigits && processors()->ioPtrs.tpcPackedDigits->tpcDigitsMC;
-  const bool sortClusters = buildNativeHost && (GetProcessingSettings().deterministicGPUReconstruction || GetProcessingSettings().debugLevel >= 4);
+  const bool sortClusters = buildNativeHost && (GetProcessingSettings().deterministicGPUReconstruction || GetProcessingSettings().debugLevel >= 4 || GetProcessingSettings().tpcSortClusters);
 
   if (GetProcessingSettings().runMC && (!processors()->ioPtrs.tpcPackedDigits || !processors()->ioPtrs.tpcPackedDigits->tpcDigitsMC)) {
     GPUWarning("Requested to process MC labels, but no labels present");
@@ -984,10 +986,8 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
   auto notifyForeignChainFinished = [this]() {
     if (mPipelineNotifyCtx) {
       SynchronizeStream(OutputStream()); // Must finish before updating ioPtrs in (global) constant memory
-      {
-        std::lock_guard<std::mutex> lock(mPipelineNotifyCtx->mutex);
-        mPipelineNotifyCtx->ready = true;
-      }
+      std::lock_guard<std::mutex> lock(mPipelineNotifyCtx->mutex);
+      mPipelineNotifyCtx->ready = true;
       mPipelineNotifyCtx->cond.notify_one();
     }
   };
@@ -1041,7 +1041,7 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
         runKernel<GPUMemClean16>({GetGridAutoStep(lane, RecoStep::TPCClusterFinding)}, clustererShadow.mPchargeMap, TPCMapMemoryLayout<ChargeMapType>::items(GetProcessingSettings().overrideClusterizerFragmentLen) * sizeof(ChargeMapType));
         runKernel<GPUMemClean16>({GetGridAutoStep(lane, RecoStep::TPCClusterFinding)}, clustererShadow.mPpeakMap, TPCMapMemoryLayout<PeakMapType>::items(GetProcessingSettings().overrideClusterizerFragmentLen) * sizeof(PeakMapType));
         if (frag.index == 0) {
-          runKernel<GPUMemClean16>({GetGridAutoStep(lane, RecoStep::TPCClusterFinding)}, clustererShadow.mPpadIsNoisy, TPC_CLUSTERER_STRIDED_PAD_COUNT * sizeof(*clustererShadow.mPpadIsNoisy));
+          runKernel<GPUMemClean16>({GetGridAutoStep(lane, RecoStep::TPCClusterFinding)}, clustererShadow.mPpadIsNoisy, tpccf::TPC_CLUSTERER_STRIDED_PAD_COUNT * sizeof(*clustererShadow.mPpadIsNoisy));
         }
         DoDebugAndDump(RecoStep::TPCClusterFinding, GPUChainTrackingDebugFlags::TPCClustererZeroedCharges, clusterer, &GPUTPCClusterFinder::DumpChargeMap, *mDebugFile, "Zeroed Charges");
 
@@ -1155,7 +1155,7 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
           const int32_t nBlocks = GPUTPCGeometry::NROWS;
 
           runKernel<GPUTPCCFCheckPadBaseline>({GetGridBlk(nBlocks, lane), {iSector}});
-          getKernelTimer<GPUTPCCFCheckPadBaseline>(RecoStep::TPCClusterFinding, iSector, TPC_REAL_PADS_IN_SECTOR * frag.lengthWithoutOverlap() * sizeof(PackedCharge), false);
+          getKernelTimer<GPUTPCCFCheckPadBaseline>(RecoStep::TPCClusterFinding, iSector, tpccf::TPC_REAL_PADS_IN_SECTOR * frag.lengthWithoutOverlap() * sizeof(PackedCharge), false);
         }
 
         DoDebugAndDump(RecoStep::TPCClusterFinding, GPUChainTrackingDebugFlags::TPCClustererDigits, clusterer, &GPUTPCClusterFinder::DumpDigits, *mDebugFile);
@@ -1367,6 +1367,7 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
 
           if (doGPU && propagateMCLabels) {
             TransferMemoryResourceLinkToHost(RecoStep::TPCClusterFinding, clusterer.mScratchId, lane);
+            TransferMemoryResourceLinkToHost(RecoStep::TPCClusterFinding, clusterer.mScratchClustersId, lane);
             SynchronizeStream(lane);
             runKernel<GPUTPCCFClusterizer>({GetGrid(clusterer.mPmemory->counters.nClusters, lane, GPUReconstruction::krnlDeviceType::CPU), {iSector}}, 1); // Computes MC labels
           }
@@ -1382,7 +1383,7 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
             SynchronizeStream(lane);
           }
           if (doGPU && propagateMCLabels) {
-            TransferMemoryResourceLinkToHost(RecoStep::TPCClusterFinding, clusterer.mScratchId, lane);
+            TransferMemoryResourceLinkToHost(RecoStep::TPCClusterFinding, clusterer.mScratchClustersId, lane);
             SynchronizeStream(lane);
             runKernel<GPUTPCCFHIPClusterizer>({GetGrid(GPUTPCGeometry::NROWS, lane, GPUReconstruction::krnlDeviceType::CPU), {iSector}}, 1); // Computes MC labels
           }
@@ -1503,10 +1504,25 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
     }
   }
 
-  if (GetProcessingSettings().param.tpcTriggerHandling) {
+  if (GetRecoSteps() & RecoStep::TPCTriggerHandling) {
     GPUOutputControl* triggerOutput = mSubOutputControls[GPUTrackingOutputs::getIndex(&GPUTrackingOutputs::tpcTriggerWords)];
-    if (triggerOutput && triggerOutput->allocator) {
-      // GPUInfo("Storing %lu trigger words", mTriggerBuffer->triggers.size());
+    const bool storeTriggers = triggerOutput && triggerOutput->allocator;
+    if (GetProcessingSettings().debugLevel >= 3) {
+      GPUInfo("%zu trigger words found%s", mTriggerBuffer->triggers.size(), storeTriggers ? ", storing" : "");
+    }
+    if (GetProcessingSettings().debugLevel >= 6 || (GetProcessingSettings().debugDumpFinal && storeTriggers)) {
+      std::vector<o2::tpc::TriggerInfoDLBZS> sorted(mTriggerBuffer->triggers.begin(), mTriggerBuffer->triggers.end());
+      std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) { return a.orbit != b.orbit ? a.orbit < b.orbit : memcmp(&a.triggerWord, &b.triggerWord, sizeof(a.triggerWord)) < 0; });
+      *mDebugFile << "\n\nTPC Trigger Words: " << sorted.size() << "\n";
+      for (const auto& t : sorted) {
+        *mDebugFile << "Orbit " << t.orbit << ":";
+        for (uint32_t j = 0; j < o2::tpc::TriggerWordDLBZS::MaxTriggerEntries; j++) {
+          *mDebugFile << " " << t.triggerWord.triggerEntries[j];
+        }
+        *mDebugFile << "\n";
+      }
+    }
+    if (storeTriggers) {
       auto* outputBuffer = (decltype(mTriggerBuffer->triggers)::value_type*)triggerOutput->allocator(mTriggerBuffer->triggers.size() * sizeof(decltype(mTriggerBuffer->triggers)::value_type));
       std::copy(mTriggerBuffer->triggers.begin(), mTriggerBuffer->triggers.end(), outputBuffer);
     }
@@ -1581,7 +1597,7 @@ int32_t GPUChainTracking::RunTPCClusterizer(bool synchronizeOutput)
     mInputsHost->mPclusterNativeAccess->setOffsetPtrs();
     TransferMemoryResourceLinkToGPU(RecoStep::TPCClusterFinding, mInputsHost->mResourceClusterNativeAccess, 0);
   }
-  if (doGPU && synchronizeOutput) {
+  if (doGPU && (synchronizeOutput || sortClusters)) { // SortClusters works on the host copy of the clusters, which is transferred on this stream
     SynchronizeStream(mRec->NStreams() - 1);
   }
   if (doGPU && synchronizeCalibUpdate) {

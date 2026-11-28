@@ -71,6 +71,7 @@ class Detector : public o2::base::DetImpl<Detector>
 
   /// Initialization of the detector is done here
   void InitializeO2Detector() override;
+  bool isMTSafe() const override { return true; }
 
   /// This method is called for each step during simulation (see FairMCApplication::Stepping())
   Bool_t ProcessHits(FairVolume* v) override;
@@ -179,6 +180,7 @@ class Detector : public o2::base::DetImpl<Detector>
 
   /// Container for data points
   std::vector<o2::ft0::HitType>* mHits = nullptr;
+  int mTrackRefLastTrackID = -1; //! last track that received a TrackReference in the current event
 
   // Define volume IDs
   int mREGVolID = -1;

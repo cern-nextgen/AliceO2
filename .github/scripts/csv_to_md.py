@@ -19,8 +19,11 @@ def get_dict(csv_filename):
     next(csv_reader)
     return {name: (float(mean), float(stdev), int(count)) for name, mean, stdev, count in csv_reader}
 
-dict_baseline = get_dict(args.baseline)
-dict_current = get_dict(args.current)
+table_baseline = get_2d_list(args.baseline)
+table_current = get_2d_list(args.current)
+dict_baseline = {row[0]: row[1:] for row in table_baseline}
+dict_current = {row[0]: row[1:] for row in table_current}
+all_names = [row[0] for row in table_baseline] + [name for name in dict_current if name not in dict_baseline]
 
 def welch(x, sx, m, y, sy, n):
   """Welch's t-test for difference of means d = x - y.
@@ -55,37 +58,41 @@ def get_emoji(d, ci_half_width):
     return ':white_circle:'
 
 table = []
-for name in dict_current.keys() | dict_baseline.keys():
-  current = dict_current.get(name)
-  baseline = dict_baseline.get(name)
-
-  if current is not None:
-    mean, stdev, count = current
-    sort_key = mean
-    current_row = [int(mean), f'{stdev:.2f}', count]
-  else:
-    sort_key = float('-inf')
-    current_row = ['', '', '']
-
-  if baseline is not None:
-    baseline_mean, baseline_stdev, baseline_count = baseline
-    baseline_row = [int(baseline_mean), f'{baseline_stdev:.2f}', baseline_count]
-  else:
-    baseline_row = ['', '', '']
-
-  if current is not None and baseline is not None:
+for name in all_names:
+  in_baseline = name in dict_baseline
+  in_current = name in dict_current
+  if in_baseline and in_current:
+    baseline_mean, baseline_stdev, baseline_count = dict_baseline[name]
+    mean, stdev, count = dict_current[name]
     d, se, t, nu, ci_half_width = welch(mean, stdev, args.runs, baseline_mean, baseline_stdev, args.runs)
     emoji = get_emoji(d, ci_half_width)
     ci_low = d - ci_half_width
     ci_high = d + ci_half_width
-    comparison_row = [f'{d:.2f}', f'[{ci_low:.2f}, {ci_high:.2f}]', emoji]
+    row = [
+      name,
+      int(mean),
+      f'{stdev:.2f}',
+      count,
+      int(baseline_mean),
+      f'{baseline_stdev:.2f}',
+      baseline_count,
+      f'{d:.2f}',
+      f'[{ci_low:.2f}, {ci_high:.2f}]',
+      emoji,
+    ]
+    sort_key = mean
+  elif in_current:
+    mean, stdev, count = dict_current[name]
+    row = [name, int(mean), f'{stdev:.2f}', count, '-', '-', '-', '-', '-', ':new:']
+    sort_key = mean
   else:
-    comparison_row = ['', '', '']
+    baseline_mean, baseline_stdev, baseline_count = dict_baseline[name]
+    row = [name, '-', '-', '-', int(baseline_mean), f'{baseline_stdev:.2f}', baseline_count, '-', '-', ':wastebasket:']
+    sort_key = baseline_mean
+  table.append(row + [sort_key])
 
-  table.append((sort_key, [name, *current_row, *baseline_row, *comparison_row]))
-
-table.sort(key = lambda row: row[0], reverse=True)
-table = [row for _, row in table]
+table.sort(key = lambda row: row[-1], reverse=True)
+table = [row[:-1] for row in table]
 
 confidence_pct = int(round((1.0 - args.alpha) * 100))
 header = [

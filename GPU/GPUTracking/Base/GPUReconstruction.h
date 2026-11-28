@@ -62,12 +62,6 @@ struct GPUSettingsRec;
 struct GPUSettingsRecDynamic;
 struct GPUMemoryReuse;
 
-namespace gpu_reconstruction_kernels
-{
-struct deviceEvent;
-class threadContext;
-} // namespace gpu_reconstruction_kernels
-
 class GPUReconstruction
 {
  protected:
@@ -138,7 +132,11 @@ class GPUReconstruction
 
   enum class krnlDeviceType : int32_t { CPU = 0,
                                         Device = 1,
-                                        Auto = -1 };
+                                        Auto = -1,
+                                        HostOnDeviceMemory = 2 }; // CPU code on the host, on the device memory (UNIFIED_MEM_SORT_ON_HOST)
+
+  struct deviceEvent;
+  struct threadContext;
 
   // Global steering functions
   template <class T, typename... Args>
@@ -148,7 +146,7 @@ class GPUReconstruction
   int32_t Finalize();
   int32_t Exit();
 
-  void DumpSettings(const char* dir = "");
+  void DumpSettings(const char* dir = "", const GPUSettingsGRP* grp = nullptr); // grp: write these GRP settings instead of the current ones
   int32_t ReadSettings(const char* dir = "");
 
   void PrepareEvent();
@@ -195,6 +193,8 @@ class GPUReconstruction
   void PrintMemoryStatistics();
   void PrintMemoryOverview();
   void PrintMemoryMax();
+  void QueryHostMemoryUSS(const char* where); // With queryHostMemoryUSS: query the USS of the process and keep track of the maximum
+  void PrintHostMemoryUSSMax();
   void SetMemoryExternalInput(int16_t res, void* ptr);
   GPUMemorySizeScalers* MemoryScalers() { return mMemoryScalers.get(); }
 
@@ -276,7 +276,7 @@ class GPUReconstruction
   int32_t InitPhaseAfterDevice();
   void WriteConstantParams(int32_t stream = -1);
   virtual int32_t ExitDevice() = 0;
-  virtual size_t WriteToConstantMemory(size_t offset, const void* src, size_t size, int32_t stream = -1, gpu_reconstruction_kernels::deviceEvent* ev = nullptr) = 0;
+  virtual size_t WriteToConstantMemory(size_t offset, const void* src, size_t size, int32_t stream = -1, deviceEvent* ev = nullptr) = 0;
   void UpdateMaxMemoryUsed();
   int32_t EnqueuePipeline(bool terminate = false);
   GPUChain* GetNextChainInQueue();
@@ -286,7 +286,7 @@ class GPUReconstruction
   virtual int32_t unregisterMemoryForGPU_internal(const void* ptr) = 0;
 
   // Management for GPU thread contexts
-  virtual std::unique_ptr<gpu_reconstruction_kernels::threadContext> GetThreadContext() = 0;
+  virtual std::unique_ptr<threadContext> GetThreadContext() = 0;
 
   // Private helpers for library loading
   static std::shared_ptr<LibraryLoader>* GetLibraryInstance(DeviceType type, bool verbose);
@@ -299,10 +299,10 @@ class GPUReconstruction
   // Private helper functions for reading / writing / allocating IO buffer from/to file
   template <class T, class S>
   uint32_t DumpData(FILE* fp, const T* const* entries, const S* num, InOutPointerType type);
-  template <class T, class S>
-  size_t ReadData(FILE* fp, const T** entries, S* num, std::unique_ptr<T[]>* mem, InOutPointerType type, T** nonConstPtrs = nullptr);
-  template <class T>
-  T* AllocateIOMemoryHelper(size_t n, const T*& ptr, std::unique_ptr<T[]>& u);
+  template <class T, class S, class D>
+  size_t ReadData(FILE* fp, const T** entries, S* num, std::unique_ptr<T[], D>* mem, InOutPointerType type, T** nonConstPtrs = nullptr);
+  template <class T, class D>
+  T* AllocateIOMemoryHelper(size_t n, const T*& ptr, std::unique_ptr<T[], D>& u);
   int16_t RegisterMemoryAllocationHelper(GPUProcessor* proc, void* (GPUProcessor::*setPtr)(void*), int32_t type, const char* name, const GPUMemoryReuse& re);
 
   // Private helper functions to dump / load flat objects
@@ -350,7 +350,10 @@ class GPUReconstruction
   void* mHostMemoryPoolBlocked = nullptr;   // Ptr to end of pool
   size_t mHostMemorySize = 0;               // Size of host memory buffer
   size_t mHostMemoryUsedMax = 0;            // Maximum host memory size used over time
+  size_t mHostMemoryUSSMax = 0;             // Maximum USS of the process seen by QueryHostMemoryUSS
+  std::string mHostMemoryUSSMaxWhere;       // and where it was seen
   void* mDeviceMemoryBase = nullptr;        // Same for device ...
+  void* mDeviceMemoryHostView = nullptr;    // Host address of the device memory, if shared with the host at another address
   void* mDeviceMemoryPermanent = nullptr;   // ...
   void* mDeviceMemoryPool = nullptr;        // ...
   void* mDeviceMemoryPoolEnd = nullptr;     // ...

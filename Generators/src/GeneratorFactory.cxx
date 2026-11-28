@@ -17,6 +17,7 @@
 #include <Generators/BoxGenerator.h>
 #include <fairlogger/Logger.h>
 #include <SimConfig/SimConfig.h>
+#include <SimConfig/G4Params.h>
 #include <Generators/GeneratorFromFile.h>
 #include <Generators/GeneratorTParticle.h>
 #include <Generators/GeneratorTParticleParam.h>
@@ -39,6 +40,7 @@
 #include <rapidjson/ostreamwrapper.h>
 #include <fstream>
 #include <unistd.h>
+#include <algorithm>
 #endif
 #include <Generators/PrimaryGenerator.h>
 #include <Generators/BoxGunParam.h>
@@ -55,17 +57,40 @@ namespace eventgen
 {
 
 #if defined(GENERATORS_WITH_PYTHIA8) && defined(GENERATORS_WITH_HEPMC3)
-// Builds a parallel GeneratorHybrid JSON configuration out of
-// 8 (Generator::NHyperloopParallelGenerators) identical "external" sub-generator entries,
-// using the configured GeneratorExternalParam. This makes the simulation parallelisation automatic
-// on Hyperloop.
+// Maximum number of parallel sub-generators on Hyperloop. Fixed rather than taken from the host
+// core count, which does not reflect the CPU slot assigned to the job: 8 is the largest slot
+// available on GRID/Hyperloop nodes.
+constexpr int MaxHyperloopParallelGenerators = 8;
+
+// Number of identical sub-generators the external generator is expanded into on Hyperloop:
+// one sub-generator per GeneratorHybrid.num_workers (1 by default), capped to
+// MaxHyperloopParallelGenerators.
+int getHyperloopNParallelGenerators()
+{
+  const int nWorkers = GeneratorHybridParam::Instance().num_workers;
+  if (nWorkers < 1) {
+    LOG(warning) << "GeneratorHybrid.num_workers = " << nWorkers << " is not positive: using 1";
+  } else if (nWorkers > MaxHyperloopParallelGenerators) {
+    LOG(warning) << "GeneratorHybrid.num_workers = " << nWorkers << " exceeds the maximum of "
+                 << MaxHyperloopParallelGenerators << " parallel sub-generators: capping to " << MaxHyperloopParallelGenerators;
+  }
+  return std::clamp(nWorkers, 1, MaxHyperloopParallelGenerators);
+}
+
+// Builds a parallel GeneratorHybrid JSON configuration out of nGenerators
+// identical "external" sub-generator entries, using the configured GeneratorExternalParam.
+// This makes the simulation parallelisation automatic on Hyperloop.
 // To-do: Define the behaviour with ini configuration which are already definining a hybrid gen
 //
-// Note on GeneratorHybrid.num_workers: expanding to 8 sub-generators does not by itself raise
-// the number of TBB workers that actually run them in parallel. This is controlled by
-// the parameter GeneratorHybrid.num_workers. On Hyperloop this will be part
-// of the standard train configuration
-std::string buildHyperloopExternalHybridConfig(GeneratorExternalParam const& extparams)
+// Note on GeneratorHybrid.num_workers: it controls both the number of TBB workers running the
+// sub-generators in parallel and nGenerators (see getHyperloopNParallelGenerators).
+// On Hyperloop it is part of the standard train configuration for MCGen datasets
+//
+// An external trigger (trgparams not null) is attached to every sub-generator. Each clone gets
+// its own trigger object, but the macro is loaded once: its static state is shared between
+// the worker threads, so trigger macros must be stateless.
+std::string buildHyperloopExternalHybridConfig(GeneratorExternalParam const& extparams, int nGenerators,
+                                               TriggerExternalParam const* trgparams)
 {
   rapidjson::Document doc;
   doc.SetObject();
@@ -74,7 +99,7 @@ std::string buildHyperloopExternalHybridConfig(GeneratorExternalParam const& ext
 
   rapidjson::Value generators(rapidjson::kArrayType);
   rapidjson::Value fractions(rapidjson::kArrayType);
-  for (int i = 0; i < Generator::NHyperloopParallelGenerators; ++i) {
+  for (int i = 0; i < nGenerators; ++i) {
     rapidjson::Value config(rapidjson::kObjectType);
     config.AddMember("fileName", rapidjson::Value(extparams.fileName.c_str(), alloc), alloc);
     config.AddMember("funcName", rapidjson::Value(extparams.funcName.c_str(), alloc), alloc);
@@ -83,6 +108,18 @@ std::string buildHyperloopExternalHybridConfig(GeneratorExternalParam const& ext
     rapidjson::Value generator(rapidjson::kObjectType);
     generator.AddMember("name", "external", alloc);
     generator.AddMember("config", config, alloc);
+    if (trgparams) {
+      // same OR mode the factory sets when the trigger is attached to a plain generator
+      rapidjson::Value spec(rapidjson::kObjectType);
+      spec.AddMember("macro", rapidjson::Value(trgparams->fileName.c_str(), alloc), alloc);
+      spec.AddMember("function", rapidjson::Value(trgparams->funcName.c_str(), alloc), alloc);
+      rapidjson::Value specs(rapidjson::kArrayType);
+      specs.PushBack(spec, alloc);
+      rapidjson::Value triggers(rapidjson::kObjectType);
+      triggers.AddMember("mode", "or", alloc);
+      triggers.AddMember("specs", specs, alloc);
+      generator.AddMember("triggers", triggers, alloc);
+    }
     generators.PushBack(generator, alloc);
     fractions.PushBack(1, alloc);
   }
@@ -140,8 +177,15 @@ void GeneratorFactory::setPrimaryGenerator(o2::conf::SimConfig const& conf, Fair
 
   /** generators **/
 
-  o2::O2DatabasePDG::addALICEParticles(TDatabasePDG::Instance());
+  // Monopole configurable mass, set before the particles get registered
+  const double monopoleMass = o2::conf::G4Params::Instance().monopoleMass;
+  o2::O2DatabasePDG::setMonopoleMass(monopoleMass);
+  auto* pdgDB = o2::O2DatabasePDG::Instance(); //--> ALICE particles are added once in this call
+  if (!o2::O2DatabasePDG::hasMonopoleMass(pdgDB, monopoleMass)) {
+    LOG(fatal) << "Monopoles were registered in TDatabasePDG with a mass other than G4.monopoleMass = " << monopoleMass << " GeV";
+  }
   auto genconfig = conf.getGenerator();
+  bool triggerInHybridConfig = false; // the -t trigger was written into the Hyperloop hybrid configuration
 #if defined(GENERATORS_WITH_PYTHIA8) && defined(GENERATORS_WITH_HEPMC3)
   std::string hyperloopExtHybridConfigFile; // set when IS_HYPERLOOP is defined
   if (genconfig.compare("external") == 0 || genconfig.compare("extgen") == 0) {
@@ -150,12 +194,31 @@ void GeneratorFactory::setPrimaryGenerator(o2::conf::SimConfig const& conf, Fair
       genconfig = "hybrid";
     } else if (Generator::isHyperloop()) {
       // Running under Hyperloop: transparently expand the single external generator
-      // configuration into a parallel hybrid of Generator::NHyperloopParallelGenerators
-      // clones, to increase on-the-fly MC-generation throughput.
-      LOG(info) << "IS_HYPERLOOP detected: expanding external generator into "
-                << Generator::NHyperloopParallelGenerators << " parallel hybrid sub-generators";
-      hyperloopExtHybridConfigFile = buildHyperloopExternalHybridConfig(GeneratorExternalParam::Instance());
-      genconfig = "hybrid";
+      // configuration into a parallel hybrid of clones (one per worker, capped to
+      // MaxHyperloopParallelGenerators), to increase on-the-fly MC-generation throughput.
+      // A single clone brings no parallelism, so the plain external generator is kept.
+      // Only an external trigger can be carried into the hybrid configuration; with any other
+      // trigger the plain external generator is kept, so that the trigger is still applied.
+      const auto trgconfig = conf.getTrigger();
+      const int nGenerators = getHyperloopNParallelGenerators();
+      if (nGenerators == 1) {
+        LOG(info) << "IS_HYPERLOOP detected: single worker requested, keeping the external generator as is";
+      } else if (trgconfig.compare("particle") == 0) {
+        LOG(warning) << "IS_HYPERLOOP detected: the particle trigger cannot be set in a hybrid generator, "
+                     << "keeping the external generator as is, without parallel generation";
+      } else if (!trgconfig.empty() && trgconfig.compare("external") != 0) {
+        // left to the "Invalid trigger" check below
+      } else {
+        if (!trgconfig.empty() && TriggerExternalParam::Instance().fileName.empty()) {
+          LOG(fatal) << "External trigger requested but TriggerExternal.fileName is empty";
+        }
+        LOG(info) << "IS_HYPERLOOP detected: expanding external generator into "
+                  << nGenerators << " parallel hybrid sub-generators";
+        auto trgparams = trgconfig.empty() ? nullptr : &TriggerExternalParam::Instance();
+        hyperloopExtHybridConfigFile = buildHyperloopExternalHybridConfig(GeneratorExternalParam::Instance(), nGenerators, trgparams);
+        triggerInHybridConfig = trgparams != nullptr;
+        genconfig = "hybrid";
+      }
     }
   }
 #endif
@@ -353,6 +416,10 @@ void GeneratorFactory::setPrimaryGenerator(o2::conf::SimConfig const& conf, Fair
 
   Trigger trigger = nullptr;
   DeepTrigger deeptrigger = nullptr;
+  if (genconfig.compare("hybrid") == 0 && !conf.getTrigger().empty() && !triggerInHybridConfig) {
+    LOG(warning) << "Trigger '" << conf.getTrigger() << "' is not applied to the hybrid generator: "
+                 << "triggers of a hybrid generator are set in its JSON configuration";
+  }
   if (!(genconfig.compare("hybrid") == 0)) {
     auto trgconfig = conf.getTrigger();
     if (trgconfig.empty()) {

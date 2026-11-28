@@ -27,11 +27,11 @@
 #include "TPCBase/RDHUtils.h"
 #include "DataFormatsTPC/ZeroSuppression.h"
 #include "GPUTPCClusterOccupancyMap.h"
-#include <gsl/span>
+#include <span>
 
 using namespace o2::gpu;
 
-using DigitArray = std::array<gsl::span<const o2::tpc::Digit>, o2::tpc::Sector::MAXSECTOR>;
+using DigitArray = std::array<std::span<const o2::tpc::Digit>, o2::tpc::Sector::MAXSECTOR>;
 
 std::unique_ptr<TPCPadGainCalib> GPUO2InterfaceUtils::getPadGainCalibDefault()
 {
@@ -130,10 +130,10 @@ void GPUO2InterfaceUtils::paramUseExternalOccupancyMap(GPUParam* param, uint32_t
     throw std::runtime_error("Occupancy map has invalid paramters occupancyMapTimeBins and occupancyMapTimeBinsAverage");
   }
   if (occupancymap) {
-    param->occupancyTotal = *occupancymap;
+    param->occupancy.total = *occupancymap;
     if (param->rec.tpc.occupancyMapTimeBins) {
-      param->occupancyMap = occupancymap + 2;
-      param->occupancyMapSize = GPUTPCClusterOccupancyMapBin::getNBins(*param);
+      param->occupancy.map = occupancymap + 2;
+      param->occupancy.mapSize = GPUTPCClusterOccupancyMapBin::getNBins(*param);
     }
   }
 }

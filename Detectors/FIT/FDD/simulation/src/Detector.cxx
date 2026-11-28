@@ -33,6 +33,7 @@
 #include "FairRootManager.h"
 #include "FairVolume.h"
 #include "FairRootManager.h"
+#include "DetectorsBase/SimRandom.h"
 
 using namespace o2::fdd;
 using o2::fdd::Geometry;
@@ -103,6 +104,13 @@ void Detector::InitializeO2Detector()
 Bool_t Detector::ProcessHits(FairVolume* vol)
 {
   // This is step manager
+  if (fMC->IsTrackEntering() && !fMC->IsNewTrack() && fMC->TrackCharge() != 0) { // one reference per charged particle, first entry from outside
+    auto o2stack = static_cast<o2::data::Stack*>(fMC->GetStack());
+    if (o2stack->GetCurrentTrackNumber() != mTrackRefLastTrackID) {
+      mTrackRefLastTrackID = o2stack->GetCurrentTrackNumber();
+      o2stack->addTrackReference(o2::TrackReference(*fMC, GetDetId()));
+    }
+  }
   // do not track neutral particles
   if (!(fMC->TrackCharge())) {
     return kFALSE;
@@ -142,31 +150,25 @@ Bool_t Detector::ProcessHits(FairVolume* vol)
 
   Float_t destep_ad = fMC->Edep();
   Int_t nPhotonsInStep_ad = Int_t(fFDDLightYield * destep_ad);
-  nPhotonsInStep_ad = gRandom->Poisson(nPhotonsInStep_ad);
+  nPhotonsInStep_ad = o2::base::simRandom()->Poisson(nPhotonsInStep_ad);
 
-  static Float_t eloss_ad = 0.;
-  static Float_t tlength_ad = 0.;
-  static Int_t nPhotons_ad = 0;
-
-  static TVector3 vPos;
-
-  eloss_ad += destep_ad;
+  mElossAD += destep_ad;
 
   if (fMC->IsTrackEntering()) {
-    nPhotons_ad = nPhotonsInStep_ad;
-    fMC->TrackPosition(vPos(0), vPos(1), vPos(2));
+    mNPhotonsAD = nPhotonsInStep_ad;
+    fMC->TrackPosition(mHitPosAD(0), mHitPosAD(1), mHitPosAD(2));
 
-    eloss_ad = 0.0;
+    mElossAD = 0.0;
     return kFALSE;
   }
-  nPhotons_ad += nPhotonsInStep_ad;
+  mNPhotonsAD += nPhotonsInStep_ad;
 
   if (fMC->IsTrackExiting() || fMC->IsTrackStop() || fMC->IsTrackDisappeared()) {
     Int_t trackID = fMC->GetStack()->GetCurrentTrackNumber();
 
     Float_t time = fMC->TrackTime() * 1.0e9; //time from seconds to ns
 
-    addHit(trackID, ADsector, vPos, time, eloss_ad, nPhotons_ad);
+    addHit(trackID, ADsector, mHitPosAD, time, mElossAD, mNPhotonsAD);
     return kTRUE;
   }
 
@@ -373,4 +375,5 @@ void Detector::Reset()
   if (!o2::utils::ShmManager::Instance().isOperational()) {
     mHits->clear();
   }
+  mTrackRefLastTrackID = -1;
 }

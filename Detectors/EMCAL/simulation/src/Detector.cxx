@@ -20,7 +20,6 @@
 #include "TVector2.h"
 #include "TVector3.h"
 
-#include "FairGeoNode.h"
 #include "FairRootManager.h"
 #include "FairVolume.h"
 
@@ -85,9 +84,9 @@ Detector::Detector(const Detector& rhs)
     mBirkC0(rhs.mBirkC0),
     mBirkC1(rhs.mBirkC1),
     mBirkC2(rhs.mBirkC2),
-    mSensitive(),
+    mSensitive(rhs.mSensitive),
     mSMVolumeID(),
-    mSMVolNames(),
+    mSMVolNames(rhs.mSMVolNames),
     mVolumeIDScintillator(-1),
     mHits(o2::utils::createSimVector<Hit>()),
     mGeometry(rhs.mGeometry),
@@ -313,6 +312,7 @@ Bool_t Detector::ProcessHits(FairVolume* v)
     } else {
       LOG(debug3) << "Adding energy to the current hit" << std::endl;
       currenthit->SetEnergyLoss(currenthit->GetEnergyLoss() + lightyield);
+      o2stack->modifiesHit(GetDetId());
     }
   }
 

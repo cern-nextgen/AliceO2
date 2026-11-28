@@ -20,7 +20,7 @@ if(ALIGPU_BUILD_TYPE STREQUAL "O2")
     o2_add_executable(standalone-benchmark
                       COMPONENT_NAME gpu
                       TARGETVARNAME targetName
-                      PUBLIC_LINK_LIBRARIES O2::GPUO2Interface O2::GPUTracking O2::TPCReconstruction
+                      PUBLIC_LINK_LIBRARIES O2::GPUO2Interface O2::GPUTracking O2::TPCReconstruction O2::CCDB O2::DetectorsBase
                       SOURCES ${SRCS})
 endif()
 
@@ -32,6 +32,7 @@ if(ALIGPU_BUILD_TYPE STREQUAL "Standalone")
 endif()
 
 install(DIRECTORY ../tools DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/GPU)
+install(DIRECTORY ../scripts DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/GPU USE_SOURCE_PERMISSIONS)
 install(DIRECTORY ../../Definitions/Parameters/ DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/GPU/tools FILES_MATCHING REGEX "\\.(python|sh|cmake)")
 target_compile_definitions(${targetName} PRIVATE $<TARGET_PROPERTY:O2::GPUTracking,COMPILE_DEFINITIONS>)
 

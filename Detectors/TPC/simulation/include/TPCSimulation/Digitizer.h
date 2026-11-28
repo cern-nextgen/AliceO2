@@ -31,6 +31,8 @@ namespace tpc
 {
 
 class DigitContainer;
+class ElectronTransport;
+class GEMAmplification;
 
 template <class T>
 class SpaceCharge;
@@ -118,10 +120,10 @@ class Digitizer
   /// \param nRBins number of grid points in r, must be (2**N)+1
   void setUseSCDistortions(const SCDistortionType& distortionType, const TH3* hisInitialSCDensity);
   /// Enable the use of space-charge distortions and provide SpaceCharge object as input
-  /// \param spaceCharge unique pointer to spaceCharge object
+  /// \param spaceCharge spaceCharge object, not owned: the caller (e.g. the DPL CCDB cache) keeps it alive
   void setUseSCDistortions(SC* spaceCharge);
 
-  /// \param spaceCharge unique pointer to spaceCharge object
+  /// \param spaceCharge spaceCharge object of the derivative map, not owned: the caller keeps it alive
   void setSCDistortionsDerivative(SC* spaceCharge);
 
   /// Enable the use of space-charge distortions by providing global distortions and global corrections stored in a ROOT file
@@ -138,24 +140,71 @@ class Digitizer
   void setMeanLumiDistortions(float meanLumi);
   void setMeanLumiDistortionsDerivative(float meanLumi);
 
+  /// method of recalculateDistortions()
+  /// \param method 0: invert the average and the derivative distortions to corrections and invert the scaled corrections C_avg + s * C_der to distortions,
+  ///               1: invert only the derivative distortions and apply the scaled derivative corrections directly to the average distortions (SpaceCharge::scaleGlobalDistWithDerivativeCorr).
+  ///               Other values are a fatal error
+  void setRecalcDistortionsMethod(int method);
+  int getRecalcDistortionsMethod() const { return mRecalcDistortionsMethod; }
+
   /// in case of scaled distortions, the distortions can be recalculated to ensure consistent distortions and corrections
   void recalculateDistortions();
 
+  /// Use the distortion maps and scaling of another digitizer, which keeps ownership of the maps
+  void setSCDistortionsFrom(const Digitizer& other);
+
+  /// Use digitizer-owned random rings filled from seed and positioned per sector and timeframe in init(),
+  /// so that the digits of a sector do not depend on which sectors were processed before.
+  /// All sectors share the ring contents and differ in the start positions, as with the singleton rings.
+  /// \param seed base seed, typically DigiParams.seed
+  void setUseSectorSeeding(ULong64_t seed);
+
+  /// Set the timeframe identifier that enters the sector seeding
+  void setSeedingTimeframe(ULong64_t timeframe) { mSeedingTimeframe = timeframe; }
+
+  /// Use copies of the sector-seeding random rings of another digitizer, which fills them if needed
+  void setSectorSeedingFrom(Digitizer& other);
+
+  /// Whether flush() also flushes the process-wide debug streamer
+  void setFlushDebugStreamer(bool flush) { mFlushDebugStreamer = flush; }
+
+  /// Apply the gain map for MC (TPC/Calib/PadGainFullMC) instead of the one of the reconstruction (TPC/Calib/PadGainFull)
+  void setUseGainMapMC(bool use) { mUseGainMapMC = use; }
+
  private:
-  DigitContainer mDigitContainer;      ///< Container for the Digits
-  std::unique_ptr<SC> mSpaceCharge;    ///< Handler of full distortions (static + IR dependant)
-  std::unique_ptr<SC> mSpaceChargeDer; ///< Handler of reference static distortions
-  Sector mSector = -1;                 ///< ID of the currently processed sector
-  double mEventTime = 0.f;             ///< Time of the currently processed event
-  double mOutputDigitTimeOffset = 0;   ///< Time of the first IR sampled in the digitizer
-  float mVDrift = 0;                   ///< VDrift for current timestamp
-  float mTDriftOffset = 0;             ///< drift time additive offset in \mus
-  bool mIsContinuous;                  ///< Switch for continuous readout
-  bool mUseSCDistortions = false;      ///< Flag to switch on the use of space-charge distortions
-  int mDistortionScaleType = 0;        ///< type=0: no scaling of distortions, type=1 distortions without any scaling, type=2 distortions scaling with lumi
-  float mLumiScaleFactor = 0;          ///< value used to scale the derivative map
-  bool mUseScaledDistortions = false;  ///< whether the distortions are already scaled
-  ClassDefNV(Digitizer, 3);
+  /// Fill the random rings of the sector seeding, if not done yet
+  void initSectorSeeding();
+
+  ElectronTransport& electronTransport();
+  GEMAmplification& gemAmplification();
+  SAMPAProcessing& sampaProcessing();
+
+  std::unique_ptr<ElectronTransport> mElectronTransport; //!< Digitizer-owned instance with sector seeding, else the singleton is used
+  std::unique_ptr<GEMAmplification> mGEMAmplification;   //!< Digitizer-owned instance with sector seeding, else the singleton is used
+  std::unique_ptr<SAMPAProcessing> mSAMPAProcessing;     //!< Digitizer-owned instance with sector seeding, else the singleton is used
+  ULong64_t mSeed = 0;                                   //!< Base seed for sector seeding
+  ULong64_t mSeedingTimeframe = 0;                       //!< Timeframe identifier for sector seeding
+  bool mUseSectorSeeding = false;                        //!< Whether sector seeding is used
+  bool mFlushDebugStreamer = true;                       //!< Whether flush() flushes the debug streamer
+  bool mUseGainMapMC = false;                            //!< Whether the gain map for MC is applied instead of the one of the reconstruction
+
+  DigitContainer mDigitContainer;        ///< Container for the Digits
+  std::vector<float> mSignalArray;       //!< Workspace for the shaped signal of one electron
+  std::unique_ptr<SC> mSpaceChargeOwned; //!< Distortions created by the digitizer itself
+  SC* mSpaceCharge = nullptr;            //!< Handler of full distortions (static + IR dependant), owned by mSpaceChargeOwned or by the caller
+  SC* mSpaceChargeDer = nullptr;         //!< Handler of reference static distortions, owned by the caller
+  Sector mSector = -1;                   ///< ID of the currently processed sector
+  double mEventTime = 0.f;               ///< Time of the currently processed event
+  double mOutputDigitTimeOffset = 0;     ///< Time of the first IR sampled in the digitizer
+  float mVDrift = 0;                     ///< VDrift for current timestamp
+  float mTDriftOffset = 0;               ///< drift time additive offset in \mus
+  bool mIsContinuous;                    ///< Switch for continuous readout
+  bool mUseSCDistortions = false;        ///< Flag to switch on the use of space-charge distortions
+  int mDistortionScaleType = 0;          ///< type=0: no scaling of distortions, type=1 distortions without any scaling, type=2 distortions scaling with lumi
+  float mLumiScaleFactor = 0;            ///< value used to scale the derivative map
+  bool mUseScaledDistortions = false;    ///< whether the distortions are already scaled
+  int mRecalcDistortionsMethod = 1;      ///< method of recalculateDistortions(): 0 = inversion of the scaled corrections, 1 = derivative corrections applied to the distortions
+  ClassDefNV(Digitizer, 5);
 };
 } // namespace tpc
 } // namespace o2

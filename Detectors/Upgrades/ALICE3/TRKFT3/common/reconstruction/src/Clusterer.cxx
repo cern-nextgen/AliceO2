@@ -13,6 +13,7 @@
 /// \brief Implementation of the TRK cluster finder
 
 #include "TRKReconstruction/Clusterer.h"
+#include "FT3Base/GeometryTGeo.h"
 #include "TRKBase/GeometryTGeo.h"
 #include "TRKBase/SegmentationChip.h"
 
@@ -82,7 +83,7 @@ void Clusterer<DetID>::process(gsl::span<const Digit> digits,
     mThread = std::make_unique<ClustererThread>(this);
   }
 
-  auto* geom = o2::trk::GeometryTGeo::Instance();
+  auto* geom = GeometryTGeo::Instance();
 
   for (size_t iROF = 0; iROF < digitROFs.size(); ++iROF) {
     const auto& inROF = digitROFs[iROF];
@@ -180,7 +181,7 @@ void Clusterer<DetID>::ClustererThread::initChip(gsl::span<const Digit> digits, 
   if (geom) {
     if (geom->getSubDetID(chipID) == 0) { // VD
       const int layer = geom->getLayer(chipID);
-      size = constants::VD::petal::layer::nRows[layer] + 2;
+      size = SegmentationChip::getNRowsVD(layer) + 2;
     }
   }
 

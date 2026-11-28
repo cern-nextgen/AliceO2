@@ -15,6 +15,7 @@
 #include <Generators/GeneratorFactory.h>
 #include <Generators/Generator.h>
 #include "SimulationDataFormat/O2DatabasePDG.h"
+#include "SimConfig/G4Params.h"
 #include "SimulationDataFormat/MCEventHeader.h"
 #include <SimConfig/SimConfig.h>
 #include <SimConfig/SimParams.h>
@@ -26,7 +27,6 @@
 #include "DataFormatsParameters/GRPECSObject.h"
 #include "DataFormatsParameters/GRPMagField.h"
 #include "DataFormatsParameters/GRPLHCIFData.h"
-#include "FairParRootFileIo.h"
 #include "FairSystemInfo.h"
 #include <SimSetup/SimSetup.h>
 #include <Steer/O2RunSim.h>
@@ -113,6 +113,15 @@ FairRunSim* o2sim_init(bool asservice, bool evalmat = false)
   run->SetSimSetup([confref]() { o2::SimSetup::setup(confref.getMCEngine().c_str()); });
   run->SetRunId(timestamp);
 
+  // NOTE: in device ("as a service") mode the transport workers persist nothing
+  // through this sink - hits go to the hit merger, which writes the real files
+  // via NameConf - so the file it produces is an empty, PID-named
+  // o2sim_<pid>.root holding only FairRoot bookkeeping. It cannot simply be
+  // left unset, though: FairRootManager::RegisterImpl() calls LOG(fatal) with
+  // "The sink does not exist to store persistent branches" for any Register()
+  // with toFile=true, which every detector does. Dropping it needs a no-op sink
+  // implementation (FairSink::kONLINESINK has no class behind it here), not just
+  // skipping SetSink().
   auto pid = getpid();
   std::stringstream s;
   s << confref.getOutPrefix();
@@ -177,8 +186,16 @@ FairRunSim* o2sim_init(bool asservice, bool evalmat = false)
   // run init
   run->Init();
 
-  // add ALICE particles to TDatabasePDG singleton
-  o2::O2DatabasePDG::addALICEParticles(TDatabasePDG::Instance());
+  // ensure ALICE particles are in the TDatabasePDG singleton (added once, thread-safely)
+  // The monopole mass has to be the one the transport uses and has to be set before the
+  // particles get registered; in the worker (asservice) the GeneratorFactory call is
+  // skipped, so this is the only place that registers it.
+  const double monopoleMass = o2::conf::G4Params::Instance().monopoleMass;
+  o2::O2DatabasePDG::setMonopoleMass(monopoleMass);
+  auto* pdgDB = o2::O2DatabasePDG::Instance();
+  if (!o2::O2DatabasePDG::hasMonopoleMass(pdgDB, monopoleMass)) {
+    LOG(fatal) << "Monopoles were registered in TDatabasePDG with a mass other than G4.monopoleMass = " << monopoleMass << " GeV";
+  }
 
   long runStart = timestamp;
   {

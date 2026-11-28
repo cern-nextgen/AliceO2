@@ -21,6 +21,7 @@
 #include "Framework/Configurable.h"
 
 #include "Framework/StepTHn.h"
+#include "Framework/CompactTHnSparse.h"
 #include <TH1.h>
 #include <TH2.h>
 #include <TH3.h>
@@ -69,11 +70,14 @@ enum HistType : unsigned int {
   kTProfile2D,
   kTProfile3D,
   kStepTHnF,
-  kStepTHnD
+  kStepTHnD,
+  kCompactTHnSparseF, // THnSparse with ~8x less memory per filled bin, written out as THnSparseF; for filling only:
+                      // bin numbers differ from THnSparse's, see CompactTHnSparse.h
+  kCompactTHnSparseD  // same, written out as THnSparseD
 };
 
 // variant of all possible root pointers; here we use only the interface types since the underlying data representation (int,float,double,long,char) is irrelevant
-using HistPtr = std::variant<std::shared_ptr<THn>, std::shared_ptr<THnSparse>, std::shared_ptr<TH3>, std::shared_ptr<TH2>, std::shared_ptr<TH1>, std::shared_ptr<TProfile3D>, std::shared_ptr<TProfile2D>, std::shared_ptr<TProfile>, std::shared_ptr<StepTHn>>;
+using HistPtr = std::variant<std::shared_ptr<THn>, std::shared_ptr<THnSparse>, std::shared_ptr<TH3>, std::shared_ptr<TH2>, std::shared_ptr<TH1>, std::shared_ptr<TProfile3D>, std::shared_ptr<TProfile2D>, std::shared_ptr<TProfile>, std::shared_ptr<StepTHn>, std::shared_ptr<CompactTHnSparse>>;
 
 //**************************************************************************************************
 /**
@@ -84,41 +88,37 @@ using HistPtr = std::variant<std::shared_ptr<THn>, std::shared_ptr<THnSparse>, s
 constexpr double VARIABLE_WIDTH = 0.;
 
 struct AxisSpec {
-  AxisSpec(std::vector<double> binEdges_, std::optional<std::string> title_ = std::nullopt, std::optional<std::string> name_ = std::nullopt)
-    : nBins(std::nullopt),
-      binEdges(std::move(binEdges_)),
-      title(std::move(title_)),
-      name(std::move(name_))
-  {
-  }
+  // Defined out of line in HistogramSpec.cxx on purpose. These run once per
+  // histogram at init() time, so inlining them buys nothing at runtime, while
+  // a task that books a few hundred histograms in one init() pays for every
+  // expansion: each one materialises a std::vector<double> and two
+  // std::optional<std::string> at the call site, with the matching destructor
+  // and exception-unwind paths. Under -g that also means a debug record per
+  // temporary, which is what makes the register allocator's rewrite pass go
+  // superlinear on such functions.
+  AxisSpec(std::vector<double> binEdges_, std::optional<std::string> title_ = std::nullopt, std::optional<std::string> name_ = std::nullopt);
 
-  AxisSpec(int nBins_, double binMin_, double binMax_, std::optional<std::string> title_ = std::nullopt, std::optional<std::string> name_ = std::nullopt)
-    : nBins(nBins_),
-      binEdges({binMin_, binMax_}),
-      title(std::move(title_)),
-      name(std::move(name_))
-  {
-    if (binMin_ > binMax_) {
-      LOG(fatal) << "Defined ill-defined axis";
-    }
-  }
+  AxisSpec(int nBins_, double binMin_, double binMax_, std::optional<std::string> title_ = std::nullopt, std::optional<std::string> name_ = std::nullopt);
 
   // first entry is assumed to be the number of bins; in case of variable size binning it must be set to zero
-  AxisSpec(ConfigurableAxis binEdges_, std::optional<std::string> title_ = std::nullopt, std::optional<std::string> name_ = std::nullopt)
-    : nBins(std::nullopt),
-      binEdges(std::vector<double>(binEdges_)),
-      title(std::move(title_)),
-      name(std::move(name_))
-  {
-    if (binEdges.empty()) {
-      return;
-    }
-    if (binEdges[0] != VARIABLE_WIDTH) {
-      nBins = static_cast<int>(binEdges[0]);
-      binEdges.resize(3); // nBins, lowerBound, upperBound, disregard whatever else is stored in vecotr
-    }
-    binEdges.erase(binEdges.begin()); // remove first entry that we assume to be number of bins
-  }
+  AxisSpec(ConfigurableAxis binEdges_, std::optional<std::string> title_ = std::nullopt, std::optional<std::string> name_ = std::nullopt);
+
+  // Out of line too, and for the same reason: every registry.add() call site
+  // materialises AxisSpec temporaries, so the *destructor* is expanded there as
+  // well -- on both the normal and the exception-unwind path. Measured with
+  // -Rpass=inline on a 276-histogram init(): ~optional<string> inlined 2164
+  // times, ~vector<AxisSpec> 552, ~vector<double> 367, ~AxisSpec 279.
+  //
+  // Declaring a destructor suppresses the implicit move operations, so all five
+  // are declared here to keep AxisSpec movable. The moves are explicitly
+  // noexcept: an out-of-line defaulted function does NOT inherit the implicit
+  // exception specification, and without it vector<AxisSpec> reallocation would
+  // silently fall back to copying.
+  ~AxisSpec();
+  AxisSpec(AxisSpec const&);
+  AxisSpec(AxisSpec&&) noexcept;
+  AxisSpec& operator=(AxisSpec const&);
+  AxisSpec& operator=(AxisSpec&&) noexcept;
 
   [[nodiscard]] long getNbins() const;
 
@@ -138,15 +138,15 @@ struct AxisSpec {
  */
 //**************************************************************************************************
 struct HistogramConfigSpec {
-  HistogramConfigSpec(HistType type_, std::vector<AxisSpec> axes_, uint8_t nSteps_ = 1)
-    : type(type_),
-      axes(std::move(axes_)),
-      nSteps(nSteps_)
-  {
-  }
+  // Out of line for the same reason as the AxisSpec constructors above.
+  HistogramConfigSpec(HistType type_, std::vector<AxisSpec> axes_, uint8_t nSteps_ = 1);
   HistogramConfigSpec() = default;
   HistogramConfigSpec(HistogramConfigSpec const& other) = default;
   HistogramConfigSpec(HistogramConfigSpec&& other) = default;
+  // Out of line: inlined 552 times into a single 276-histogram init().
+  // The copy/move constructors above stay declared, so this does not suppress
+  // them.
+  ~HistogramConfigSpec();
 
   void addAxis(const AxisSpec& axis)
   {
@@ -261,7 +261,9 @@ DECLAREEXT(TProfile);
 DECLAREEXT(TProfile2D);
 DECLAREEXT(TProfile3D);
 DECLAREEXT(StepTHnF);
-DECLAREEXT(StepTHnD)
+DECLAREEXT(StepTHnD);
+DECLAREEXT(CompactTHnSparseF);
+DECLAREEXT(CompactTHnSparseD)
 #undef DECLAREEXT
 
 } // namespace o2::framework

@@ -46,7 +46,12 @@ class GPUTPCGMSectorTrack
   {
     return (i < 2) ? mSegmentNeighbour[i] : mNeighbour[i - 2];
   }
-  GPUd() MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_pointer> OrigTrack() const { return mOrigTrack; }
+  GPUd() int32_t OrigTrackId() const { return mOrigTrackId; }
+  template <class T>
+  GPUdi() MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_pointer> OrigTrack(const T* merger) const // T = GPUTPCGMMerger, template since it is incomplete here
+  {
+    return &merger->GetConstantMem()->tpcTrackers[mSector].Tracks()[mOrigTrackId];
+  }
   GPUd() float X() const { return mParam.mX; }
   GPUd() float Y() const { return mParam.mY; }
   GPUd() float Z() const { return mParam.mZ; }
@@ -75,8 +80,9 @@ class GPUTPCGMSectorTrack
   }
 
   GPUd() void Set(const GPUTPCGMTrackParam& trk, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> sectorTr, float alpha, int32_t sector);
+  GPUd() void Set(const GPUTPCGMMerger* merger, const GPUTPCGMTrackParam& trk, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_pointer> sectorTr, float alpha, int32_t sector);
   GPUd() void SetParam2(const GPUTPCGMTrackParam& trk);
-  GPUd() void Set(const GPUTPCGMMerger* merger, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_reference> sectorTr, float alpha, int32_t sector);
+  GPUd() void Set(const GPUTPCGMMerger* merger, MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_pointer> sectorTr, float alpha, int32_t sector);
   GPUd() void UseParam2() { mParam = mParam2; } // TODO: Clean this up!
   GPUd() void SetX2(float v) { mParam2.mX = v; }
   GPUd() float X2() const { return mParam2.mX; }
@@ -118,24 +124,24 @@ class GPUTPCGMSectorTrack
   template <int I = 0>
   GPUd() bool TransportToX(GPUTPCGMMerger* merger, float x, float Bz, GPUTPCGMBorderTrack& b, float maxSinPhi, bool doCov = true) const;
   GPUd() bool TransportToXAlpha(GPUTPCGMMerger* merger, float x, float sinAlpha, float cosAlpha, float Bz, GPUTPCGMBorderTrack& b, float maxSinPhi) const;
-  GPUd() void CopyBaseTrackCov();
+  GPUd() void CopyBaseTrackCov(const GPUTPCGMMerger* merger);
   struct sectorTrackParam {
     float mX, mY, mZ, mSinPhi, mDzDs, mQPt, mCosPhi, mSecPhi; // parameters
     float mC0, mC2, mC3, mC5, mC7, mC9, mC10, mC12, mC14;     // covariances
   };
 
  private:
-  MemLayout::wrapper<GPUTPCTrackSkeleton, MemLayout::const_pointer> mOrigTrack;    // pointer to original sector track
+  int32_t mOrigTrackId;             // index of the original sector track in the tracker of mSector
   sectorTrackParam mParam;          // Track parameters
   sectorTrackParam mParam2;         // Parameters at other side
   float mTOffset;                   // Z offset with early transform, T offset otherwise
   float mAlpha;                     // alpha angle
   float mClusterT[2];               // Minimum maximum cluster T
-  int32_t mNClusters;               // N clusters
   int32_t mNeighbour[2];            //
   int32_t mSegmentNeighbour[2];     //
   int32_t mLocalTrackId;            // Corrected local track id in terms of GMSectorTracks array for extrapolated tracks, UNDEFINED for local tracks!
   int32_t mExtrapolatedTrackIds[2]; // IDs of associated extrapolated tracks
+  int16_t mNClusters;               // N clusters
   uint8_t mSector;                  // sector of this track segment
 
   ClassDefNV(GPUTPCGMSectorTrack, 1);

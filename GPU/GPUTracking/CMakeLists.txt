@@ -67,9 +67,20 @@ set(SRCS
 
 set(SRCS_DATATYPES DataTypes/GPUDataTypesConfig.cxx DataTypes/GPUConfigDump.cxx DataTypes/GPUTPCGMPolynomialField.cxx)
 
+set(ON_THE_FLY_DIR ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly)
+file(MAKE_DIRECTORY ${ON_THE_FLY_DIR})
+file(TOUCH ${ON_THE_FLY_DIR}/.cmake_stamp)
+set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES ${ON_THE_FLY_DIR})               # Files are generated at configure time, remove them with "make / ninja clean"
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${ON_THE_FLY_DIR}/.cmake_stamp) # and rerun CMake afterwards to regenerate them, since the stamp is gone
+include(cmake/gpu_settings_list_generator.cmake)
+foreach(GPU_SETTINGS_LIST GPUSettingsList GPUSettingsListDisplay GPUSettingsListStandalone)
+  generate_gpu_settings_list(${CMAKE_CURRENT_SOURCE_DIR}/Definitions/${GPU_SETTINGS_LIST}.template ${ON_THE_FLY_DIR}/${GPU_SETTINGS_LIST}.h)
+  list(APPEND GPU_SETTINGS_LIST_HEADERS ${ON_THE_FLY_DIR}/${GPU_SETTINGS_LIST}.h)
+endforeach()
+
 set(HDRS_CINT_O2 Merger/GPUTPCGMTrackParam.h Merger/GPUTPCGMMergedTrack.h Merger/GPUTPCGMSectorTrack.h Merger/GPUTPCGMBorderTrack.h TRDTracking/GPUTRDInterfaces.h)
 set(HDRS_CINT_DATATYPES DataTypes/GPUTPCGMMergedTrackHit.h)
-set(HDRS_CINT_O2_ADDITIONAL DataTypes/GPUSettings.h Definitions/GPUSettingsList.h DataTypes/GPUDataTypesIO.h DataTypes/GPUDataTypesConfig.h DataTypes/GPUDataTypesQA.h DataTypes/GPUTRDTrack.h DataTypes/GPUTRDRecoParam.h DataTypes/CalibdEdxTrackTopologyPol.h DataTypes/CalibdEdxTrackTopologySpline.h) # Manual dependencies for ROOT dictionary generation
+set(HDRS_CINT_O2_ADDITIONAL DataTypes/GPUSettings.h DataTypes/GPUSettingsTypes.h DataTypes/GPUDataTypesIO.h DataTypes/GPUDataTypesConfig.h DataTypes/GPUDataTypesQA.h DataTypes/GPUTRDTrack.h DataTypes/GPUTRDRecoParam.h DataTypes/CalibdEdxTrackTopologyPol.h DataTypes/CalibdEdxTrackTopologySpline.h) # Manual dependencies for ROOT dictionary generation
 
 set(SRCS_NO_CINT
     DataTypes/GPUMemorySizeScalers.cxx
@@ -120,6 +131,7 @@ set(HDRS_INSTALL
     Base/GPUReconstructionIncludesITS.h
     Base/GPUReconstructionKernelMacros.h
     Base/GPUReconstructionCPUKernels.h
+    Base/GPUStdSystemHeaders.h
     DataCompression/GPUTPCClusterRejection.h
     DataCompression/GPUTPCCompressionKernels.inc
     DataCompression/TPCClusterDecompressionCore.inc
@@ -156,6 +168,7 @@ set(HDRS_INSTALL
     SectorTracker/GPUTPCMCInfo.h
     SectorTracker/GPUTPCTracklet.h
     SectorTracker/GPUTPCTrackLinearisation.h
+    SectorTracker/GPUTPCRow.h
     TPCConvert/GPUTPCConvertImpl.h
     TRDTracking/GPUTRDGeometry.h
     TRDTracking/GPUTRDSpacePoint.h
@@ -165,6 +178,7 @@ set(HDRS_INSTALL
     TRDTracking/GPUTRDTrackPoint.h
     TRDTracking/GPUTRDTrackPoint.h
     DataTypes/GPUTPCGMPolynomialField.h
+    DataTypes/GPUSettingsParam.h
 )
 
 set(SRCS_NO_CINT ${SRCS_NO_CINT} display/GPUDisplayInterface.cxx)
@@ -230,15 +244,13 @@ if(ALIGPU_BUILD_TYPE STREQUAL "O2")
       DataTypes/GPUO2ConfigurableParam.cxx)
 endif()
 
-set(ON_THE_FLY_DIR ${CMAKE_CURRENT_BINARY_DIR}/include_gpu_onthefly)
-file(MAKE_DIRECTORY ${ON_THE_FLY_DIR})
 set(TEMPLATE_HEADER_LIST Base/GPUReconstructionKernelList.template.h
                          Base/GPUReconstructionKernelIncludes.template.h
                          Base/GPUReconstructionIncludesDeviceAll.template.h
                          cmake/GPUNoFastMathKernels.template.h
                          Definitions/GPUDefParametersRuntime.template.h
                          Definitions/GPUDefParametersLoad.template.inc)
-set(GENERATED_HEADERS_LIST "")
+set(GENERATED_HEADERS_LIST ${GPU_SETTINGS_LIST_HEADERS})
 
 foreach(TEMPLATE_FILE ${TEMPLATE_HEADER_LIST})
   get_filename_component(OUTPUT_FILE_NAME ${TEMPLATE_FILE} NAME)
@@ -252,6 +264,7 @@ string(APPEND GPUDEFPARAMETERSLBLIST "$<JOIN:$<LIST:TRANSFORM,$<TARGET_PROPERTY:
 file(GENERATE
      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/GPUDefParametersLoadPrepareBase
      CONTENT ${GPUDEFPARAMETERSLBLIST})
+set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES ${CMAKE_CURRENT_BINARY_DIR}/GPUDefParametersLoadPrepareBase)
 add_custom_command(
   OUTPUT ${ON_THE_FLY_DIR}/GPUDefParametersLoadPrepare.h
   COMMAND awk "{print(\"#ifndef GPUCA_\" $0 \"\\n#define GPUCA_\" $0 \" 0\\n#endif\")}" ${CMAKE_CURRENT_BINARY_DIR}/GPUDefParametersLoadPrepareBase > ${ON_THE_FLY_DIR}/GPUDefParametersLoadPrepare.h
@@ -286,6 +299,7 @@ foreach(GPU_PARAM_JSON_FILE IN LISTS GPU_PARAM_JSON)
                     COMMAND_ERROR_IS_FATAL ANY
     )
     message(STATUS "Converted ${GPU_PARAM_JSON_FILE} to ${CONVOUTFILE}")
+    set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES ${CMAKE_CURRENT_BINARY_DIR}/${CONVOUTFILE})
     list(APPEND GPU_PARAM_JSON_FILES ${CMAKE_CURRENT_BINARY_DIR}/${CONVOUTFILE})
   else()
     list(APPEND GPU_PARAM_JSON_FILES ${GPU_PARAM_JSON_FILE})
@@ -305,7 +319,14 @@ file(GENERATE
 list(APPEND GENERATED_HEADERS_LIST ${GPU_DEFAULT_PARAMS_HEADER} ${ON_THE_FLY_DIR}/GPUKernelsWith1Warp.inc)
 
 set(HDRS_INSTALL ${HDRS_INSTALL} ${GENERATED_HEADERS_LIST})
+file(GLOB GPU_STALE_GENERATED_HEADERS LIST_DIRECTORIES false ${ON_THE_FLY_DIR}/*.h ${ON_THE_FLY_DIR}/*.inc) # Remove headers of previous configurations, which are no longer generated
+list(REMOVE_ITEM GPU_STALE_GENERATED_HEADERS ${GENERATED_HEADERS_LIST})
+if(GPU_STALE_GENERATED_HEADERS)
+  message(STATUS "Removing stale generated GPU headers: ${GPU_STALE_GENERATED_HEADERS}")
+  file(REMOVE ${GPU_STALE_GENERATED_HEADERS})
+endif()
 include(kernels.cmake)
+check_gpu_param_json("${GPU_PARAM_JSON_FILES}") # Needs the kernel and parameter lists from kernels.cmake
 
 # Optional sources depending on optional dependencies
 if(GPUCA_EVENT_DISPLAY)
@@ -366,6 +387,8 @@ if(ALIGPU_BUILD_TYPE STREQUAL "O2")
   o2_target_root_dictionary(GPUDataTypes
                             HEADERS ${HDRS_CINT_DATATYPES} ${HDRS_CINT_O2_ADDITIONAL}
                             LINKDEF GPUTrackingLinkDef_O2_DataTypes.h)
+  get_target_property(GPU_DICT_NAME ${targetName} OUTPUT_NAME)
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/G__${GPU_DICT_NAME}.cxx APPEND DEPENDS ${GPU_SETTINGS_LIST_HEADERS}) # Generated headers cannot be in HEADERS, which must be relative to the source dir
 
   o2_add_library(${MODULE}
                  TARGETVARNAME targetName
@@ -395,6 +418,8 @@ if(ALIGPU_BUILD_TYPE STREQUAL "O2")
   o2_target_root_dictionary(${MODULE}
                             HEADERS ${HDRS_CINT_O2} ${HDRS_CINT_O2_ADDITIONAL}
                             LINKDEF GPUTrackingLinkDef_O2.h)
+  get_target_property(GPU_DICT_NAME ${targetName} OUTPUT_NAME)
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/G__${GPU_DICT_NAME}.cxx APPEND DEPENDS ${GPU_SETTINGS_LIST_HEADERS}) # Generated headers cannot be in HEADERS, which must be relative to the source dir
 
   o2_add_test_root_macro(Standalone/tools/createGeo.C
                          PUBLIC_LINK_LIBRARIES O2::GPUTracking
@@ -417,6 +442,7 @@ if(ALIGPU_BUILD_TYPE STREQUAL "Standalone")
 
   if(GPUCA_CONFIG_ROOT)
     ROOT_GENERATE_DICTIONARY(G__${targetName} ${HDRS_CINT_O2} ${HDRS_CINT_DATATYPES} ${HDRS_CINT_O2_ADDITIONAL} GPUTrackingLinkDef_Standalone.h MODULE ${targetName})
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/G__${targetName}.cxx APPEND DEPENDS ${GPU_SETTINGS_LIST_HEADERS})
     install(FILES
       ${CMAKE_CURRENT_BINARY_DIR}/lib${targetName}_rdict.pcm
       ${CMAKE_CURRENT_BINARY_DIR}/lib${targetName}.rootmap
@@ -440,6 +466,7 @@ endif()
 
 # GPUReconstructionLibrary needs to know which GPU backends are enabled for proper error messages
 configure_file(Base/GPUReconstructionAvailableBackends.template.h ${CMAKE_CURRENT_BINARY_DIR}/GPUReconstructionAvailableBackends.h)
+set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES ${CMAKE_CURRENT_BINARY_DIR}/GPUReconstructionAvailableBackends.h)
 set_source_files_properties(Base/GPUReconstructionLibrary.cxx
                             PROPERTIES
                             INCLUDE_DIRECTORIES "${CMAKE_CURRENT_BINARY_DIR}")
@@ -476,9 +503,11 @@ elseif(CUDA_ENABLED OR OPENCL_ENABLED OR HIP_ENABLED)
     set(PARAMFILE ${CMAKE_CURRENT_BINARY_DIR}/genGPUArch/gpu_const_param_${GPU_ARCH}.par)
     add_custom_command(
       OUTPUT ${PARAMFILE}
+      COMMAND ${CMAKE_COMMAND} -E rm -f ${PARAMFILE}
       COMMAND bash -c
               "echo -e '#define GPUCA_GPUTYPE_${GPU_ARCH}\\n#define PARAMETER_FILE \"GPUDefParametersDefaults.h\"\\ngInterpreter->AddIncludePath(\"${CMAKE_CURRENT_SOURCE_DIR}/Definitions\");\\ngInterpreter->AddIncludePath(\"${ON_THE_FLY_DIR}\");\\n.x ${CMAKE_CURRENT_SOURCE_DIR}/Standalone/tools/dumpGPUDefParam.C(\"${PARAMFILE}\")\\n.q\\n'"
               | root -l -b > /dev/null
+      COMMAND test -f ${PARAMFILE} # root returns 0 also if the macro fails
       VERBATIM
       WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/genGPUArch
       MAIN_DEPENDENCY Standalone/tools/dumpGPUDefParam.C
@@ -507,9 +536,7 @@ if(CPUDEVICE_ENABLED)
 endif()
 
 if(ALIGPU_BUILD_TYPE STREQUAL "O2" OR ALIGPU_BUILD_TYPE STREQUAL "Standalone")
-  if(NOT ${CMAKE_SYSTEM} MATCHES Darwin)
-    add_subdirectory(Standalone/Benchmark)
-  endif()
+  add_subdirectory(Standalone/Benchmark)
 endif()
 
 if(GPUCA_DETERMINISTIC_MODE GREATER_EQUAL ${GPUCA_DETERMINISTIC_MODE_MAP_GPU})

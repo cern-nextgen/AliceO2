@@ -16,6 +16,7 @@
 #define GPUO2INTERFACECONFIGURATION_H
 
 #include "GPUO2ExternalUser.h"
+#define GPUSETTINGS_DISPLAY
 #include "GPUSettings.h"
 #include "GPUDataTypesIO.h"
 #include "GPUHostDataTypes.h"
@@ -25,7 +26,6 @@
 #include <array>
 #include <vector>
 #include <functional>
-#include <gsl/gsl> // TODO: Get rid of gsl
 
 class TH1F;
 class TH1D;

@@ -26,6 +26,7 @@
 #include "VecGeomChecks.h"
 #include "VecGeomG4Map.h"
 #include "VecGeomG4Navigator.h"
+#include "VecGeomParallelWorld.h"
 #include "VecGeomG4PropagatingNavigator.h"
 
 #include "TG4RootDetectorConstruction.h"
@@ -37,6 +38,7 @@
 #include "G4SteppingManager.hh"
 #include "G4TrackingManager.hh"
 #include "G4TransportationManager.hh"
+#include "G4Threading.hh"
 
 #include "TMCManager.h"
 #include "TStopwatch.h"
@@ -50,6 +52,49 @@ namespace o2::simsetup
 
 bool isVecGeomNavigationAvailable() { return true; }
 
+namespace
+{
+// The VecGeom side built once by installVecGeomNavigator; read-only afterwards and shared by the navigators of all threads.
+struct SharedVecGeomSetup {
+  VecGeomG4Map map;
+  VecGeomParallelWorld parallelWorldStore;
+  VecGeomParallelWorld const* parallelWorld = nullptr;
+  bool leanLocate = false;
+  bool built = false;
+};
+SharedVecGeomSetup gShared;
+
+// Creates a VecGeom navigator and makes it the tracking navigator of the calling thread.
+void registerNavigator(TG4RootDetectorConstruction& detConstruction)
+{
+  auto const& g4Params = o2::conf::G4Params::Instance();
+  G4Navigator* navigator = nullptr;
+  if (g4Params.vecgeomNavigator == o2::conf::EVecGeomNav::kPropagated) {
+    LOG(info) << "VecGeom navigation: propagating navigator";
+    navigator = new VecGeomG4PropagatingNavigator(gShared.map, g4Params.vecgeomZeroSafety);
+  } else {
+    LOG(info) << "VecGeom relocating navigator with the " << (gShared.leanLocate ? "lean" : "previous") << " locate";
+    navigator = new VecGeomG4Navigator(gShared.map, g4Params.vecgeomPushDepth, g4Params.vecgeomZeroSafety,
+                                       gShared.parallelWorld, gShared.leanLocate);
+  }
+  navigator->SetWorldVolume(detConstruction.GetTopPV());
+
+  // Same sequence TG4RootNavMgr::SetNavigator uses, run here because by the time the engine
+  // exists the navigator manager considers itself connected and refuses to swap.
+  auto* trMgr = G4TransportationManager::GetTransportationManager();
+  trMgr->SetNavigatorForTracking(navigator);
+  auto* fieldMgr = trMgr->GetPropagatorInField()->GetCurrentFieldManager();
+  delete trMgr->GetPropagatorInField();
+  trMgr->SetPropagatorInField(new G4PropagatorInField(navigator, fieldMgr));
+  trMgr->ActivateNavigator(navigator);
+  if (auto* evtMgr = G4EventManager::GetEventManager()) {
+    evtMgr->GetTrackingManager()->GetSteppingManager()->SetNavigator(navigator);
+  }
+  LOG(info) << "VecGeom navigator registered with the Geant4 transportation manager"
+            << (G4Threading::IsWorkerThread() ? " of a worker thread" : "");
+}
+} // namespace
+
 void installVecGeomNavigator()
 {
   auto const& g4Params = o2::conf::G4Params::Instance();
@@ -58,9 +103,10 @@ void installVecGeomNavigator()
     LOG(fatal) << "G4.navmode=kVecGeom cannot be used with the multi-engine TMCManager: restoring a "
                   "geometry state across engines goes through the TGeo navigator";
   }
-  if (o2::GeometryManagerParam::Instance().useParallelWorld) {
-    LOG(fatal) << "G4.navmode=kVecGeom cannot be used with GeometryManagerParam.useParallelWorld: VecGeom "
-                  "has no equivalent of the TGeo priority world";
+  const bool useParallelWorld = o2::GeometryManagerParam::Instance().useParallelWorld;
+  if (useParallelWorld && g4Params.vecgeomNavigator != o2::conf::EVecGeomNav::kRelocating) {
+    LOG(fatal) << "GeometryManagerParam.useParallelWorld needs G4.vecgeomNavigator=kRelocating: the propagating "
+                  "navigator adopts the state VecGeom propagated, which knows no priority world";
   }
   auto* navMgr = TG4RootNavMgr::GetInstance();
   if (navMgr == nullptr || navMgr->GetDetConstruction() == nullptr) {
@@ -83,13 +129,26 @@ void installVecGeomNavigator()
   o2::base::GeometryManager::buildVecGeomGeometry(g4Params.vecgeomFlattenAssemblies, g4Params.vecgeomBooleanThreshold);
   timer.Stop();
   LOG(info) << "VecGeom geometry built in " << timer.RealTime() << " s";
+  // The lean locate needs every mother with daughters stepped with the BVH navigator; kPropagated keeps the build's.
+  const bool leanLocate = g4Params.vecgeomLeanLocate && g4Params.vecgeomNavigator == o2::conf::EVecGeomNav::kRelocating;
+  o2::base::GeometryManager::setVecGeomBvhForSmallMothers(leanLocate);
 
   timer.Start();
-  // Owned here for the lifetime of the process; the navigator keeps a reference to it.
-  static VecGeomG4Map map;
+  auto& map = gShared.map;
   map.build(*detConstruction, g4Params.vecgeomFlattenAssemblies);
   timer.Stop();
   LOG(info) << "VecGeom to Geant4 map built in " << timer.RealTime() << " s";
+
+  // The prioritised placements of the TGeo parallel world, navigated with VecGeom.
+  auto& parallelWorld = gShared.parallelWorldStore;
+  VecGeomParallelWorld const* parallelWorldPtr = nullptr;
+  if (useParallelWorld) {
+    if (parallelWorld.build(*detConstruction, map)) {
+      parallelWorldPtr = &parallelWorld;
+    } else {
+      LOG(warning) << "GeometryManagerParam.useParallelWorld is set but the TGeo parallel world is empty";
+    }
+  }
 
   if (!g4Params.vecgeomCheckVolumes.empty()) {
     std::stringstream names(g4Params.vecgeomCheckVolumes);
@@ -105,28 +164,25 @@ void installVecGeomNavigator()
     checkVecGeomLocation(static_cast<std::size_t>(g4Params.vecgeomCheckLocation));
   }
 
-  G4Navigator* navigator = nullptr;
-  if (g4Params.vecgeomNavigator == o2::conf::EVecGeomNav::kPropagated) {
-    LOG(info) << "VecGeom navigation: propagating navigator";
-    navigator = new VecGeomG4PropagatingNavigator(map, g4Params.vecgeomZeroSafety);
-  } else {
-    navigator = new VecGeomG4Navigator(map, g4Params.vecgeomPushDepth, g4Params.vecgeomZeroSafety);
-  }
-  navigator->SetWorldVolume(detConstruction->GetTopPV());
+  gShared.leanLocate = leanLocate;
+  gShared.parallelWorld = parallelWorldPtr;
+  gShared.built = true;
+  registerNavigator(*detConstruction);
+}
 
-  // Same sequence TG4RootNavMgr::SetNavigator uses, run here because by the time the engine
-  // exists the navigator manager considers itself connected and refuses to swap.
-  auto* trMgr = G4TransportationManager::GetTransportationManager();
-  trMgr->SetNavigatorForTracking(navigator);
-  auto* fieldMgr = trMgr->GetPropagatorInField()->GetCurrentFieldManager();
-  delete trMgr->GetPropagatorInField();
-  trMgr->SetPropagatorInField(new G4PropagatorInField(navigator, fieldMgr));
-  trMgr->ActivateNavigator(navigator);
-  if (auto* evtMgr = G4EventManager::GetEventManager()) {
-    evtMgr->GetTrackingManager()->GetSteppingManager()->SetNavigator(navigator);
+void installVecGeomNavigatorOnWorker()
+{
+  if (!G4Threading::IsWorkerThread()) {
+    LOG(fatal) << "installVecGeomNavigatorOnWorker must be called on a Geant4 worker thread";
   }
-
-  LOG(info) << "VecGeom navigator registered with the Geant4 transportation manager";
+  if (!gShared.built) {
+    LOG(fatal) << "The VecGeom geometry has not been built; installVecGeomNavigator must run on the master first";
+  }
+  auto* navMgr = TG4RootNavMgr::GetInstance(); // this thread's, cloned by geant4_vmc from the master's
+  if (navMgr == nullptr || navMgr->GetDetConstruction() == nullptr) {
+    LOG(fatal) << "G4.navmode=kVecGeom found no g4root navigation on this worker thread";
+  }
+  registerNavigator(*navMgr->GetDetConstruction());
 }
 
 #else
@@ -138,6 +194,8 @@ void installVecGeomNavigator()
   LOG(fatal) << "G4.navmode=kVecGeom needs O2 built against TGeo2VecGeom and a VecGeom with the BVH navigator of "
                 "the VNavigator family (BVHNavigatorV), which were not found at configure time";
 }
+
+void installVecGeomNavigatorOnWorker() { installVecGeomNavigator(); }
 
 #endif
 

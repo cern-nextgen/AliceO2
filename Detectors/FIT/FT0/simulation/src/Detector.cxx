@@ -37,6 +37,8 @@
 #include "FT0Base/Geometry.h"
 #include "FT0Simulation/Detector.h"
 #include "DetectorsBase/Stack.h"
+#include "DetectorsBase/SimRandom.h"
+#include <algorithm>
 
 using namespace o2::ft0;
 using o2::ft0::Geometry;
@@ -54,6 +56,8 @@ Detector::Detector(Bool_t Active)
 Detector::Detector(const Detector& rhs)
   : o2::base::DetImpl<Detector>(rhs), mIdSens1(rhs.mIdSens1), mPMTeff(rhs.mPMTeff), mHits(o2::utils::createSimVector<o2::ft0::HitType>()), mTrackIdTop(-1), mTrackIdMCPtop(-1)
 {
+  // the channel lookup is built with the optical geometry, which only the master constructs
+  std::copy(std::begin(rhs.mSim2LUT), std::end(rhs.mSim2LUT), mSim2LUT);
 }
 
 Detector::~Detector()
@@ -1123,6 +1127,13 @@ Bool_t Detector::ProcessHits(FairVolume* v)
 
   Int_t copy;
   Int_t volID = fMC->CurrentVolID(copy);
+  if (fMC->IsTrackEntering() && !fMC->IsNewTrack() && fMC->TrackCharge() != 0 && volID == mTOPVolID) { // one reference per charged particle, first entry from outside
+    auto o2stack = static_cast<o2::data::Stack*>(fMC->GetStack());
+    if (o2stack->GetCurrentTrackNumber() != mTrackRefLastTrackID) {
+      mTrackRefLastTrackID = o2stack->GetCurrentTrackNumber();
+      o2stack->addTrackReference(o2::TrackReference(*fMC, GetDetId()));
+    }
+  }
 
   TVirtualMCStack* stack = fMC->GetStack();
   Int_t quadrant, mcp;
@@ -1180,9 +1191,12 @@ Bool_t Detector::ProcessHits(FairVolume* v)
 o2::ft0::HitType* Detector::AddHit(float x, float y, float z, float time, float energy, Int_t trackId, Int_t detId)
 {
   mHits->emplace_back(x, y, z, time, energy, trackId, detId);
+  auto stack = (o2::data::Stack*)fMC->GetStack();
   if (energy == 10) {
-    auto stack = (o2::data::Stack*)fMC->GetStack();
     stack->addHit(GetDetId());
+  } else {
+    // optical photon contributing to a hit recorded for its parent
+    stack->modifiesHit(GetDetId());
   }
   return &(mHits->back());
 }
@@ -1203,6 +1217,9 @@ void Detector::Reset()
   if (!o2::utils::ShmManager::Instance().isOperational()) {
     mHits->clear();
   }
+  mTrackRefLastTrackID = -1;
+  mTrackIdTop = -1;
+  mTrackIdMCPtop = -1;
 }
 
 void Detector::CreateMaterials()
@@ -1362,7 +1379,7 @@ void Detector::FillOtherOptProperties()
 Bool_t Detector::RegisterPhotoE(float energy)
 {
   float eff = mPMTeff->Eval(energy);
-  float p = gRandom->Rndm();
+  float p = o2::base::simRandom()->Rndm();
   if (p > eff) {
     return kFALSE;
   }

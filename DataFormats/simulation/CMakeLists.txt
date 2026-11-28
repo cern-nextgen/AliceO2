@@ -22,7 +22,7 @@ o2_add_library(SimulationDataFormat
                        src/InteractionSampler.cxx
                        src/ConstMCTruthContainer.cxx
                PUBLIC_LINK_LIBRARIES Microsoft.GSL::GSL
-                                     FairRoot::Base
+                                     O2::FairRootBase
                                      O2::DetectorsCommonDataFormats
                                      O2::DataFormatsParameters
                                      O2::DataFormatsCalibration
@@ -77,6 +77,11 @@ o2_add_test(MCTruthContainer
 
 o2_add_test(MCCompLabel
             SOURCES test/testMCCompLabel.cxx
+            COMPONENT_NAME SimulationDataFormat
+            PUBLIC_LINK_LIBRARIES O2::SimulationDataFormat)
+
+o2_add_test(O2DatabasePDG
+            SOURCES test/testO2DatabasePDG.cxx
             COMPONENT_NAME SimulationDataFormat
             PUBLIC_LINK_LIBRARIES O2::SimulationDataFormat)
 

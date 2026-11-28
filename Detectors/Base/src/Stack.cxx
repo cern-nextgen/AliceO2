@@ -36,11 +36,40 @@
 #include <cassert>
 #include <cstddef> // for NULL
 #include <cmath>
+#include <unordered_map>
+#include "DetectorsBase/SimRandom.h"
 
 using std::cout;
 using std::endl;
 using std::pair;
 using namespace o2::data;
+
+namespace
+{
+// a TParticle copied from a per-thread prototype per PDG code, avoiding the ROOT-locked PDG lookup
+TParticle makeParticle(int pdg, int status, int mother1, int mother2, int daughter1, int daughter2,
+                       double px, double py, double pz, double e, double vx, double vy, double vz, double t)
+{
+  thread_local std::unordered_map<int, TParticle> prototypes;
+  auto it = prototypes.find(pdg);
+  if (it == prototypes.end()) {
+    TParticle p(pdg, status, mother1, mother2, daughter1, daughter2, px, py, pz, e, vx, vy, vz, t);
+    if (p.GetPDG(1)) { // unknown codes may still be added to TDatabasePDG later
+      prototypes.emplace(pdg, p);
+    }
+    return p;
+  }
+  TParticle p(it->second); // the copy keeps the PDG record and the mass
+  p.SetStatusCode(status);
+  p.SetFirstMother(mother1);
+  p.SetLastMother(mother2);
+  p.SetFirstDaughter(daughter1);
+  p.SetLastDaughter(daughter2);
+  p.SetMomentum(px, py, pz, e);
+  p.SetProductionVertex(vx, vy, vz, t);
+  return p;
+}
+} // namespace
 
 // small helper function to append to vector at arbitrary position
 template <typename T, typename I>
@@ -100,7 +129,7 @@ Stack::Stack(Int_t size)
     transportPrimary = o2::conf::GetFromMacro<o2::data::Stack::TransportFcn>(param.transportPrimaryFileName,
                                                                              param.transportPrimaryFuncName,
                                                                              "o2::data::Stack::TransportFcn", "stack_transport_primary");
-    if (!mTransportPrimary) {
+    if (!transportPrimary) {
       LOG(fatal) << "Failed to retrieve external \'transportPrimary\' function: problem with configuration ";
     }
     LOG(info) << "Successfully retrieve external \'transportPrimary\' frunction: " << param.transportPrimaryFileName;
@@ -109,7 +138,7 @@ Stack::Stack(Int_t size)
   }
 
   if (param.transportPrimaryInvert) {
-    mTransportPrimary = [transportPrimary](const TParticle& p, const std::vector<TParticle>& particles) { return !transportPrimary; };
+    mTransportPrimary = [transportPrimary](const TParticle& p, const std::vector<TParticle>& particles) { return !transportPrimary(p, particles); };
   } else {
     mTransportPrimary = transportPrimary;
   }
@@ -119,6 +148,7 @@ Stack::Stack(const Stack& rhs)
   : FairGenericStack(rhs),
     mStack(),
     mParticles(),
+    mTrackIDtoParticlesEntry(rhs.mTrackIDtoParticlesEntry.size(), -1),
     mTracks(nullptr),
     mIndexMap(),
     mIndexOfCurrentTrack(-1),
@@ -130,10 +160,15 @@ Stack::Stack(const Stack& rhs)
     mNumberOfPrimariesPopped(0),
     mStoreMothers(rhs.mStoreMothers),
     mStoreSecondaries(rhs.mStoreSecondaries),
+    mPruneKinematics(rhs.mPruneKinematics),
     mMinHits(rhs.mMinHits),
     mEnergyCut(rhs.mEnergyCut),
-    mTrackRefs(new std::vector<o2::TrackReference>),
-    mIsG4Like(rhs.mIsG4Like)
+    mCleanupThreshold(rhs.mCleanupThreshold),
+    mIsG4Like(rhs.mIsG4Like),
+    mIsExternalMode(rhs.mIsExternalMode),
+    mDoTrackSeeding(rhs.mDoTrackSeeding),
+    mTransportPrimary(rhs.mTransportPrimary),
+    mTrackRefs(new std::vector<o2::TrackReference>)
 {
   LOG(debug) << "copy constructor called";
   mTracks = new std::vector<MCTrack>();
@@ -193,8 +228,8 @@ void Stack::PushTrack(Int_t toBeDone, Int_t parentId, Int_t pdgCode, Double_t px
                       TMCProcess proc2)
 {
   //  printf("Pushing %s toBeDone %5d parentId %5d pdgCode %5d is %5d entries %5d \n",
-  //	 proc == kPPrimary ? "Primary:   " : "Secondary: ",
-  //	 toBeDone, parentId, pdgCode, is, mNumberOfEntriesInParticles);
+  //   proc == kPPrimary ? "Primary:   " : "Secondary: ",
+  //   toBeDone, parentId, pdgCode, is, mNumberOfEntriesInParticles);
 
   //
   // This method is called
@@ -212,7 +247,7 @@ void Stack::PushTrack(Int_t toBeDone, Int_t parentId, Int_t pdgCode, Double_t px
   //  Int_t daughter1Id = -1;
   //  Int_t daughter2Id = -1;
   Int_t iStatus = (proc == kPPrimary) ? is : trackId;
-  TParticle p(pdgCode, iStatus, parentId, secondparentId, daughter1Id, daughter2Id, px, py, pz, e, vx, vy, vz, time);
+  TParticle p = makeParticle(pdgCode, iStatus, parentId, secondparentId, daughter1Id, daughter2Id, px, py, pz, e, vx, vy, vz, time);
   p.SetPolarisation(polx, poly, polz);
   p.SetWeight(weight);
   p.SetUniqueID(proc);                                           // using the unique ID to transfer process ID
@@ -361,7 +396,7 @@ TParticle* Stack::PopNextTrack(Int_t& iTrack)
         auto hash = getHash(mCurrentParticle);
         // LOG(info) << "SEEDING NEW TRACK USING HASH" << hash;
         // init seed per track
-        gRandom->SetSeed(hash);
+        o2::base::simRandom()->SetSeed(hash);
         o2::base::VMCSeederService::instance().setSeed();
         // NOTE: THE BETTER PLACE WOULD BE IN PRETRACK HOOK BUT THIS DOES NOT SEEM TO WORK
         // WORKS ONLY WITH G3 SINCE G4 DOES NOT CALL THIS FUNCTION
@@ -652,6 +687,16 @@ void Stack::addHit(int iDet)
   }
   mCurrentParticle.SetBit(ParticleStatus::kHasHits, 1);
   mHitCounter++;
+}
+void Stack::modifiesHit(int iDet)
+{
+  // flag only; hit mask, kHasHits and hit counter stay untouched
+  if (mIndexOfCurrentTrack < mNumberOfPrimaryParticles) {
+    mTracks->at(mIndexOfCurrentTrack).setContributesToAHit();
+  } else {
+    Int_t iTrack = mTrackIDtoParticlesEntry[mIndexOfCurrentTrack];
+    mParticles[iTrack].setContributesToAHit();
+  }
 }
 void Stack::addHit(int iDet, Int_t iTrack)
 {

@@ -187,15 +187,15 @@ void GPUChainTracking::PrintMemoryRelations()
     GPUInfo("MEMREL SectorTrackHits NCl %d NTrkH %d", processors()->tpcTrackers[i].NHitsTotal(), *processors()->tpcTrackers[i].NTrackHits());
   }
   if (processors()->tpcMerger.Memory()) {
-    GPUInfo("MEMREL Tracks NCl %d NTrk %d", processors()->tpcMerger.NMaxClusters(), processors()->tpcMerger.NMergedTracks());
-    GPUInfo("MEMREL TrackHitss NCl %d NTrkH %d", processors()->tpcMerger.NMaxClusters(), processors()->tpcMerger.NMergedTrackClusters());
+    GPUInfo("MEMREL Tracks NCl %d NTrk %d", processors()->tpcMerger.NClusters(), processors()->tpcMerger.NMergedTracks());
+    GPUInfo("MEMREL TrackHitss NCl %d NTrkH %d", processors()->tpcMerger.NClusters(), processors()->tpcMerger.NMergedTrackClusters());
   }
 }
 
 void GPUChainTracking::PrepareKernelDebugOutput()
 {
 #ifdef GPUCA_KERNEL_DEBUGGER_OUTPUT
-  const auto& threadContext = GetThreadContext();
+  const auto& holdContext = GetThreadContext();
   if (mRec->IsGPU()) {
     SetupGPUProcessor(&processors()->debugOutput, false);
     WriteToConstantMemory(RecoStep::NoRecoStep, (char*)&processors()->debugOutput - (char*)processors(), &processorsShadow()->debugOutput, sizeof(processors()->debugOutput), -1);
@@ -208,7 +208,7 @@ void GPUChainTracking::PrepareKernelDebugOutput()
 void GPUChainTracking::PrintKernelDebugOutput()
 {
 #ifdef GPUCA_KERNEL_DEBUGGER_OUTPUT
-  const auto& threadContext = GetThreadContext();
+  const auto& holdContext = GetThreadContext();
   TransferMemoryResourcesToHost(RecoStep::NoRecoStep, &processors()->debugOutput, -1);
   processors()->debugOutput.Print();
 #endif
@@ -216,11 +216,13 @@ void GPUChainTracking::PrintKernelDebugOutput()
 
 void GPUChainTracking::PrintOutputStat()
 {
-  int32_t nTracks = 0, nAttachedClusters = 0, nAttachedClustersFitted = 0, nAdjacentClusters = 0;
-  uint32_t nCls = GetProcessingSettings().doublePipeline ? mIOPtrs.clustersNative->nClustersTotal : processors()->tpcMerger.NMaxClusters();
+  int32_t nTracks = 0, nAttachedClusters = 0, nAttachedClustersFitted = 0, nAdjacentClusters = 0, nCompressedClusters = 0;
+  uint32_t nCls = GetProcessingSettings().doublePipeline ? mIOPtrs.clustersNative->nClustersTotal : processors()->tpcMerger.NClusters();
+  const char* outputType = "";
   if (GetProcessingSettings().createO2Output > 1) {
     nTracks = mIOPtrs.nOutputTracksTPCO2;
     nAttachedClusters = mIOPtrs.nMergedTrackHits;
+    outputType = "O2";
   } else {
     for (uint32_t k = 0; k < mIOPtrs.nMergedTracks; k++) {
       if (mIOPtrs.mergedTracks[k].OK()) {
@@ -237,6 +239,11 @@ void GPUChainTracking::PrintOutputStat()
         nAdjacentClusters++;
       }
     }
+    outputType = "GPU";
+  }
+  if (mIOPtrs.tpcCompressedClusters) {
+    o2::tpc::CompressedClusters c = *mIOPtrs.tpcCompressedClusters;
+    nCompressedClusters = c.nAttachedClusters + c.nUnattachedClusters;
   }
 
   char trdText[1024] = "";
@@ -256,7 +263,32 @@ void GPUChainTracking::PrintOutputStat()
     }
     snprintf(trdText, 1024, " - TRD Tracker reconstructed %d tracks (%d tracklets)", nTRDTracks, nTRDTracklets);
   }
-  GPUInfo("Output Tracks: %d (%d / %d / %d / %d clusters (fitted / attached / adjacent / total) - %s format)%s", nTracks, nAttachedClustersFitted, nAttachedClusters, nAdjacentClusters, nCls, GetProcessingSettings().createO2Output > 1 ? "O2" : "GPU", trdText);
+  GPUInfo("Output Tracks (%s): %d - Clusters: %d / %d / %d / %d / %d (attached / total / compressed / fitted / adjacent)%s", outputType, nTracks, nAttachedClusters, nCls, nCompressedClusters, nAttachedClustersFitted, nAdjacentClusters, trdText);
+}
+
+void GPUChainTracking::DumpFinalOutput()
+{
+  std::ostream& out = *mDebugFile;
+  out << "\n\nFinal Output\n";
+  if (mIOPtrs.clustersNative) {
+    DumpClusters(out, mIOPtrs.clustersNative);
+  }
+  if (mIOPtrs.mergedTracks && GetProcessingSettings().createO2Output <= 1) {
+    processors()->tpcMerger.DumpFinal(out);
+  }
+  if (mIOPtrs.outputTracksTPCO2 && GetProcessingSettings().createO2Output) {
+    processors()->tpcMerger.DumpFinalO2(out);
+  }
+  if (mIOPtrs.mergedTrackHitStates && GetProcessingSettings().outputSharedClusterMap && mIOPtrs.clustersNative) {
+    out << "\nTPC Shared Cluster Map\n";
+    for (uint32_t i = 0; i < mIOPtrs.clustersNative->nClustersTotal; i++) {
+      out << (int32_t)mIOPtrs.mergedTrackHitStates[i] << (i % 100 == 99 ? "\n" : " ");
+    }
+    out << "\n";
+  }
+  if ((GetRecoSteps() & RecoStep::TPCCompression) && mIOPtrs.tpcCompressedClusters) {
+    processors()->tpcCompressor.DumpCompressedClusters(out);
+  }
 }
 
 void GPUChainTracking::OutputSanityCheck()
@@ -418,4 +450,27 @@ void GPUChainTracking::DoDebugRawDump()
   GPUInfo("Doing debug raw dump");
   mRec->DumpSettings((dirName + "/").c_str());
   DumpData((dirName + "/event.0.dump").c_str(), &ioPtrs);
+}
+
+void GPUChainTracking::DoDebugMergerNClDump(const GPUTPCGMMerger& merger)
+{
+  if (GetProcessingSettings().debug.mergerDumpTrackNCl) {
+#ifndef GPUCA_DETERMINISTIC_MODE
+    GPUError("GPUCA_DETERMINISTIC_MODE not enabled, track dump will not be deterministic");
+#endif
+    if (!GetProcessingSettings().deterministicGPUReconstruction) {
+      GPUError("deterministicGPUReconstruction not enabled, track dump will not be deterministic");
+    }
+    if (GetRecoStepsGPU() & RecoStep::TPCMerging) {
+      SynchronizeGPU();
+    }
+    FILE* fout = fopen("merger_tracks_ncl.txt", "w+");
+    if (fout == nullptr) {
+      throw std::runtime_error("Error Opening Debug File");
+    }
+    for (int32_t i = 0; i < merger.NMergedTracks(); i++) {
+      fprintf(fout, "Track %7d NCl %5u\n", i, merger.MergedTracks()[i].OK() ? merger.MergedTracks()[i].NClustersFitted() : 0u);
+    }
+    fclose(fout);
+  }
 }

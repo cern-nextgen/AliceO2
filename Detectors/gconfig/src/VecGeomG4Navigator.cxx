@@ -9,7 +9,12 @@
 // granted to it by virtue of its status as an Intergovernmental Organization
 // or submit itself to any jurisdiction.
 
+// before the VecGeom headers, which define a VECGEOM macro
+#include "DetectorsBase/GeometryManager.h"
+
 #include "VecGeomG4Navigator.h"
+
+#include "VecGeomParallelWorld.h"
 
 #include "G4Exception.hh"
 #include "G4TouchableHistory.hh"
@@ -45,8 +50,13 @@ vecgeom::VPlacedVolume const* topOf(vecgeom::NavigationState const& st)
 namespace o2::simsetup
 {
 
-VecGeomG4Navigator::VecGeomG4Navigator(VecGeomG4Map const& map, double pushDepth, bool zeroSafety)
-  : VecGeomG4NavigatorBase(map), mPushDepth(pushDepth), mZeroSafety(zeroSafety)
+VecGeomG4Navigator::VecGeomG4Navigator(VecGeomG4Map const& map, double pushDepth, bool zeroSafety,
+                                       VecGeomParallelWorld const* parallelWorld, bool leanLocate)
+  : VecGeomG4NavigatorBase(map),
+    mPushDepth(pushDepth),
+    mZeroSafety(zeroSafety),
+    mLeanLocate(leanLocate),
+    mParallelWorld(parallelWorld)
 {
   mEmptyState.Clear();
 }
@@ -57,17 +67,15 @@ VecGeomG4Navigator::~VecGeomG4Navigator()
             << ", abandoned " << mAbandonCount << ", negative safeties " << mNegativeSafetyCount
             << ", unmappable touchables " << mUnmappableHistoryCount << ", relocated resumes "
             << mRelocatedResumeCount << ", missing exit normals " << mNoNormalCount;
-}
-
-G4VPhysicalVolume* VecGeomG4Navigator::updateG4History()
-{
-  // The history is a function of the VecGeom state alone, so it is rebuilt only when that changed.
-  if (mHistoryValid && mCurState.HasSamePathAsOther(mHistoryState)) {
-    return fHistory.GetTopVolume();
+  if (mParallelWorld != nullptr) {
+    LOG(info) << "VecGeom parallel world: " << mParallelEntries << " steps ended on a node, " << mParallelRelocated
+              << " locates overridden";
   }
-  mHistoryState = mCurState;
-  mHistoryValid = true;
-  return historyFromState(mCurState);
+  if (mPushRestartCount > 0) {
+    LOG(info) << "VecGeom stuck tracks: " << mPushRestartCount << " runs of zero steps restarted after a push";
+  }
+  LOG(debug) << "VecGeom history: " << mHistoryStepCount << " updated by one level, " << mHistoryRebuildCount
+             << " rebuilt";
 }
 
 void VecGeomG4Navigator::locateFromWorld(const V3& point)
@@ -118,6 +126,7 @@ G4double VecGeomG4Navigator::ComputeStep(const G4ThreeVector& globalPoint, const
   if (top == nullptr) { // the track is outside the world
     return kInfinity;
   }
+  // With the lean locate, the geometry setup gives every mother with daughters the BVH navigator.
   auto const* navigator = top->GetLogicalVolume()->GetNavigator();
 
   // On the point a boundary locate left the track on, the safety is zero; a point seen before
@@ -133,19 +142,47 @@ G4double VecGeomG4Navigator::ComputeStep(const G4ThreeVector& globalPoint, const
   // along the curve. The volume the last crossing left is blocked in the first call only, and only
   // while the direction points away from it; a track turning back into it must see its boundary.
   mStepState = mCurState;
-  if (mExitBlockPending) {
+  bool blockExited = false;
+  bool leanExitPending = false; // a parallel world node left by the lean locate is blocked by the same rule
+  if (mExitBlockPending && mLeanLocate) {
+    leanExitPending = samePoint(globalPoint, mLastLocatedPoint);
+    mExitBlockPending = false;
+  } else if (mExitBlockPending) {
     const bool block = samePoint(globalPoint, mLastLocatedPoint) &&
                        (mExitNormalFromPush ? directionLeaves(mPushNormal, toDir(direction))
                                             : directionLeaves(mExitedState, toVG(globalPoint), toDir(direction)));
     if (!block) {
       mStepState.SetLastExited(mEmptyState.GetLastExitedState());
     }
+    blockExited = block;
     clearLastExited();
   }
   const double limit = std::min(proposedStepLength * kG4ToVG, static_cast<double>(vecgeom::kInfLength));
   double safety = 0.;
   double vgStep = navigator->ComputeStepAndSafety(toVG(globalPoint), toDir(direction), limit, mStepState, calcSafety,
                                                   safety, true);
+  // Outside the parallel world its nodes limit the step and the safety like daughters of every volume;
+  // inside a node they are not seen, as in TGeo. A node at the distance of the main boundary is left to
+  // the main hierarchy, which is safe because the locate descends from what was entered and then asks the
+  // parallel world again. The nodes just left are blocked by the rule of the volume just left.
+  int parallelHit = -1;
+  if (mParallelWorld != nullptr && !mInParallelNode) {
+    const V3 p = toVG(globalPoint);
+    double pwStep = std::min(std::max(vgStep, 0.), limit);
+    parallelHit = mParallelWorld->distanceToIn(p, toDir(direction), pwStep, [&](int node) {
+      if (leanExitPending) {
+        return mParallelWorld->isInNode(node, mExitedState) && directionLeaves(mExitedState, p, toDir(direction));
+      }
+      return blockExited && mParallelWorld->isInNode(node, mExitedState);
+    });
+    if (parallelHit >= 0) {
+      vgStep = pwStep;
+      ++mParallelEntries;
+    }
+    if (calcSafety && safety > 0.) {
+      safety = mParallelWorld->safetyToIn(p, safety);
+    }
+  }
   if (calcSafety) {
     if (safety < 0.) {
       ++mNegativeSafetyCount;
@@ -158,35 +195,68 @@ G4double VecGeomG4Navigator::ComputeStep(const G4ThreeVector& globalPoint, const
   }
   const bool boundaryLimited = vgStep < limit;
   G4double step = std::max(vgStep, 0.) * kVGToG4;
-  const bool entering = mStepState.GetCurrentLevel() > mCurState.GetCurrentLevel();
+  const bool entering = parallelHit >= 0 || mStepState.GetCurrentLevel() > mCurState.GetCurrentLevel();
 
-  // A track that is not moving, handled as G4Navigator does: after ten zero steps the step is
-  // lengthened by 100 kCarTolerance, after twenty-five the event is aborted.
+  // A track that is not moving, with G4Navigator's thresholds: after ten zero steps the step is
+  // lengthened, after twenty-five the event is aborted.
   if (step < 0.05 * kCarTolerance) {
     ++mZeroStepCount;
-    if (++mNzeroSteps >= kActionThresholdNoZeroSteps) {
-      ++mStuckPushCount;
-      step += 100. * kCarTolerance;
+    // A push that took the track off its face and into a volume this run of zero steps did not alternate
+    // between starts a new run there, with its own chords and momentum. Bounded until the next finite step.
+    if (mPushPending && mPushRestarts < kMaxPushRestarts &&
+        (globalPoint - mPushOrigin).mag2() >= 0.25 * mPushLength * mPushLength && !inZeroRun(mCurState)) {
+      mNzeroSteps = 0;
+      mZeroLinearSeen = false;
+      mZeroRunSize = 0;
+      ++mPushRestarts;
+      ++mPushRestartCount;
+    }
+    mPushPending = false;
+    // Without a field Geant4 asks along the momentum it located the track with, and takes a lengthened step.
+    // The field propagator asks along chords and takes a step longer than its chord for a miss.
+    const bool linear = (direction - mLastLocatedDir).mag2() < 1.e-18;
+    mZeroLinearSeen = mZeroLinearSeen || linear;
+    // The volumes the run alternates between, recorded only when it gets near the threshold.
+    if (++mNzeroSteps >= kRecordZeroRun && mZeroRunSize < 2 && !inZeroRun(mCurState)) {
+      mZeroRun[mZeroRunSize++] = mCurState;
+    }
+    if (mNzeroSteps >= kActionThresholdNoZeroSteps) {
+      // A track going back and forth over a face between a medium with a field and one without is tangent
+      // to the face: the chord crosses it one way and the momentum the other way. The crossing along the
+      // chord is left at zero length, so that it takes place, and the step along the momentum is lengthened.
+      if (linear || !mZeroLinearSeen) {
+        ++mStuckPushCount;
+        // The push grows fourfold per try from 100 kCarTolerance, capped below the thinnest layers (15 um).
+        constexpr double kMaxStuckPush = 10. * CLHEP::um;
+        const int tries = mNzeroSteps - kActionThresholdNoZeroSteps;
+        const double push = std::min(100. * kCarTolerance * std::pow(4., tries), kMaxStuckPush);
+        step += push;
+        mPushPending = true;
+        mPushOrigin = globalPoint;
+        mPushLength = push;
+      }
       if (mNzeroSteps >= kAbandonThresholdNoZeroSteps) {
         ++mAbandonCount;
         std::ostringstream msg;
         msg << "Track stuck or not moving: " << mNzeroSteps << " zero steps in " << top->GetLabel() << " at ("
             << globalPoint.x() << ", " << globalPoint.y() << ", " << globalPoint.z() << ") mm. Event aborted, as "
             << "G4Navigator does.";
-        mNzeroSteps = 0;
+        resetZeroSteps();
         G4Exception("VecGeomG4Navigator::ComputeStep()", "GeomNav0003", EventMustBeAborted, msg.str().c_str());
       }
     }
   } else {
-    mNzeroSteps = 0;
+    resetZeroSteps();
   }
 
   if (boundaryLimited) {
     mWouldEnter = entering;
     mWouldExit = !entering;
     mNextPoint = globalPoint + step * direction;
+    mNextDir = toDir(direction);
     if (entering) {
-      mNextState = mStepState;
+      // A parallel world node is entered from anywhere in the hierarchy, not only from its mother.
+      mNextState = parallelHit >= 0 ? mParallelWorld->state(parallelHit) : mStepState;
     }
     // The surface this step ends on, for the exit normal: the entered daughter's or our own.
     mNormalState = entering ? mNextState : mCurState;
@@ -204,11 +274,11 @@ G4double VecGeomG4Navigator::ComputeStep(const G4ThreeVector& globalPoint, const
 /// the surface of and heading out of, then look down again from there, never back into the volume
 /// just left, which stays blocked for the next step. Bounded, because popping and descending can
 /// meet another flush face. It never pops to or above minLevel: a daughter the step entered stays
-/// entered, because the step decided that with the chord direction, and the direction a locate gets
-/// under a field is the momentum. Nor does it descend back into `avoid`, the volume the crossing
-/// exited: on a face a helix touches tangentially chord and momentum disagree about the side.
+/// entered, as the step decided. Nor does it descend back into `avoid`, the volume the crossing
+/// exited. Both guard the decision of the step against a locate direction that disagrees with it
+/// about the side of the face.
 void VecGeomG4Navigator::leaveFlushVolumes(const V3& point, const V3& dir, int minLevel,
-                                           vecgeom::VPlacedVolume const* avoid)
+                                           vecgeom::NavigationState const* avoid)
 {
   for (int round = 0; round < 4; ++round) {
     vecgeom::VPlacedVolume const* left = nullptr;
@@ -242,12 +312,14 @@ void VecGeomG4Navigator::leaveFlushVolumes(const V3& point, const V3& dir, int m
       return; // no daughter holds the point
     }
     if (avoid != nullptr && mCurState.GetCurrentLevel() > level) {
-      // Undo a descent into the volume the crossing exited, at whatever depth the search put it.
-      mPathScratch = mCurState;
-      while (mPathScratch.GetCurrentLevel() > level && mPathScratch.Top() != avoid) {
-        mPathScratch.Pop();
+      // Undo a descent into the volume the crossing exited. It is told by its whole path: the same
+      // placement also sits in every other copy of its mother, where the track may well go.
+      const int exited = avoid->GetCurrentLevel();
+      bool back = static_cast<int>(mCurState.GetCurrentLevel()) >= exited;
+      for (int l = exited - 1; back && l > 0; --l) {
+        back = mCurState.At(l) == avoid->At(l);
       }
-      if (mPathScratch.GetCurrentLevel() > level) {
+      if (back) {
         while (mCurState.GetCurrentLevel() > level) {
           mCurState.Pop();
         }
@@ -294,8 +366,11 @@ G4VPhysicalVolume* VecGeomG4Navigator::LocateGlobalPointAndSetup(const G4ThreeVe
   const bool crossing = onBoundary && (mWouldEnter || mWouldExit) && direction != nullptr;
   const bool entering = crossing && mWouldEnter;
   const V3 p = toVG(point);
-  const V3 dir = direction != nullptr ? toDir(*direction) : V3(0., 0., 0.);
-  const double push = (onBoundary && direction != nullptr) ? boundaryPush(p, dir) : 0.;
+  // A crossing is located along the direction of the step that found the boundary. The direction given
+  // here is the one after the step, which multiple scattering can have turned back into the volume left;
+  // the track then belongs to what lies behind the face, as G4Navigator does, not to the mother of the two.
+  const V3 dir = crossing ? mNextDir : (direction != nullptr ? toDir(*direction) : V3(0., 0., 0.));
+  const double push = (onBoundary && direction != nullptr) ? (mLeanLocate ? kLeanPush : boundaryPush(p, dir)) : 0.;
   const V3 q = p + push * dir;
 
   fWasLimitedByGeometry = false;
@@ -303,11 +378,15 @@ G4VPhysicalVolume* VecGeomG4Navigator::LocateGlobalPointAndSetup(const G4ThreeVe
   fExitedMother = false;
   mLocatedOnBoundary = false;
   mLastLocatedPoint = point;
+  mLastLocatedDir = direction != nullptr ? *direction : G4ThreeVector(0., 0., 0.);
   mSafetyOrig = kNoPoint;
   clearLastExited();
 
   if (!relativeSearch) {
-    mNzeroSteps = 0; // a new track: nothing of the previous one applies
+    resetZeroSteps(); // a new track: nothing of the previous one applies
+    if (mLeanLocate && !o2::base::GeometryManager::vecGeomSmallMothersUseBvh()) {
+      LOG(fatal) << "The lean locate needs GeometryManager::setVecGeomBvhForSmallMothers(true)";
+    }
     locateFromWorld(p);
   } else if (topOf(mCurState) == nullptr) {
     locateFromWorld(p);
@@ -318,12 +397,7 @@ G4VPhysicalVolume* VecGeomG4Navigator::LocateGlobalPointAndSetup(const G4ThreeVe
     // mNextState is a copy of the step state and can still carry the block of the volume the previous
     // crossing left, which was meant for the first step after that exit only.
     mCurState.SetLastExited(mEmptyState.GetLastExitedState());
-    auto const* daughter = mCurState.Top();
-    mCurState.Pop();
-    vecgeom::Transformation3D m;
-    mCurState.TopMatrix(m);
-    vecgeom::GlobalLocator::LocateGlobalPoint(daughter, daughter->GetTransformation()->Transform(m.Transform(q)),
-                                              mCurState, false);
+    descendInto(mCurState, q);
     mLocatedOnBoundary = true;
   } else if (crossing) {
     // Out of the current volume: up until the point is contained, then down, never back into the
@@ -332,12 +406,35 @@ G4VPhysicalVolume* VecGeomG4Navigator::LocateGlobalPointAndSetup(const G4ThreeVe
     mReloScratch = mCurState;
     if (mCurState.GetCurrentLevel() <= 1) {
       mCurState.Clear(); // left the world
+    } else if (mLeanLocate) {
+      // The volume left is popped whatever the point; ten nanometres past the face, containment pops
+      // every flush mother too. The next step refuses the volume left by the BVH navigator's rule.
+      vecgeom::Transformation3D m;
+      mCurState.TopMatrix(m);
+      vecgeom::GlobalLocator::RelocatePointFromPathForceDifferent(m.Transform(q), mCurState);
+      if (topOf(mCurState) == nullptr) {
+        mCurState.Clear();
+      }
+      if (mParallelWorld != nullptr) {
+        setExited(mReloScratch, false);
+      }
     } else {
       vecgeom::Transformation3D m;
       mCurState.TopMatrix(m);
       vecgeom::GlobalLocator::RelocatePointFromPathForceDifferent(m.Transform(q), mCurState);
-      mReloScratch.SetLastExited();
-      mCurState.SetLastExited(mReloScratch.GetLastExitedState());
+      // As G4Navigator, block the volume left that is a daughter of the deepest volume both paths share.
+      int shared = 0;
+      while (!mCurState.IsOutside() && shared + 1 < static_cast<int>(mCurState.GetCurrentLevel()) &&
+             shared + 1 < static_cast<int>(mReloScratch.GetCurrentLevel()) &&
+             mCurState.At(shared + 1) == mReloScratch.At(shared + 1)) {
+        ++shared;
+      }
+      mPathScratch = mReloScratch;
+      while (static_cast<int>(mPathScratch.GetCurrentLevel()) > shared + 2) {
+        mPathScratch.Pop();
+      }
+      mPathScratch.SetLastExited();
+      mCurState.SetLastExited(mPathScratch.GetLastExitedState());
       setExited(mReloScratch, true);
     }
     mLocatedOnBoundary = true;
@@ -351,17 +448,62 @@ G4VPhysicalVolume* VecGeomG4Navigator::LocateGlobalPointAndSetup(const G4ThreeVe
     }
     mLocatedOnBoundary = onBoundary;
   }
-  if (crossing) {
+  if (crossing && !mLeanLocate) {
     leaveFlushVolumes(q, dir, entering ? static_cast<int>(mNextState.GetCurrentLevel()) : 0,
-                      entering ? nullptr : topOf(mReloScratch));
+                      entering || topOf(mReloScratch) == nullptr ? nullptr : &mReloScratch);
+  }
+  if (mParallelWorld != nullptr) {
+    applyParallelWorld(q, crossing && !entering);
+  }
+  if (crossing) {
     updateCrossingFlags(entering);
   }
   mWouldEnter = false;
   mWouldExit = false;
-  return updateG4History();
+  return updateHistory(mCurState);
 }
 
-G4VPhysicalVolume* VecGeomG4Navigator::ResetHierarchyAndLocate(const G4ThreeVector& point, const G4ThreeVector&,
+/// TGeo's rule: the node added first among those holding the point is where the track is. The
+/// locate then goes on into the node's daughters, which TGeo leaves out; with sensors and metal
+/// layers added before their chips, as ITS does, the result is the same.
+bool VecGeomG4Navigator::applyParallelWorld(const V3& point, bool exiting)
+{
+  mInParallelNode = false;
+  if (topOf(mCurState) == nullptr || !mParallelWorld->nearNodes(point)) {
+    return false;
+  }
+  // The pushed point can still be within the tolerance of a node the step just left.
+  const int node = mParallelWorld->findNode(point, [&](int k) {
+    return exiting && mParallelWorld->isInNode(k, mReloScratch) && !mParallelWorld->isInNode(k, mCurState);
+  });
+  if (node < 0) {
+    // No node holds the point, but the main hierarchy may have put the track in one within its tolerance.
+    mInParallelNode = mParallelWorld->isInAnyNode(mCurState);
+    return false;
+  }
+  mInParallelNode = true;
+  if (mParallelWorld->isInNode(node, mCurState)) {
+    return false;
+  }
+  mCurState = mParallelWorld->state(node);
+  descendInto(mCurState, point);
+  clearLastExited(); // the volume left is no daughter of this branch
+  ++mParallelRelocated;
+  return true;
+}
+
+void VecGeomG4Navigator::descendInto(vecgeom::NavigationState& state, const V3& point)
+{
+  auto const* placed = state.Top();
+  state.Pop();
+  vecgeom::Transformation3D m;
+  state.TopMatrix(m);
+  vecgeom::GlobalLocator::LocateGlobalPoint(placed, placed->GetTransformation()->Transform(m.Transform(point)), state,
+                                            false);
+}
+
+G4VPhysicalVolume* VecGeomG4Navigator::ResetHierarchyAndLocate(const G4ThreeVector& point,
+                                                               const G4ThreeVector& direction,
                                                                const G4TouchableHistory& history)
 {
   // A track resumes from a stored touchable, usually a secondary starting where its parent's step
@@ -373,8 +515,9 @@ G4VPhysicalVolume* VecGeomG4Navigator::ResetHierarchyAndLocate(const G4ThreeVect
   mWouldExit = false;
   mLocatedOnBoundary = false;
   mLastLocatedPoint = point;
+  mLastLocatedDir = direction;
   mSafetyOrig = kNoPoint;
-  mNzeroSteps = 0;
+  resetZeroSteps();
   fHistory = *history.GetHistory();
   const V3 p = toVG(point);
   bool kept = false;
@@ -397,14 +540,17 @@ G4VPhysicalVolume* VecGeomG4Navigator::ResetHierarchyAndLocate(const G4ThreeVect
     locateFromWorld(p);
   }
   clearLastExited();
+  if (mParallelWorld != nullptr) {
+    // A node holding the point has priority over the touchable too, as in TGeo's search on a resume.
+    kept = !applyParallelWorld(p, false) && kept;
+  }
   if (kept) {
     // The touchable's history is the path of the state: keep it rather than rebuild it.
-    mHistoryState = mCurState;
-    mHistoryValid = true;
+    keepTouchableHistory(mCurState);
     return fHistory.GetTopVolume();
   }
-  mHistoryValid = false;
-  return updateG4History();
+  invalidateHistory();
+  return updateHistory(mCurState);
 }
 
 void VecGeomG4Navigator::LocateGlobalPointWithinVolume(const G4ThreeVector& position)
@@ -445,6 +591,10 @@ G4double VecGeomG4Navigator::ComputeSafety(const G4ThreeVector& globalPoint, con
     return rest;
   }
   double safety = boundedSafety(mCurState, globalPoint, proposedMaxLength);
+  if (mParallelWorld != nullptr && !mInParallelNode && safety > 0.) {
+    // Up to the caller's bound only; the bound returned for a farther node is a valid lower bound.
+    safety = mParallelWorld->safetyToIn(toVG(globalPoint), std::min(safety, proposedMaxLength) * kG4ToVG) * kVGToG4;
+  }
   if (safety < 0.) {
     ++mNegativeSafetyCount;
     safety = 0.;

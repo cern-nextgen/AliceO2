@@ -21,6 +21,14 @@
 using namespace o2::gpu;
 using namespace o2::gpu::tpccf;
 
+#if defined(GPUCA_GPUCODE) && !defined(GPUCA_GPUCODE_NO_LAUNCH_BOUNDS)
+static_assert(GPUCA_PAR_CF_SCAN_WORKGROUP_SIZE == GPUCA_GET_THREAD_COUNT(GPUCA_LB_GPUTPCCFStreamCompaction_scanStart));
+static_assert(GPUCA_PAR_CF_SCAN_WORKGROUP_SIZE == GPUCA_GET_THREAD_COUNT(GPUCA_LB_GPUTPCCFStreamCompaction_scanUp));
+static_assert(GPUCA_PAR_CF_SCAN_WORKGROUP_SIZE == GPUCA_GET_THREAD_COUNT(GPUCA_LB_GPUTPCCFStreamCompaction_scanTop));
+static_assert(GPUCA_PAR_CF_SCAN_WORKGROUP_SIZE == GPUCA_GET_THREAD_COUNT(GPUCA_LB_GPUTPCCFStreamCompaction_scanDown));
+static_assert(GPUCA_PAR_CF_SCAN_WORKGROUP_SIZE == GPUCA_GET_THREAD_COUNT(GPUCA_LB_GPUTPCCFStreamCompaction_compactDigits));
+#endif
+
 template <>
 GPUdii() void GPUTPCCFStreamCompaction::Thread<GPUTPCCFStreamCompaction::scanStart>(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUSharedMemory& smem, processorType& clusterer, int32_t iBuf, int32_t stage)
 {
@@ -36,7 +44,7 @@ GPUdii() void GPUTPCCFStreamCompaction::Thread<GPUTPCCFStreamCompaction::scanSta
     pred = predicate[iThreadGlobal];
   }
 
-  int32_t nElemsInBlock = CfUtils::blockPredicateSum<GPUCA_PAR_CF_SCAN_WORKGROUP_SIZE>(smem, pred);
+  int32_t nElemsInBlock = CfUtils::blockPredicateSum<GPUCA_PAR_CF_SCAN_WORKGROUP_SIZE>(smem, pred GPUCA_THREAD_INFO_PROVIDE);
 
   int32_t lastThread = nThreads - 1;
   if (iThread == lastThread) {
@@ -115,7 +123,7 @@ GPUdii() void GPUTPCCFStreamCompaction::Thread<GPUTPCCFStreamCompaction::compact
   bool iAmDummy = (iThreadGlobal >= nElems);
 
   int32_t pred = (iAmDummy) ? 0 : predicate[iThreadGlobal];
-  int32_t offsetInBlock = CfUtils::blockPredicateScan<GPUCA_PAR_CF_SCAN_WORKGROUP_SIZE>(smem, pred);
+  int32_t offsetInBlock = CfUtils::blockPredicateScan<GPUCA_PAR_CF_SCAN_WORKGROUP_SIZE>(smem, pred, nullptr GPUCA_THREAD_INFO_PROVIDE);
 
   SizeT globalOffsetOut = offsetInBlock;
   if (iBlock > 0) {

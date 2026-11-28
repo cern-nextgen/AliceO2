@@ -16,6 +16,7 @@
 #include "DetectorsBase/MaterialManager.h"
 #include "DetectorsBase/Stack.h"
 #include "ZDCSimulation/Detector.h"
+#include "DetectorsBase/SimRandom.h"
 #include "DataFormatsZDC/Hit.h"
 
 #include "TMath.h"
@@ -68,7 +69,31 @@ Detector::Detector(Bool_t active)
   mMediumPMCid = -1; // minus for unitialized
   mMediumPMQid = -2; // different to PMC in any case
   resetHitIndices();
+  setupFastSim();
+}
 
+//_____________________________________________________________________________
+Detector::Detector(const Detector& rhs)
+  : o2::base::DetImpl<Detector>(rhs),
+    mXImpact(-999, -999, -999),
+    // the medium ids are set while the geometry is built, which only the master does
+    mMediumPMCid(rhs.mMediumPMCid),
+    mMediumPMQid(rhs.mMediumPMQid),
+    mHits(new std::vector<o2::zdc::Hit>),
+    mNeutronResponseImage(rhs.mNeutronResponseImage),
+    mProtonResponseImage(rhs.mProtonResponseImage)
+{
+  mTrackEta = 999;
+  mTotLightPMC = 0;
+  mTotLightPMQ = 0;
+  resetHitIndices();
+  // each copy has its own fast simulation models, since running a model changes its state
+  setupFastSim();
+}
+
+//_____________________________________________________________________________
+void Detector::setupFastSim()
+{
 #ifdef ZDC_FASTSIM_ONNX
   // If FastSim module was disabled, log appropriate message
   // otherwise check if all necessary parameters were passed, if so try build objects
@@ -124,13 +149,6 @@ Detector::Detector(Bool_t active)
     }
   }
 #endif
-}
-
-//_____________________________________________________________________________
-Detector::Detector(const Detector& rhs)
-  : o2::base::DetImpl<Detector>(rhs),
-    mHits(new std::vector<o2::zdc::Hit>)
-{
 }
 
 //_____________________________________________________________________________
@@ -460,7 +478,7 @@ Bool_t Detector::ProcessHits(FairVolume* v)
             //printf("  \t ZPtableEntry[%d %d %d] = %1.5f -> lightoutput %f\n", ibeta, iangle, iradius, mLightTableZP[ibeta][iangle][iradius], lightoutput);
           }
           if (lightoutput > 0) {
-            nphe = gRandom->Poisson(lightoutput);
+            nphe = o2::base::simRandom()->Poisson(lightoutput);
             //printf("  \t\t-> nphe %d  \n", nphe);
           }
         }
@@ -527,6 +545,7 @@ Bool_t Detector::ProcessHits(FairVolume* v)
       curHit.SetEnergyLoss(incenloss);
       curHit.setPMCLightYield(curHit.getPMCLightYield() + nPMC);
       curHit.setPMQLightYield(curHit.getPMQLightYield() + nPMQ);
+      stack->modifiesHit(GetDetId());
       //printf("  >>> Hit updated in vol %d %d  for track %d (mother: %d) \t light %1.0f %1.0f \n",
       //detector, sector, trackn, stack->GetCurrentTrack()->GetFirstMother(), curHit.getPMCLightYield(), curHit.getPMQLightYield());
     }

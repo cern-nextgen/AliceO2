@@ -19,7 +19,7 @@
 using namespace o2::gpu;
 
 template <int32_t I>
-GPUdii() void GPUTrackingRefitKernel::Thread(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& GPUrestrict() processors)
+GPUd() void GPUTrackingRefitKernel::Thread(int32_t nBlocks, int32_t nThreads, int32_t iBlock, int32_t iThread, GPUsharedref() GPUSharedMemory& smem, processorType& GPUrestrict() processors)
 {
   auto& refit = processors.trackingRefit;
   for (uint32_t i = get_global_id(0); i < processors.ioPtrs.nMergedTracks; i += get_global_size(0)) {

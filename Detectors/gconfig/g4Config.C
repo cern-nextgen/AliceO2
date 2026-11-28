@@ -61,14 +61,40 @@ R__LOAD_LIBRARY(libgeant4vmc)
 #include "TG4RunConfiguration.h"
 #include "SimConfig/G4Params.h"
 #include "SimConfig/FluenceWeightCalculator.h"
+#include "SimSetup/O2MonopolePhysics.h"
 #include "SimConfig/G4ScoringMerger.h"
 #include "G4ScoringManager.hh"
 #include "G4VScoringMesh.hh"
 #include <unistd.h>
 #include "SimSetup/G4RunConfiguration.h"
 #include "SimSetup/VecGeomNavigation.h"
+#include "SimSetup/G4FieldCache.h"
+#include "DetectorsBase/VMCSeederService.h"
+#include "CLHEP/Random/Random.h"
+#include "TRandom.h"
+#include "CommonUtils/ConfigurableParam.h"
+#include <boost/property_tree/ptree.hpp>
+#include "DetectorsBase/MTWorkerHooks.h"
+#include "G4RunManager.hh"
+#include "G4Threading.hh"
+#include "G4UImanager.hh"
+#include "G4RegionStore.hh"
+#include "G4ProductionCuts.hh"
 #endif
 #include "commonConfig.C"
+
+// skips particles unknown to Geant4 (e.g. some ions) with a warning instead of a crash
+constexpr const char* kSkipUnknownParticles = "/mcPrimaryGenerator/skipUnknownParticles true";
+
+// whether the TRD charge comes from the Geant4 energy deposit (TRDSimParams.ionisationModel=0), true without TRD
+bool trdUsesEnergyDeposit()
+{
+  try {
+    return o2::conf::ConfigurableParam::getValueAs<int>("TRDSimParams.ionisationModel") == 0;
+  } catch (...) {
+    return true;
+  }
+}
 
 // Configuration macro for Geant4 VirtualMC
 void Config()
@@ -104,6 +130,11 @@ void Config()
 
   //Geant4 VMC 3.x
   Bool_t mtMode = FairRunSim::Instance()->IsMT();
+#ifndef G4MULTITHREADED
+  if (mtMode) {
+    LOG(fatal) << "Multithreaded mode (--isMT) needs Geant4 built with GEANT4_BUILD_MULTITHREADED=ON";
+  }
+#endif
   Bool_t specialStacking = true; // leads to default stack behaviour in which new primaries are only started if the previous
                                  // one and all of its secondaries have been transported
                                  // any other choice is dangerously inconsistent with the FinishPrimary() interface of VMCApp
@@ -124,11 +155,21 @@ void Config()
     LOG(fatal) << "Unsupported geometry navigation mode";
   }
 
-  // o2::g4config::G4RunConfiguration adds the fast-simulation hook and the local
-  // magnetic fields; with neither configured it behaves like TG4RunConfiguration.
-  auto runConfiguration = new o2::g4config::G4RunConfiguration(geomNavStr, physicsSetup,
-                                                               "stepLimiter+specialCuts",
-                                                               specialStacking, mtMode);
+  TG4RunConfiguration* runConfiguration = nullptr;
+  if (g4Params.monopole) {
+    // Reference physics list + magnetic-monopole ionisation attached
+    // The reference physics is unchanged.
+    std::cout << "Monopole ionisation physics requested (G4.monopole=1)\n";
+    runConfiguration = o2::g4config::createMonopoleRunConfiguration(
+      geomNavStr, physicsSetup, "stepLimiter+specialCuts", specialStacking, mtMode,
+      g4Params.monopoleMagneticCharge);
+  } else {
+    // o2::g4config::G4RunConfiguration adds the fast-simulation hook and the local
+    // magnetic fields; with neither configured it behaves like TG4RunConfiguration.
+    runConfiguration = new o2::g4config::G4RunConfiguration(geomNavStr, physicsSetup,
+                                                            "stepLimiter+specialCuts",
+                                                            specialStacking, mtMode);
+  }
   if (g4Params.g4scoring) {
     runConfiguration->SetUseOfG4Scoring();
     if (g4Params.g4fluenceweight) {
@@ -138,9 +179,51 @@ void Config()
   }
   /// avoid the use of G4BACKTRACE (it seems to inferfere with process logic in o2-sim)
   setenv("G4BACKTRACE", "none", 1);
+  if (mtMode) {
+    // one transport thread per worker, read by the TGeant4 constructor
+    const char* nthreads = getenv("ALICE_NSIMWORKERS");
+    setenv("G4FORCENUMBEROFTHREADS", nthreads ? nthreads : "1", 1);
+  }
   /// Create the G4 VMC
   TGeant4* geant4 = new TGeant4("TGeant4", "The Geant4 Monte Carlo", runConfiguration);
   std::cout << "Geant4 has been created." << std::endl;
+
+  // seeds the Geant4 engine of the calling thread from a ROOT generator, as TG4RunManager::SetRandomSeed does from gRandom
+  o2::base::VMCSeederService::setGeant4Seeder([](TRandom* r) {
+    long seeds[10];
+    seeds[0] = r->GetSeed();
+    seeds[1] = r->GetSeed();
+    seeds[2] = 0;
+    CLHEP::HepRandom::setTheSeeds(seeds);
+  });
+
+  if (mtMode) {
+    if (g4Params.navmode == o2::conf::EG4Nav::kVecGeom) {
+      // each worker thread steps with its own navigator on the VecGeom geometry built below
+      o2::base::MTWorkerHooks::instance().initOnWorker = &o2::simsetup::installVecGeomNavigatorOnWorker;
+    }
+    // each thread takes one sub-event at a time
+    geant4->ProcessGeantCommand("/run/eventModulo 1");
+    // a thread without more work ends its own event loop after the current (empty) event
+    o2::base::MTWorkerHooks::instance().stopWorker = []() { G4RunManager::GetRunManager()->AbortRun(true); };
+    // each worker thread creates its own external decayer
+    o2::base::MTWorkerHooks::instance().makeDecayer = &makeDecayer;
+    // the field seen by a track must not depend on the previous track of the thread
+    o2::base::MTWorkerHooks::instance().beginTrack = &o2::simsetup::invalidateFieldCache;
+    // the primary generator exists only on the worker threads, so its commands are applied there
+    o2::base::MTWorkerHooks::instance().beginRunOnWorker = []() { G4UImanager::GetUIpointer()->ApplyCommand(kSkipUnknownParticles); };
+    // makes the first run apply the media energy cuts
+    o2::base::MTWorkerHooks::instance().beforeTransport = []() {
+      for (auto region : *G4RegionStore::GetInstance()) {
+        if (auto cuts = region->GetProductionCuts()) {
+          for (int i = 0; i < NumberOfG4CutIndex; ++i) {
+            cuts->SetProductionCut(cuts->GetProductionCut(i), i);
+          }
+        }
+      }
+      G4UImanager::GetUIpointer()->ApplyCommand("/run/physicsModified");
+    };
+  }
 
   if (g4Params.navmode == o2::conf::EG4Nav::kVecGeom) {
     o2::simsetup::installVecGeomNavigator();
@@ -163,6 +246,14 @@ void Config()
     /// Customise Geant4 setting
     /// (verbose level, global range cut, ..)
     geant4->ProcessGeantMacro(configm1.Data());
+
+    // PAI in the TRD gas only when the TRD charge comes from the energy deposit
+    if (trdUsesEnergyDeposit()) {
+      geant4->ProcessGeantMacro((configm + "/Detectors/gconfig/g4config_trd_pai.in").Data());
+    }
+  }
+  if (!mtMode) {
+    geant4->ProcessGeantCommand(kSkipUnknownParticles);
   }
 
   // Enter in Geant4 Interactive mode

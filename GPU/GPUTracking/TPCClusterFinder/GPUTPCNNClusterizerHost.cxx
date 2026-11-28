@@ -17,7 +17,6 @@
 #include "GPUTPCNNClusterizerHost.h"
 #include "GPUTPCNNClusterizer.h"
 #include "GPUSettings.h"
-#include "ML/3rdparty/GPUORTFloat16.h"
 #include "GPUReconstruction.h"
 #include "GPUTPCGeometry.h"
 #include "DataFormatsTPC/Constants.h"
@@ -111,8 +110,8 @@ void GPUTPCNNClusterizerHost::initClusterizer(const GPUSettingsProcessingNNclust
   clustererNN.mNnSigmoidTrafoClassThreshold = settings.nnSigmoidTrafoClassThreshold;
   clustererNN.mNnClusterizerUseClassification = settings.nnClusterizerUseClassification;
   clustererNN.mNnClusterizerSetDeconvolutionFlags = (bool)settings.nnClusterizerSetDeconvolutionFlags;
-  clustererNN.maxFragmentLen = maxFragmentLen == -1 ? TPC_MAX_FRAGMENT_LEN_GPU : maxFragmentLen;
-  clustererNN.maxAllowedTimebin = maxAllowedTimebin == -1 ? TPC_MAX_FRAGMENT_LEN_GPU : maxAllowedTimebin;
+  clustererNN.maxFragmentLen = maxFragmentLen == -1 ? tpccf::TPC_MAX_FRAGMENT_LEN_GPU : maxFragmentLen;
+  clustererNN.maxAllowedTimebin = maxAllowedTimebin == -1 ? tpccf::TPC_MAX_FRAGMENT_LEN_GPU : maxAllowedTimebin;
   if (clustererNN.mNnSigmoidTrafoClassThreshold) {
     clustererNN.mNnClassThreshold = (float)std::log(settings.nnClassThreshold / (1.f - settings.nnClassThreshold));
   } else {

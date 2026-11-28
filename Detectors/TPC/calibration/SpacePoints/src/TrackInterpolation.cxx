@@ -554,7 +554,7 @@ void TrackInterpolation::interpolateTrack(int iSeed)
     mCacheDEDX[row].first = std::min<uint16_t>(clTPC.getQtot(), UINT16_MAX);
     mCacheDEDX[row].second = clTPC.getQmax();
     int imb = int(clTPC.getTime() * mNTPCOccBinLengthInv);
-    if (imb < mTPCParam->occupancyMapSize) {
+    if (imb < mTPCParam->occupancy.mapSize) {
       multBins[row] = 1 + std::max(0, imb);
     }
   }
@@ -799,7 +799,7 @@ void TrackInterpolation::interpolateTrack(int iSeed)
       if (--mltBinMin >= 0) { // we were offsetting bin IDs by 1!
         float avMlt = 0;
         for (int ib = mltBinMin; ib < mltBinMax; ib++) {
-          avMlt += mTPCParam->occupancyMap[ib];
+          avMlt += mTPCParam->occupancy.map[ib];
         }
         avMlt /= (mltBinMax - mltBinMin);
         trackData.setMultStack(avMlt, ist);
@@ -913,7 +913,7 @@ void TrackInterpolation::interpolateTrack(int iSeed)
           auto dy = yv - trkWorkITS.getY();
           auto dz = zv - trkWorkITS.getZ();
           if ((std::abs(dy) < param::MaxResid) && (std::abs(dz) < param::MaxResid) && (std::abs(trkWorkITS.getY()) < param::MaxY) && (std::abs(trkWorkITS.getZ()) < param::MaxZ) && std::abs(xv) < param::MaxVtxX) {
-            short compXV = static_cast<short>(xv * 0x7fff / param::MaxVtxX);
+            short compXV = UnbinnedResid::packToShort(xv, param::MaxVtxX);
             mClRes.emplace_back(dy, dz, alpha / TMath::Pi(), trkWorkITS.getY(), trkWorkITS.getZ(), 190, -1, compXV);
             if (!gidTable[GTrackID::ITSTPC].isIndexSet()) {
               LOGP(fatal, "ITS-TPC seed index is not set for TOF track");
@@ -985,7 +985,7 @@ int TrackInterpolation::processTRDLayer(const o2::trd::TrackTRD& trkTRD, int iLa
   if (trkData) {
     auto slope = trdSP.getDy();
     if (std::abs(slope) < param::MaxTRDSlope) {
-      trkData->TRDTrkltSlope[iLayer] = slope * 0x7fff / param::MaxTRDSlope;
+      trkData->TRDTrkltSlope[iLayer] = UnbinnedResid::packToShort(slope, param::MaxTRDSlope);
     }
   }
   if (trk64) {
@@ -1087,7 +1087,7 @@ void TrackInterpolation::extrapolateTrack(int iSeed)
       rowPrev = row;
     }
     int imb = int(cl.getTime() * mNTPCOccBinLengthInv);
-    if (imb < mTPCParam->occupancyMapSize) {
+    if (imb < mTPCParam->occupancy.mapSize) {
       multBins[row] = 1 + std::max(0, imb);
     }
     ++nMeasurements;
@@ -1182,7 +1182,7 @@ void TrackInterpolation::extrapolateTrack(int iSeed)
       if (--mltBinMin >= 0) { // we were offsetting bin IDs by 1!
         float avMlt = 0;
         for (int ib = mltBinMin; ib < mltBinMax; ib++) {
-          avMlt += mTPCParam->occupancyMap[ib];
+          avMlt += mTPCParam->occupancy.map[ib];
         }
         avMlt /= (mltBinMax - mltBinMin);
         trackData.setMultStack(avMlt, ist);
@@ -1308,7 +1308,7 @@ void TrackInterpolation::extrapolateTrack(int iSeed)
           auto dy = yv - trkWorkITS.getY();
           auto dz = zv - trkWorkITS.getZ();
           if ((std::abs(dy) < param::MaxResid) && (std::abs(dz) < param::MaxResid) && (std::abs(trkWorkITS.getY()) < param::MaxY) && (std::abs(trkWorkITS.getZ()) < param::MaxZ) && std::abs(xv) < param::MaxVtxX) {
-            short compXV = static_cast<short>(xv * 0x7fff / param::MaxVtxX);
+            short compXV = UnbinnedResid::packToShort(xv, param::MaxVtxX);
             mClRes.emplace_back(dy, dz, alpha / TMath::Pi(), trkWorkITS.getY(), trkWorkITS.getZ(), 190, -1, compXV);
             if (!gidTableFull[GTrackID::ITSTPC].isIndexSet()) {
               LOGP(fatal, "ITS-TPC seed index is not set for TOF track");

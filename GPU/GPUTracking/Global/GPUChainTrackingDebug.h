@@ -21,7 +21,7 @@
 
 namespace o2::gpu
 {
-// NOTE: Values below 262144 are activated by default with --debug 6 in GPUSettingsList.h::debugMask
+// NOTE: Values below 262144 are activated by default with --debug 6 in GPUSettingsList.template::debugMask
 enum GPUChainTrackingDebugFlags : uint32_t {
   TPCSectorTrackingData = 1 << 0,
   TPCPreLinks = 1 << 1,
@@ -50,7 +50,7 @@ enum GPUChainTrackingDebugFlags : uint32_t {
 };
 
 template <class T, class S, typename... Args>
-inline bool GPUChain::DoDebugAndDump(GPUChain::RecoStep step, uint32_t mask, bool transfer, T& processor, S T::*func, Args&&... args)
+inline bool GPUChain::DoDebugAndDump(GPUChain::RecoStep step, uint32_t mask, bool transfer, T& processor, S T::* func, Args&&... args)
 {
   if (GetProcessingSettings().keepAllMemory) {
     if (transfer) {

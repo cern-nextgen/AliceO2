@@ -52,9 +52,9 @@ class GPUTPCTrackSkeleton
   GPUhd() void SetFirstHitID(int32_t v) { mFirstHitID = v; }
   GPUhd() void SetParam(MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> v) { mParam = v; }
 
- //private:
+//private:
   F<int32_t> mFirstHitID;         // index of the first track cell in the track->cell pointer array
-  F<int32_t> mNHits;              // number of track cells
+  F<int16_t> mNHits;              // number of track cells
   F<int32_t> mLocalTrackId;       // Id of local track this extrapolated track belongs to, index of this track itself if it is a local track
   MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, F> mParam; // track parameters
 };

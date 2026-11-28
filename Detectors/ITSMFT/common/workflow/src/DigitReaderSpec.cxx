@@ -11,6 +11,8 @@
 
 /// @file   DigitReaderSpec.cxx
 
+#include "Framework/DeviceSpec.h"
+#include "Framework/TimingInfo.h"
 #include <string>
 #include <vector>
 #include <format>
@@ -101,13 +103,13 @@ void DigitReader<N>::run(ProcessingContext& pc)
 
   auto ent = mTree->GetReadEntry();
   if (!mUseIRFrames) {
-    ent++;
+    ent = pc.services().get<o2::framework::TimingInfo>().timeslice;
     if (ent >= mTree->GetEntries()) {
       // A timeframe holds no collision at all whenever the interaction rate is low enough, and the
       // digit tree then has no entry to read. Send empty output rather than dereferencing the
       // branch addresses, which GetEntry has not filled. (This used to be an assert, which is
       // compiled out of every production build since ENABLE_CASSERT defaults to OFF.)
-      LOG(info) << mDetName << "DigitReader has no entry to read, sending empty output";
+      LOGP(warning, "{}DigitReader: no entry {} to read, tree contains {} entries, sending empty output", mDetName, ent, mTree->GetEntries());
       for (uint32_t iLayer = 0; iLayer < mLayers; ++iLayer) {
         pc.outputs().snapshot(Output{Origin, "DIGITSROF", iLayer}, std::vector<o2::itsmft::ROFRecord>{});
         pc.outputs().snapshot(Output{Origin, "DIGITS", iLayer}, std::vector<o2::itsmft::Digit>{});
@@ -150,7 +152,7 @@ void DigitReader<N>::run(ProcessingContext& pc)
       std::vector<o2::itsmft::PhysTrigger> dummyTrig;
       pc.outputs().snapshot(Output{Origin, "PHYSTRIG", 0}, dummyTrig);
     }
-    if (mTree->GetReadEntry() + 1 >= mTree->GetEntries()) {
+    if (mTree->GetReadEntry() + pc.services().get<const o2::framework::DeviceSpec>().maxInputTimeslices >= mTree->GetEntries()) {
       pc.services().get<ControlService>().endOfStream();
       pc.services().get<ControlService>().readyToQuit(QuitRequest::Me);
     }
@@ -291,7 +293,7 @@ void DigitReader<N>::setBranchAddress(const std::string& base, Ptr& addr, int la
 namespace
 {
 template <int N>
-std::vector<OutputSpec> makeOutChannels(bool mctruth, bool doStag, bool useCalib)
+std::vector<OutputSpec> makeOutChannels(bool mctruth, bool doStag, bool useCalib, bool useTriggers)
 {
   constexpr o2::header::DataOrigin Origin{N == o2::detectors::DetID::ITS ? o2::header::gDataOriginITS : o2::header::gDataOriginMFT};
   std::vector<OutputSpec> outputs;
@@ -307,7 +309,9 @@ std::vector<OutputSpec> makeOutChannels(bool mctruth, bool doStag, bool useCalib
   if (useCalib) {
     outputs.emplace_back(Origin, "GBTCALIB", 0, Lifetime::Timeframe);
   }
-  outputs.emplace_back(Origin, "PHYSTRIG", 0, Lifetime::Timeframe);
+  if (useTriggers) {
+    outputs.emplace_back(Origin, "PHYSTRIG", 0, Lifetime::Timeframe);
+  }
   return outputs;
 }
 } // namespace
@@ -317,7 +321,7 @@ DataProcessorSpec getITSDigitReaderSpec(bool useMC, bool doStag, bool useCalib, 
   return DataProcessorSpec{
     .name = "its-digit-reader",
     .inputs = Inputs{},
-    .outputs = makeOutChannels<o2::detectors::DetID::ITS>(useMC, doStag, useCalib),
+    .outputs = makeOutChannels<o2::detectors::DetID::ITS>(useMC, doStag, useCalib, useTriggers),
     .algorithm = AlgorithmSpec{adaptFromTask<ITSDigitReader>(useMC, doStag, useCalib, useTriggers)},
     .options = Options{
       {"its-digit-infile", VariantType::String, defname, {"Name of the input digit file"}},
@@ -329,7 +333,7 @@ DataProcessorSpec getMFTDigitReaderSpec(bool useMC, bool doStag, bool useCalib, 
   return DataProcessorSpec{
     .name = "mft-digit-reader",
     .inputs = Inputs{},
-    .outputs = makeOutChannels<o2::detectors::DetID::MFT>(useMC, doStag, useCalib),
+    .outputs = makeOutChannels<o2::detectors::DetID::MFT>(useMC, doStag, useCalib, useTriggers),
     .algorithm = AlgorithmSpec{adaptFromTask<MFTDigitReader>(useMC, doStag, useCalib, useTriggers)},
     .options = Options{
       {"mft-digit-infile", VariantType::String, defname, {"Name of the input digit file"}},

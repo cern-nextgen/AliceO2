@@ -52,9 +52,9 @@ class GPUTPCTrackletSkeleton
   GPUhd() void SetParam(MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, MemLayout::const_reference> v) { mParam = v; }
   GPUhd() void SetHitWeight(const int32_t w) { mHitWeight = w; }
 
-// private:
-  F<uint32_t> mFirstRow;          // first TPC row // TODO: We can use smaller data format here!
-  F<uint32_t> mLastRow;           // last TPC row
+//private:
+  F<uint8_t> mFirstRow;          // first TPC row
+  F<uint8_t> mLastRow;           // last TPC row
   MemLayout::wrapper<GPUTPCBaseTrackParamSkeleton, F> mParam; // tracklet parameters
   F<int32_t> mHitWeight;          // Hit Weight of Tracklet
   F<uint32_t> mFirstHit;          // first hit in row hit array
