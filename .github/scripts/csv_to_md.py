@@ -19,11 +19,9 @@ def get_dict(csv_filename):
     next(csv_reader)
     return {name: (float(mean), float(stdev), int(count)) for name, mean, stdev, count in csv_reader}
 
-table_baseline = get_2d_list(args.baseline)
-table_current = get_2d_list(args.current)
-dict_baseline = {row[0]: row[1:] for row in table_baseline}
-dict_current = {row[0]: row[1:] for row in table_current}
-all_names = [row[0] for row in table_baseline] + [name for name in dict_current if name not in dict_baseline]
+dict_baseline = get_dict(args.baseline)
+dict_current = get_dict(args.current)
+all_names = [name for name in dict_baseline] + [name for name in dict_current if name not in dict_baseline]
 
 def welch(x, sx, m, y, sy, n):
   """Welch's t-test for difference of means d = x - y.
