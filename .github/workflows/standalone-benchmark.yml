@@ -143,12 +143,12 @@ jobs:
 
       - name: Display table on GitHub web
         run: |
-          source /etc/profile.d/modules.sh
-          module load ${MODULES}
           mkdir -p ${STANDALONE_DIR}/baseline
           rm -f ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV}
           curl -fL --retry 3 -o ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV} https://cernbox.cern.ch/remote.php/dav/public-files/SfYXgQOHFga2w75/baseline/summary_${BENCHMARK_CSV} || true
           if [ -s ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV} ]; then
+            source /etc/profile.d/modules.sh
+            module load ${MODULES}
             python3 ${ALICE_SOURCE_DIR}/.github/scripts/csv_to_md.py --runs ${{ matrix.standalone_runs }} \
             --baseline ${STANDALONE_DIR}/baseline/summary_${BENCHMARK_CSV} \
             --current ${ARTIFACT_DIR}/summary_${BENCHMARK_CSV} >> ${GITHUB_STEP_SUMMARY}
